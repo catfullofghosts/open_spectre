@@ -1,0 +1,95 @@
+check new build:
+
+counters only seem to work at lowest res? are they not reset on a format change or clock loss?
+
+
+note: 27/11/25:
+oscilaors are fixed, no discontinuity now,
+sqr osc are now symetricxal 
+
+-- vertical sync needs to change the osc range to be much smaller, freq of 01 only just fits on the screen
+
+yeah, but matrix in 50 = 0x32 or 63 = 0x3f dont seem to pull up the outputs oddly, why
+
+- removing that extra clock delay from feedback seems to have messed up feedback now it is not there
+
+to do: 
+-add alpha back for osc 1 (done)
+
+- adjust osc 2 freq it isnt very (done)
+interesting, should be an non even devision of the main osc -- is + 36 a good value?
+also add un sync for osc derivation
+
+osc freq steps are too big!!! - (done) - scaled to 13 bits
+
+-put clock delay for feed back back in and see if that has brough back the feedback (done)
+
+- noise freq needs to be faster (done)
+at the low end and slower at the high end - made 13 bits, this wont speed up the fastest speed sadly
+
+
+
+
+-- the video in range, look staggered when you change the values, like i need to scale up all the values? 
+
+-- need to use a dac style look up for the 3 sets of coulurs to get a full range (done add to repo)
+
+--set video in blanking to apropriate value
+
+
+note: 1/12/25:
+
+check feedback (looks good)
+
+check osc smoothness when changing freq
+check osc works for both horz and vert
+ - verticly there are only 4 lines , need to work that out
+ - unsynced the slowest is still too fast, need a way of deviding by like 8 or something to ge fades that go over multiuple frames
+
+
+check noise freq range
+- at its min freq is still too fast, much need a switch like for oscilators
+
+check fake dacs make colours look ok!!! i like them
+
+
+
+note 2/12/15:
+
+-- check feedback when extra ff is removed, should be afeedback path of 1 clock now (NO IT IS BAD!! needs the FF)
+
+-- check if the vertical osc bars are 4x faster now? (yes! needs to be faster still! try + 8)
+
+-- check if osc speed bit slows the freq by a lot check with free running
+(yes but make way slower again!!!! when bit is set)
+
+-- check if noise speed selct slows down the noise enouggh
+it slows it down a lot, but it needs to be maybe 8 x slower -- good enough for now
+
+
+-- check the shapegen- do debug
+
+next build check after 2/12/25
+
+--check osc vertical goes fast and slow enough, still needs to be 2x faster!!!!!
+
+-- free running WORKING!!!
+
+-- reg 78 has color encoder bypass bit (bit 1) to turn on/off colour encoding -- test (works)
+
+
+NEXT TO DO
+-- any shape stuff that has been deiscivered by debug
+
+-- add control for the counter pix clock devider, so the lines can get more and less chunky --- it creates an odd 3 line smearing, shuld reset oh hs!!
+
+-- add blanking values to blanking video out
+
+-- debug why counters dont seem to run when i change resolution
+
+-- chenging the pixel devision creats vertical offsets
+
+-- te4st luma key!!
+
+
+edge detectors need to be reset or something, when you first route them they show the full input signal then when you route them again you see the edge

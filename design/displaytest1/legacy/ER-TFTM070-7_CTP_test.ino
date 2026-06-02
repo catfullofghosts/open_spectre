@@ -1,0 +1,716 @@
+/***************************************************
+//Web: http://www.buydisplay.com
+EastRising Technology Co.,LTD
+Examples for ER-TFTM070-7  Capacitive touch screen test
+Display is Hardward SPI 4-Wire SPI Interface and 5V Power Supply,CTP is I2C interface.
+Tested and worked with:
+Works with Arduino 1.6.0 IDE  
+Test ok:  Arduino Due,Arduino UNO,Arduino MEGA2560
+****************************************************/
+#include <SD.h>
+#include <SPI.h>
+#include <Wire.h>
+#include "ER_TFTM070_7.h"
+#include "DisplayLayout.h"
+
+uint8_t addr  = 0x38;  //CTP IIC ADDRESS
+
+#define FT5316_RST 6
+#define FT5316_INT   7
+
+// Grid display control
+bool showGrid = false;  // Set to true to enable grid display  
+
+
+
+enum {
+  eNORMAL = 0,
+  eTEST   = 0x04,
+  eSYSTEM = 0x01
+};
+
+
+struct TouchLocation
+{
+  uint16_t x;
+  uint16_t y;
+};
+
+TouchLocation touchLocations[5];
+
+uint8_t readFT5316TouchRegister( uint8_t reg );
+uint8_t readFT5316TouchLocation( TouchLocation * pLoc, uint8_t num );
+uint8_t readFT5316TouchAddr( uint8_t regAddr, uint8_t * pBuf, uint8_t len );
+
+uint32_t dist(const TouchLocation & loc);
+uint32_t dist(const TouchLocation & loc1, const TouchLocation & loc2);
+
+bool sameLoc( const TouchLocation & loc, const TouchLocation & loc2 );
+
+
+uint8_t buf[30];
+
+uint8_t readFT5316TouchRegister( uint8_t reg )
+{
+  Wire.beginTransmission(addr);
+  Wire.write( reg );  // register 0
+  uint8_t retVal = Wire.endTransmission();
+  
+  uint8_t returned = Wire.requestFrom(addr, uint8_t(1) );    // request 6 uint8_ts from slave device #2
+  
+  if (Wire.available())
+  {
+    retVal = Wire.read();
+  }
+  
+  return retVal;
+}
+
+uint8_t readFT5316TouchAddr( uint8_t regAddr, uint8_t * pBuf, uint8_t len )
+{
+  Wire.beginTransmission(addr);
+  Wire.write( regAddr );  // register 0
+  uint8_t retVal = Wire.endTransmission();
+  
+  uint8_t returned = Wire.requestFrom(addr, len);    // request 1 bytes from slave device #2
+  
+  uint8_t i;
+  for (i = 0; (i < len) && Wire.available(); i++)
+  {
+    pBuf[i] = Wire.read();
+  }
+  
+  return i;
+}
+
+uint8_t readFT5316TouchLocation( TouchLocation * pLoc, uint8_t num )
+{
+  uint8_t retVal = 0;
+  uint8_t i;
+  uint8_t k;
+  
+  do
+  {
+    if (!pLoc) break; // must have a buffer
+    if (!num)  break; // must be able to take at least one
+    
+    uint8_t status = readFT5316TouchRegister(2);
+    
+    static uint8_t tbuf[40];
+    
+    if ((status & 0x0f) == 0) break; // no points detected
+    
+    uint8_t hitPoints = status & 0x0f;
+    
+    Serial.print("number of hit points = ");
+    Serial.println( hitPoints );
+    
+    readFT5316TouchAddr( 0x03, tbuf, hitPoints*6);
+    
+    for (k=0,i = 0; (i < hitPoints*6)&&(k < num); k++, i += 6)
+    {
+      pLoc[k].x = (tbuf[i+0] & 0x0f) << 8 | tbuf[i+1];
+      pLoc[k].y = (tbuf[i+2] & 0x0f) << 8 | tbuf[i+3];
+    }
+    
+    retVal = k;
+    
+  } while (0);
+  
+  return retVal;
+}
+
+void writeFT5316TouchRegister( uint8_t reg, uint8_t val)
+{
+  Wire.beginTransmission(addr);
+  Wire.write( reg );  // register 0
+  Wire.write( val );  // value
+  
+  uint8_t retVal = Wire.endTransmission();  
+}
+
+void readOriginValues(void)
+{
+  writeFT5316TouchRegister(0, eTEST);
+  delay(1);
+  //uint8_t originLength = readFT5316TouchAddr(0x08, buf, 8 );
+  uint8_t originXH = readFT5316TouchRegister(0x08);
+  uint8_t originXL = readFT5316TouchRegister(0x09);
+  uint8_t originYH = readFT5316TouchRegister(0x0a);
+  uint8_t originYL = readFT5316TouchRegister(0x0b);
+  
+  uint8_t widthXH  = readFT5316TouchRegister(0x0c);
+  uint8_t widthXL  = readFT5316TouchRegister(0x0d);
+  uint8_t widthYH  = readFT5316TouchRegister(0x0e);
+  uint8_t widthYL  = readFT5316TouchRegister(0x0f);
+  
+  //if (originLength)
+  {
+    Serial.print("Origin X,Y = ");
+    Serial.print( uint16_t((originXH<<8) | originXL) );
+    Serial.print(", ");
+    Serial.println( uint16_t((originYH<<8) | originYL) );
+    
+    Serial.print("Width X,Y = ");
+    Serial.print( uint16_t((widthXH<<8) | widthXL) );
+    Serial.print(", ");
+    Serial.println( uint16_t((widthYH<<8) | widthYL) );
+  }
+  
+}
+
+
+uint32_t dist(const TouchLocation & loc)
+{
+  uint32_t retVal = 0;
+  
+  uint32_t x = loc.x;
+  uint32_t y = loc.y;
+  
+  retVal = x*x + y*y;
+  
+  return retVal;
+}
+
+uint32_t dist(const TouchLocation & loc1, const TouchLocation & loc2)
+{
+  uint32_t retVal = 0;
+  
+  uint32_t x = loc1.x - loc2.x;
+  uint32_t y = loc1.y - loc2.y;
+  
+  retVal = sqrt(x*x + y*y);
+  
+  return retVal;
+}
+
+bool sameLoc( const TouchLocation & loc, const TouchLocation & loc2 )
+{
+  return dist(loc,loc2) < 50;
+}
+
+void drawGrid(void)
+{
+  // Check if grid should be displayed
+  if (!showGrid) return;
+  
+  // Use macros from DisplayLayout.h for grid dimensions
+  int x_div = GRID_X_DIV;
+  int Y_div = GRID_Y_DIV;
+  uint16_t x_step = GRID_X_STEP;
+  uint16_t y_step = GRID_Y_STEP;
+  
+  // Draw main grid lines (proper grey color - RGB565: 0x8410 = R=16, G=16, B=16)
+  // uint16_t mainGrey = 0x8410; // Proper medium grey
+  ER5517.Foreground_color_65k(mainGrey);
+  for (int x_idx = 0; x_idx <= x_div; x_idx++) {
+      uint16_t x = GRID_START_X + x_idx * x_step;
+      ER5517.Line_Start_XY(x, GRID_START_Y);
+      ER5517.Line_End_XY(x, GRID_END_Y);
+      ER5517.Start_Line();
+  }
+
+  for (int y_idx = 0; y_idx <= Y_div; y_idx++) {
+      uint16_t y = GRID_START_Y + y_idx * y_step;
+      ER5517.Line_Start_XY(GRID_START_X, y);
+      ER5517.Line_End_XY(GRID_END_X, y);
+      ER5517.Start_Line();
+  }
+  
+  // Draw darker grey grid lines at halfway points
+  // RGB565 format: 0x2104 = darker grey (R=4, G=4, B=4)
+  // uint16_t darkerGrey = 0x2104;
+  ER5517.Foreground_color_65k(darkerGrey);
+  
+  // Vertical lines at halfway points
+  for (int x_idx = 0; x_idx < x_div; x_idx++) {
+      uint16_t x = GRID_START_X + x_idx * x_step + x_step/2;
+      if (x < GRID_END_X) {
+        ER5517.Line_Start_XY(x, GRID_START_Y);
+        ER5517.Line_End_XY(x, GRID_END_Y);
+        ER5517.Start_Line();
+      }
+  }
+  
+  // Horizontal lines at halfway points
+  for (int y_idx = 0; y_idx < Y_div; y_idx++) {
+      uint16_t y = GRID_START_Y + y_idx * y_step + y_step/2;
+      if (y < GRID_END_Y) {
+        ER5517.Line_Start_XY(GRID_START_X, y);
+        ER5517.Line_End_XY(GRID_END_X, y);
+        ER5517.Start_Line();
+      }
+  }
+  
+  // Draw pixel location text in corner of each grid box (using smallest font)
+  ER5517.Foreground_color_65k(White);
+  ER5517.Background_color_65k(Black);
+  ER5517.CGROM_Select_Internal_CGROM();  
+  ER5517.Font_Select_8x16_16x16();
+  ER5517.Font_Width_X1();  // Ensure minimum width
+  ER5517.Font_Height_X1(); // Ensure minimum height
+  ER5517.Text_Mode();
+  
+  char coordBuf[12];
+  for (int y_idx = 0; y_idx < Y_div; y_idx++) {
+    for (int x_idx = 0; x_idx < x_div; x_idx++) {
+      uint16_t box_x = GRID_START_X + x_idx * x_step;
+      uint16_t box_y = GRID_START_Y + y_idx * y_step;
+      
+      // Only draw if box is within grid bounds and has enough space
+      if (box_x < GRID_END_X && box_y < GRID_END_Y && box_x + 40 < GRID_END_X) {
+        // Compact format: "x,y" in top-left corner of each box
+        snprintf(coordBuf, sizeof(coordBuf), "%d,%d", box_x, box_y);
+        ER5517.Goto_Text_XY(box_x + 1, box_y + 1); // Smaller offset
+        ER5517.LCD_CmdWrite(0x04);
+        const char *str = coordBuf;
+        while(*str != '\0') {
+          ER5517.LCD_DataWrite(*str);
+          ER5517.Check_Mem_WR_FIFO_not_Full();
+          ++str;
+        }
+        ER5517.Check_2D_Busy();
+      }
+    }
+  }
+  
+  ER5517.Graphic_Mode(); // Back to graphic mode
+}
+
+// Convert RGB888 to RGB565
+uint16_t rgb888_to_rgb565(uint8_t r, uint8_t g, uint8_t b) {
+  return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+}
+
+void displayAllColors(void)
+{
+  // Display color gradients and uncommented color swatches
+  // Screen is 800x480, leaving room for header text at top
+  
+  const uint16_t HEADER_HEIGHT = 32;
+  const uint16_t START_Y = HEADER_HEIGHT;
+  const uint16_t DISPLAY_HEIGHT = LCD_YSIZE_TFT - START_Y;
+  
+  ER5517.Graphic_Mode();
+  
+  // Section 1: Brightness gradient (black to white)
+  const uint16_t BRIGHTNESS_Y = START_Y;
+  const uint16_t BRIGHTNESS_HEIGHT = 60;
+  const uint16_t BRIGHTNESS_STEPS = 200;
+  for (uint16_t step = 0; step < BRIGHTNESS_STEPS; step++) {
+    uint16_t x_start = (step * LCD_XSIZE_TFT) / BRIGHTNESS_STEPS;
+    uint16_t x_end = ((step + 1) * LCD_XSIZE_TFT) / BRIGHTNESS_STEPS;
+    if (x_end > LCD_XSIZE_TFT) x_end = LCD_XSIZE_TFT;
+    
+    uint8_t grey = (step * 255) / BRIGHTNESS_STEPS;
+    uint16_t color = rgb888_to_rgb565(grey, grey, grey);
+    
+    ER5517.Foreground_color_65k(color);
+    ER5517.Line_Start_XY(x_start, BRIGHTNESS_Y);
+    ER5517.Line_End_XY(x_end - 1, BRIGHTNESS_Y + BRIGHTNESS_HEIGHT - 1);
+    ER5517.Start_Square_Fill();
+  }
+  
+  // Section 3: Red gradient (black to red)
+  const uint16_t RED_Y = BRIGHTNESS_Y + BRIGHTNESS_HEIGHT;
+  const uint16_t RED_HEIGHT = 50;
+  const uint16_t RED_STEPS = 200;
+  for (uint16_t step = 0; step < RED_STEPS; step++) {
+    uint16_t x_start = (step * LCD_XSIZE_TFT) / RED_STEPS;
+    uint16_t x_end = ((step + 1) * LCD_XSIZE_TFT) / RED_STEPS;
+    if (x_end > LCD_XSIZE_TFT) x_end = LCD_XSIZE_TFT;
+    
+    uint8_t r = (step * 255) / RED_STEPS;
+    uint16_t color = rgb888_to_rgb565(r, 0, 0);
+    
+    ER5517.Foreground_color_65k(color);
+    ER5517.Line_Start_XY(x_start, RED_Y);
+    ER5517.Line_End_XY(x_end - 1, RED_Y + RED_HEIGHT - 1);
+    ER5517.Start_Square_Fill();
+  }
+  
+  // Section 4: Green gradient (black to green)
+  const uint16_t GREEN_Y = RED_Y + RED_HEIGHT;
+  const uint16_t GREEN_HEIGHT = 50;
+  const uint16_t GREEN_STEPS = 200;
+  for (uint16_t step = 0; step < GREEN_STEPS; step++) {
+    uint16_t x_start = (step * LCD_XSIZE_TFT) / GREEN_STEPS;
+    uint16_t x_end = ((step + 1) * LCD_XSIZE_TFT) / GREEN_STEPS;
+    if (x_end > LCD_XSIZE_TFT) x_end = LCD_XSIZE_TFT;
+    
+    uint8_t g = (step * 255) / GREEN_STEPS;
+    uint16_t color = rgb888_to_rgb565(0, g, 0);
+    
+    ER5517.Foreground_color_65k(color);
+    ER5517.Line_Start_XY(x_start, GREEN_Y);
+    ER5517.Line_End_XY(x_end - 1, GREEN_Y + GREEN_HEIGHT - 1);
+    ER5517.Start_Square_Fill();
+  }
+  
+  // Section 5: Blue gradient (black to blue)
+  const uint16_t BLUE_Y = GREEN_Y + GREEN_HEIGHT;
+  const uint16_t BLUE_HEIGHT = 50;
+  const uint16_t BLUE_STEPS = 200;
+  for (uint16_t step = 0; step < BLUE_STEPS; step++) {
+    uint16_t x_start = (step * LCD_XSIZE_TFT) / BLUE_STEPS;
+    uint16_t x_end = ((step + 1) * LCD_XSIZE_TFT) / BLUE_STEPS;
+    if (x_end > LCD_XSIZE_TFT) x_end = LCD_XSIZE_TFT;
+    
+    uint8_t b = (step * 255) / BLUE_STEPS;
+    uint16_t color = rgb888_to_rgb565(0, 0, b);
+    
+    ER5517.Foreground_color_65k(color);
+    ER5517.Line_Start_XY(x_start, BLUE_Y);
+    ER5517.Line_End_XY(x_end - 1, BLUE_Y + BLUE_HEIGHT - 1);
+    ER5517.Start_Square_Fill();
+  }
+  
+  // Section 6: Color swatches for uncommented colors only
+  // Arranged vertically: light on top, normal in middle, dark on bottom
+  const uint16_t SWATCH_Y = BLUE_Y + BLUE_HEIGHT;
+  const uint16_t SWATCH_HEIGHT = DISPLAY_HEIGHT - (SWATCH_Y - START_Y);
+  const uint16_t SWATCH_WIDTH = 100;
+  const uint16_t SWATCH_HEIGHT_PIXELS = 25;
+  const uint16_t SWATCH_SPACING_X = 110;
+  const uint16_t SWATCH_SPACING_Y = 50;  // Increased spacing for better text readability
+  const uint16_t START_X = 10;
+  
+  struct ColorItem {
+    uint16_t color;
+    const char* name;
+    uint8_t column;  // Column position
+    uint8_t row;     // Row position (0 = top/light, 1 = middle/normal, 2+ = bottom/dark)
+  };
+  
+  // Only uncommented colors from the header file, organized by color family
+  // Arranged vertically: light versions on top, normal in middle, dark on bottom
+  ColorItem colors[] = {
+    // Orange family - Column 0
+    {light_Orange_Coral, "OrangeL", 0, 0},  // Light on top
+    {Orange_Coral, "Orange", 0, 1},         // Normal in middle
+    {Orange_dark, "BrownD", 0, 2},           // Dark on bottom
+    
+    // Pink family - Column 1
+    {light_Pink_Pastel, "PinkL", 1, 0},    // Light on top
+    {Pink_Pastel, "Pink", 1, 1},           // Normal in middle
+    {Pink_Magenta, "Magenta", 1, 2},       // Darker variant
+    // {Magenta_Dark, "MagentaD", 1, 3},      // Dark on bottom
+    
+    // Green Lime family - Column 2
+    {light_Green_Lime, "LimeL", 2, 0},    // Light on top
+    {Green_Lime, "Lime", 2, 1},           // Normal in middle
+    {Green_Lime_dark, "Lime", 2, 2},           // Normal in middle
+    
+    // Green Forest family - Column 3
+    // {light_Green_Forest, "ForestL", 3, 0}, // Light on top
+    // {Green_Forest, "Forest", 3, 1},        // Normal in middle
+    // {Green_Olive_Dark, "OliveD", 3, 2},    // Dark variant
+    // {Green_Teal_Dark, "TealD", 3, 3},     // Dark variant
+    
+    // Basic colors - Column 4
+    {White, "White", 4, 0},
+    {mainGrey, "grey1", 4, 1},
+    {darkerGrey, "grey2", 4, 2},
+    {Black, "Black", 4, 3},
+    
+    // Purple - Column 5
+    {Red, "Red", 5, 0},
+    // {Purple_Dark, "PurpleD", 5, 0}
+  };
+  
+  uint8_t numColors = sizeof(colors) / sizeof(colors[0]);
+  
+  for (uint8_t i = 0; i < numColors; i++) {
+    uint16_t x = START_X + colors[i].column * SWATCH_SPACING_X;
+    uint16_t y = SWATCH_Y + colors[i].row * SWATCH_SPACING_Y;
+    
+    if (y + SWATCH_HEIGHT_PIXELS + 5 < LCD_YSIZE_TFT && x + SWATCH_WIDTH < LCD_XSIZE_TFT) {
+      // Draw color swatch
+      ER5517.Foreground_color_65k(colors[i].color);
+      ER5517.Line_Start_XY(x, y);
+      ER5517.Line_End_XY(x + SWATCH_WIDTH - 1, y + SWATCH_HEIGHT_PIXELS - 1);
+      ER5517.Start_Square_Fill();
+      
+      // Draw label
+      ER5517.Text_Mode();
+      ER5517.Foreground_color_65k(White);
+      ER5517.Background_color_65k(Black);
+      ER5517.Goto_Text_XY(x, y + SWATCH_HEIGHT_PIXELS + 1);
+      ER5517.LCD_CmdWrite(0x04);
+      const char *str = colors[i].name;
+      uint8_t charCount = 0;
+      while(*str != '\0' && charCount < 10) {
+        ER5517.LCD_DataWrite(*str);
+        ER5517.Check_Mem_WR_FIFO_not_Full();
+        ++str;
+        ++charCount;
+      }
+      ER5517.Check_2D_Busy();
+      ER5517.Graphic_Mode();
+    }
+  }
+  
+  ER5517.Graphic_Mode(); // Back to graphic mode
+}
+
+
+void setup() {
+  Serial.begin(9600);
+  Wire.begin();        // join i2c bus (address optional for master)   
+  pinMode     (FT5316_INT, INPUT);//CTP INT INPUT
+  pinMode(FT5316_RST, OUTPUT);  //CTP RESET OUTPUT
+  digitalWrite(FT5316_RST, HIGH);//on
+  delay(10);
+  digitalWrite(FT5316_RST, LOW);//on
+  delay(10);
+  digitalWrite(FT5316_RST, HIGH);//on
+ 
+  pinMode(5,   OUTPUT);
+  digitalWrite(5, HIGH);//Disable  SD 
+  pinMode(2,   OUTPUT);
+  digitalWrite(2, HIGH);//Disable  RTP  
+  
+  ER5517.Parallel_Init();
+  ER5517.HW_Reset();
+  ER5517.System_Check_Temp();
+  delay(100);
+  while(ER5517.LCD_StatusRead()&0x02);
+  ER5517.initial();
+  ER5517.Display_ON();
+
+}
+void loop() {
+   static uint16_t w = LCD_XSIZE_TFT;
+  static uint16_t h = LCD_YSIZE_TFT; 
+  static DisplayLayout layout;
+  static bool layoutInitialized = false;
+  static bool lastTouchState = false;  // Track previous touch state for debouncing
+  static unsigned long lastTopRegionTouchTime = 0;  // Track last time a top region touch was processed
+  static bool lastTopRegionTouchProcessed = false;  // Track if we've already processed this touch down event
+  const unsigned long TOP_REGION_DEBOUNCE_MS = 120;  // 120ms debounce for top region touches (tripled)
+  uint8_t attention = digitalRead(FT5316_INT);
+   unsigned int i;
+   double float_data;  
+  
+  ER5517.Select_Main_Window_16bpp();
+  ER5517.Main_Image_Start_Address(layer1_start_addr);        
+  ER5517.Main_Image_Width(LCD_XSIZE_TFT);
+  ER5517.Main_Window_Start_XY(0,0);
+  ER5517.Canvas_Image_Start_address(0);
+  ER5517.Canvas_image_width(LCD_XSIZE_TFT);
+  ER5517.Active_Window_XY(0,0);
+  ER5517.Active_Window_WH(LCD_XSIZE_TFT,LCD_YSIZE_TFT); 
+  
+  // Clear screen
+  ER5517.Foreground_color_65k(Black);
+  ER5517.Line_Start_XY(0,0);
+  ER5517.Line_End_XY(LCD_XSIZE_TFT-1,LCD_YSIZE_TFT-1);
+  ER5517.Start_Square_Fill(); 
+  
+  // Initialize layout if not done
+  if (!layoutInitialized) {
+    layout.init();
+    layoutInitialized = true;
+  }
+  
+  // Draw the layout structure
+  layout.drawLayout();
+  
+  // Prepare button text array (4 wide x 2 tall)
+  const char* buttonTexts[2][4] = {
+    {"Btn1", "Btn2", "Btn3", "Btn4"},
+    {"Btn5", "Btn6", "Btn7", "Btn8"}
+  };
+  
+  // All buttons are lighter grey (using a lighter shade)
+  uint16_t buttonColors[2][4] = {
+    {0xC618, 0xC618, 0xC618, 0xC618},  // Lighter grey (RGB565: R=24, G=24, B=24)
+    {0xC618, 0xC618, 0xC618, 0xC618}
+  };
+  
+  // Draw button grid with colors
+  layout.drawButtonGridWithColors(buttonTexts, buttonColors);
+  
+  // Prepare circle colors (4 circles)
+  uint16_t circleColors[4] = {
+    Orange_Coral,
+    Pink_Pastel,
+    Pink_Magenta,
+    Green_Lime
+  };
+  
+  // Draw circles
+  layout.drawCircles(circleColors);
+
+
+  
+  while(1) 
+  { attention = digitalRead(FT5316_INT);
+     bool currentTouchState = !attention;  // True when touching
+     
+     // Debounce: only process on touch down (transition from not touching to touching)
+     bool touchDown = currentTouchState && !lastTouchState;
+     bool touchUp = !currentTouchState && lastTouchState;
+     lastTouchState = currentTouchState;
+     
+     // Reset the processed flag when touch is released
+     if (touchUp) {
+       lastTopRegionTouchProcessed = false;
+     }
+     
+     if (currentTouchState && touchDown)  // Only process on touch down
+    {  
+      Serial.println("Touch: ");
+      
+      uint8_t count = readFT5316TouchLocation( touchLocations, 5 );
+                
+        for (i = 0; i < count; i++)
+        {
+            
+            if ((touchLocations[i].x<50) &&(touchLocations[i].y>LCD_YSIZE_TFT-30))
+              {    // Clear screen
+                  ER5517.Foreground_color_65k(Black);
+                  ER5517.Line_Start_XY(0,0);
+                  ER5517.Line_End_XY(LCD_XSIZE_TFT-1,LCD_YSIZE_TFT-1);
+                  ER5517.Start_Square_Fill(); 
+                  
+                  // Redraw the layout
+                  layout.drawLayout();
+                  
+                  // Redraw button grid
+                  const char* buttonTexts[2][4] = {
+                    {"Btn1", "Btn2", "Btn3", "Btn4"},
+                    {"Btn5", "Btn6", "Btn7", "Btn8"}
+                  };
+                  // All buttons are lighter grey
+                  uint16_t buttonColors[2][4] = {
+                    {0xC618, 0xC618, 0xC618, 0xC618},  // Lighter grey
+                    {0xC618, 0xC618, 0xC618, 0xC618}
+                  };
+                  layout.drawButtonGridWithColors(buttonTexts, buttonColors);
+                  
+                  // Redraw circles
+                  uint16_t circleColors[4] = {
+                    Orange_Coral,
+                    Pink_Pastel,
+                    Pink_Magenta,
+                    Green_Lime
+                  };
+                  layout.drawCircles(circleColors);                  
+              }  
+              
+          else{
+            // Check if touch is in top section (only process on touch down)
+            if (touchLocations[i].y < layout.getTopSectionY() + layout.getTopSectionHeight()) {
+              // First check if touch is on a button (only process on touch down)
+              uint8_t btnRow, btnCol;
+              if (layout.getTouchedButton(touchLocations[i].x, touchLocations[i].y, &btnRow, &btnCol)) {
+                // Only process if this is a new touch down event (not already processed)
+                if (lastTopRegionTouchProcessed) {
+                  continue;  // Already processed this touch down, skip
+                }
+                
+                // Debounce top region touches: check if enough time has passed since last touch
+                unsigned long currentTime = millis();
+                if (currentTime - lastTopRegionTouchTime < TOP_REGION_DEBOUNCE_MS) {
+                  continue;  // Skip this touch, too soon after last one
+                }
+                lastTopRegionTouchTime = currentTime;  // Update last touch time
+                lastTopRegionTouchProcessed = true;  // Mark this touch down as processed
+                
+                // Touch is on a button - toggle its active state (only on touch down)
+                bool currentState = layout.isButtonActive(btnRow, btnCol);
+                layout.setButtonActive(btnRow, btnCol, !currentState);
+                
+                // Clear only the specific button area and redraw just that button
+                layout.clearButtonArea(btnRow, btnCol);
+                
+                // Redraw just the clicked button with updated state
+                const char* buttonTexts[2][4] = {
+                  {"Btn1", "Btn2", "Btn3", "Btn4"},
+                  {"Btn5", "Btn6", "Btn7", "Btn8"}
+                };
+                // Determine colors based on new active state
+                uint16_t bgColor, textColor;
+                if (!currentState) {  // Now active
+                  bgColor = Orange_Coral;
+                  textColor = 0xC618;
+                } else {  // Now inactive
+                  bgColor = 0xC618;
+                  textColor = Orange_Coral;
+                }
+                layout.drawButton(btnRow, btnCol, buttonTexts[btnRow][btnCol], bgColor, textColor);
+              }
+              // Then check if touch is on a tab
+              else {
+                uint8_t touchedTab = layout.getTouchedTab(touchLocations[i].x, touchLocations[i].y);
+                if (touchedTab < 255) {
+                  // Only process if this is a new touch down event (not already processed)
+                  if (lastTopRegionTouchProcessed) {
+                    continue;  // Already processed this touch down, skip
+                  }
+                  
+                  // Debounce top region touches: check if enough time has passed since last touch
+                  unsigned long currentTime = millis();
+                  if (currentTime - lastTopRegionTouchTime < TOP_REGION_DEBOUNCE_MS) {
+                    continue;  // Skip this touch, too soon after last one
+                  }
+                  lastTopRegionTouchTime = currentTime;  // Update last touch time
+                  lastTopRegionTouchProcessed = true;  // Mark this touch down as processed
+                  
+                  // Touch is on a tab - get previous active tab
+                  uint8_t previousActiveTab = layout.getActiveTab();
+                  
+                  // Activate the new tab
+                  layout.setActiveTab(touchedTab);
+                  
+                  // Only redraw the specific tabs that changed
+                  if (previousActiveTab < 255 && previousActiveTab != touchedTab) {
+                    // Clear and redraw previous tab (now inactive)
+                    layout.clearSingleTabArea(previousActiveTab);
+                    layout.drawCircleTab(previousActiveTab, Green_Olive_Dark);
+                    layout.drawCircle(previousActiveTab, Green_Olive_Dark);
+                    layout.drawCircleCenter(previousActiveTab);
+                  }
+                  
+                  // Clear and redraw the newly active tab
+                  layout.clearSingleTabArea(touchedTab);
+                  layout.drawCircleTab(touchedTab, Pink_Pastel);
+                  layout.drawCircle(touchedTab, Pink_Pastel);
+                  layout.drawCircleCenter(touchedTab);
+                }
+              }
+            }
+            else {
+              // Touch is not on a tab - show touch indicator
+              snprintf((char*)buf,sizeof(buf),"(%3d,%3d)",touchLocations[i].x,touchLocations[i].y); 
+              const  char *str=(const char *)buf;
+              ER5517.Foreground_color_65k(Red);  
+              ER5517.Text_Mode();
+              ER5517.Goto_Text_XY(50,80+16*i);
+              ER5517.LCD_CmdWrite(0x04);
+              while(*str != '\0')
+              {
+                ER5517.LCD_DataWrite(*str);
+                ER5517.Check_Mem_WR_FIFO_not_Full();      
+                ++str; 
+              } 
+              ER5517.Check_2D_Busy();
+              ER5517.Graphic_Mode(); //back to graphic mode;
+             
+              if(i==0)  ER5517.DrawCircle_Fill(touchLocations[i].x,touchLocations[i].y, 3, Red);  
+              else if(i==1)  ER5517.DrawCircle_Fill(touchLocations[i].x,touchLocations[i].y, 3, Red); 
+              else if(i==2)  ER5517.DrawCircle_Fill(touchLocations[i].x,touchLocations[i].y, 3, Red);        
+              else if(i==3)  ER5517.DrawCircle_Fill(touchLocations[i].x,touchLocations[i].y, 3, Red); 
+              else if(i==4)  ER5517.DrawCircle_Fill(touchLocations[i].x,touchLocations[i].y, 3, Red);     
+            }
+          }
+        }
+     } 
+    
+  }
+ 
+}
+
+
+
