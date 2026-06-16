@@ -690,31 +690,31 @@ begin
       shape_b               => shape1_b
     );
 
---  shape_gen2 : entity work.shape_gen
---    port map
---    (
---      clk                   => pix_clk, --clk_148_5,
---      rst                   => reset_n,
---      h_sync                => h_sync_n, --negated inside the module
---      v_sync                => v_sync_n, --negated inside the module
---      start_of_frame        => start_of_frame_n,
---      start_of_active_video => '0',
---      video_on              => '0',
---      pos_h                 => matrix_pos_h_2,
---      pos_v                 => matrix_pos_v_2,
---      zoom_h                => matrix_zoom_h_2,
---      zoom_v                => matrix_zoom_v_2,
---      circle_i              => matrix_circle_2,
---      gear_i                => matrix_gear_2,
---      lantern_i             => matrix_lantern_2,
---      fizz_i                => matrix_fizz_2,
---      shape_a_sel           => shape2_a_sel_reg,
---      shape_b_sel           => shape2_b_sel_reg,
---      x_in                  => x_in, --digital side x
---      y_in                  => y_in, --digital side y
---      shape_a               => shape2_a,
---      shape_b               => shape2_b
---    );
+  shape_gen2 : entity work.shape_gen
+    port map
+    (
+      clk                   => pix_clk, --clk_148_5,
+      rst                   => reset_n,
+      h_sync                => h_sync_n, --negated inside the module
+      v_sync                => v_sync_n, --negated inside the module
+      start_of_frame        => start_of_frame_n,
+      start_of_active_video => '0',
+      video_on              => '0',
+      pos_h                 => matrix_pos_h_2,
+      pos_v                 => matrix_pos_v_2,
+      zoom_h                => matrix_zoom_h_2,
+      zoom_v                => matrix_zoom_v_2,
+      circle_i              => matrix_circle_2,
+      gear_i                => matrix_gear_2,
+      lantern_i             => matrix_lantern_2,
+      fizz_i                => matrix_fizz_2,
+      shape_a_sel           => shape2_a_sel_reg,
+      shape_b_sel           => shape2_b_sel_reg,
+      x_in                  => x_in, --digital side x
+      y_in                  => y_in, --digital side y
+      shape_a               => shape2_a,
+      shape_b               => shape2_b
+    );
 
   -------------------------------------------
   -- Luma Key
