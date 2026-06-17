@@ -285,7 +285,7 @@ architecture rtl of spector_wrapper_zynq is
   signal luma_key_thresh_low : std_logic_vector(7 downto 0);
   signal luma_key_thresh_high: std_logic_vector(7 downto 0);
   signal ext_video_keyed     : std_logic_vector(23 downto 0);
-  signal luma_key_valid      : std_logic;
+  signal luma_key_valid      : std_logic := '0'; -- tied low until luma_key is enabled
   -- Alpha controls for analog side (from registers)
   signal osc1_alpha_reg     : std_logic_vector(11 downto 0);
   signal osc2_alpha_reg     : std_logic_vector(11 downto 0);
@@ -695,8 +695,8 @@ begin
     (
       clk                   => pix_clk, --clk_148_5,
       rst                   => reset_n,
-      h_sync                => h_sync_n, --negated inside the module
-      v_sync                => v_sync_n, --negated inside the module
+      h_sync                => h_sync, --negated inside the module
+      v_sync                => v_sync, --negated inside the module
       start_of_frame        => start_of_frame_n,
       start_of_active_video => '0',
       video_on              => '0',
@@ -736,23 +736,6 @@ begin
   -------------------------------------------
   -- Video Output
   -------------------------------------------
---  y_out_padded <= y_out & "000";
---  u_out_padded <= u_out & "000";
---  v_out_padded <= v_out & "000";
-
---    color_encoder_inst : entity work.color_encoder
---      port map
---      (
---        clk        => pix_clk,
---        y          => y_out_padded,
---        c1         => u_out_padded,
---        c2         => v_out_padded,
---        swap_early => '0',
---        red        => red,
---        green      => green,
---        blue       => blue
---      );
-      
      color_encoder_inst : entity work.color_encoder
         port map (
             clk        => pix_clk,

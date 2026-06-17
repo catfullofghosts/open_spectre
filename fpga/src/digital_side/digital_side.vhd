@@ -154,8 +154,14 @@ architecture Behavioral of digital_side is
 
   --mux function
   function multi321 (A, B : in std_logic_vector) return std_logic is
+    variable idx : natural;
   begin
-    return A(to_integer(unsigned(B)));
+    idx := to_integer(unsigned(B));
+    if idx >= A'length then
+      return '0';
+    else
+      return A(idx);
+    end if;
   end multi321;
 
   function rev_v (a : in std_logic_vector)
@@ -203,7 +209,6 @@ cdc_pix_100 : process(clk)
     clk    => clk, 
     rst    => h_sync_i, --rst, -- x needs to be reset by hs otherwise some bits out run over and get out of sync on the next line
     counter_up => pix_clk_i,
-    enable => '1',
     count  => x_count_low_hi
     );
 
@@ -215,7 +220,6 @@ cdc_pix_100 : process(clk)
     clk    => clk, 
     rst    => v_sync_i, --vsync reset to stop rolling
     counter_up => h_sync_i,
-    enable => '1',
     count  => y_count_low_hi
     );
 

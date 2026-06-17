@@ -30,7 +30,7 @@ end AlphaBlend;
 architecture Behavioral of AlphaBlend is
     signal signal1_int, signal2_int, alpha_int : integer range 0 to 4095;
     signal diff          : integer range -4095 to 4095;
-    signal mult_result   : integer range -4095*4095 to 4095*4095;
+    signal mult_result   : signed(31 downto 0);
     signal shift_result  : integer range -4095 to 4095;
     signal result_int    : integer range 0 to 4095;
 
@@ -59,15 +59,15 @@ begin
     begin
         if rising_edge(clk) then
             -- Stage 3: Multiply
-            mult_result <= alpha_int * diff;
+            mult_result <= to_signed(alpha_int * diff, mult_result'length);
         end if;
     end process;
 
     process(clk)
     begin
         if rising_edge(clk) then
-            -- Stage 4: Shift (divide)
-            shift_result <= mult_result / 4096; -- equivalent to mult_result srl 12
+            -- Stage 4: Scale by 1/4096 (arithmetic shift right 12)
+            shift_result <= to_integer(shift_right(mult_result, 12));
         end if;
     end process;
 

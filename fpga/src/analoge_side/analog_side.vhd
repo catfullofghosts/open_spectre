@@ -386,7 +386,7 @@ dsm_lo_i_slew <= dsm_lo_i_padded; -- does this get dsm lo working!?
   fizz_1_mix : entity work.AdderSub_12bit_Clamp 
   port map(
   clk => clk,
-  A => outputs(8),
+  A => outputs(7),
   B => fizz_1,
   SUM => mixed_fizz_1
   );
@@ -402,49 +402,49 @@ dsm_lo_i_slew <= dsm_lo_i_padded; -- does this get dsm lo working!?
   pos_v_2_mix : entity work.AdderSub_12bit_Clamp 
   port map(
   clk => clk,
-  A => outputs(10),
+  A => outputs(9),
   B => zoom_v_2,
-  SUM => mixed_pos_v_2
+  SUM => mixed_zoom_h_2
   );
   zoom_h_2_mix : entity work.AdderSub_12bit_Clamp 
   port map(
   clk => clk,
-  A => outputs(11),
+  A => outputs(10),
   B => zoom_h_2,
-  SUM => mixed_zoom_h_2
+  SUM => mixed_pos_v_2
   );
   zoom_v_2_mix : entity work.AdderSub_12bit_Clamp 
   port map(
   clk => clk,
-  A => outputs(12),
+  A => outputs(11),
   B => pos_v_2,
   SUM => mixed_zoom_v_2
   );
   circle_2_mix : entity work.AdderSub_12bit_Clamp 
   port map(
   clk => clk,
-  A => outputs(13),
+  A => outputs(12),
   B => circle_2,
   SUM => mixed_circle_2
   );
   gear_2_mix : entity work.AdderSub_12bit_Clamp 
   port map(
   clk => clk,
-  A => outputs(14),
+  A => outputs(13),
   B => gear_2,
   SUM => mixed_gear_2
   );
   lantern_2_mix : entity work.AdderSub_12bit_Clamp 
   port map(
   clk => clk,
-  A => outputs(15),
+  A => outputs(14),
   B => lantern_2,
   SUM => mixed_lantern_2
   );
   fizz_2_mix : entity work.AdderSub_12bit_Clamp 
   port map(
   clk => clk,
-  A => outputs(16),
+  A => outputs(15),
   B => fizz_2,
   SUM => mixed_fizz_2
   );

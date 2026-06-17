@@ -108,10 +108,16 @@ architecture Behavioral of shape_gen is
   attribute MARK_DEBUG of vert_seg : signal is "TRUE";
   attribute MARK_DEBUG of cutout : signal is "TRUE";
 
-  --mux function
+  --mux function (shape_bus is 16 bits: indices 0..15)
   function multi321 (A, B : in std_logic_vector) return std_logic is
+    variable idx : natural;
   begin
-    return A(to_integer(unsigned(B)));
+    idx := to_integer(unsigned(B));
+    if idx >= A'length then
+      return '0';
+    else
+      return A(idx);
+    end if;
   end multi321;
 
 begin
@@ -141,7 +147,7 @@ begin
     port map
     (
       px_clk => clk,
-      reset  => rst,
+      reset  => rst_n,
       -- center coordinate inputs
       cx_level => cx_pixel,
       cy_level => cy_pixel,
@@ -158,7 +164,7 @@ begin
     port map
     (
       i_clk        => clk,
-      i_rstb       => rst,
+      i_rstb       => rst_n,
       i_sync_reset => h_sync_n, -- is one when video is active 0 other wise that means that the ramp restarts at each line
       i_enable     => '1',
       i_repeat     => '1',
@@ -170,7 +176,7 @@ begin
     port map
     (
       i_clk        => clk,
-      i_rstb       => rst,
+      i_rstb       => rst_n,
       i_sync_reset => v_sync_n, -- is one when video is active 0 other wise that means that the ramp restarts at frame 
       i_enable     => vramp_en,
       i_repeat     => '1',
@@ -203,8 +209,8 @@ begin
     port map
     (
       i_clk        => clk,
-      i_rstb       => rst,
-      i_sync_reset => rst,
+      i_rstb       => rst_n,
+      i_sync_reset => rst_n,
       i_data_ena   => '1',
       i_data       => gear_x5,
       o_data_valid => open,

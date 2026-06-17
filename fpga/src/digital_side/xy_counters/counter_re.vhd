@@ -11,8 +11,7 @@ entity counter_re is
     port (
         clk: in std_logic;       -- clock input
         rst: in std_logic;       -- reset input
-        counter_up : in std_logic; 
-        enable: in std_logic;    -- enable input
+        counter_up : in std_logic;
         count: out std_logic_vector(width-1 downto 0)  -- count output
     );
 end entity;
