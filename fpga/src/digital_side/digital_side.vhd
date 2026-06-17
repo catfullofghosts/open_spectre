@@ -274,10 +274,11 @@ cdc_pix_100 : process(clk)
   delay_in_vec <= '0' & delay_in;
   delay_out       <= delay_out_vec(0);
   
-  delay_800 : entity work.delay_800us -- need another solution to this even at 25mhz enables for write we would need a fifo of lenght of 2_000_000!!
+  delay_800 : entity work.delay_800us -- BRAM delay ~800 us at pix_clk/2 (74.25 MHz sample rate)
     generic
     map(
-    g_DEPTH => 512 -- would need to be 80k depth to do 800us
+    g_WIDTH => 2,
+    g_DEPTH => 59400
     )
     port
     map(
