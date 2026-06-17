@@ -144,6 +144,9 @@ entity digital_reg_file is
     shape1_b_sel   : out std_logic_vector(3 downto 0);
     shape2_a_sel   : out std_logic_vector(3 downto 0);
     shape2_b_sel   : out std_logic_vector(3 downto 0);
+    -- Final video output effects (register 0xE4)
+    video_fx_ctrl     : out std_logic_vector(31 downto 0);
+    video_fx_bitplane : out std_logic_vector(31 downto 0);
 
     -- debug
     debug            : out std_logic_vector(127 downto 0);
@@ -271,6 +274,8 @@ architecture RTL of digital_reg_file is
   signal shape1_b_sel_i   : std_logic_vector(3 downto 0);
   signal shape2_a_sel_i   : std_logic_vector(3 downto 0);
   signal shape2_b_sel_i   : std_logic_vector(3 downto 0);
+  signal video_fx_ctrl_i     : std_logic_vector(31 downto 0);
+  signal video_fx_bitplane_i : std_logic_vector(31 downto 0) := x"00000FFF"; -- all channels bypass
   signal exception_addr : std_logic; -- toggles on address out of range error for reg file -- need better solution with reset + exception for sniffer
 
 begin
@@ -344,6 +349,11 @@ begin
   regs(ra(x"DC")) <= x"00000" & noise_alpha_i;
   -- Shape select controls
   regs(ra(x"E0")) <= x"0000" & shape2_b_sel_i & shape2_a_sel_i & shape1_b_sel_i & shape1_a_sel_i;
+  -- Video output effects: [0]=inv R, [1]=inv G, [2]=inv B, [4:3]=swap, [7:5]=bit rev,
+  --   [8]=scan en, [10:9]=scan delay, [12:11]=logic w/ prev pixel (01=OR 10=AND 11=XOR)
+  regs(ra(x"E4")) <= video_fx_ctrl_i;
+  -- Bit plane slice: R[3:0] G[7:4] B[11:8]; bit3 per channel = bypass
+  regs(ra(x"E8")) <= video_fx_bitplane_i;
 
   -- hardware interface
 --  regs(ra(x"7C")) <= 0x"0000000" & Rotery_addr_mux_i;
@@ -491,6 +501,10 @@ begin
             shape1_b_sel_i <= write_reg(7 downto 4);
             shape2_a_sel_i <= write_reg(11 downto 8);
             shape2_b_sel_i <= write_reg(15 downto 12);
+          when x"E4" =>
+            video_fx_ctrl_i <= write_reg;
+          when x"E8" =>
+            video_fx_bitplane_i <= write_reg;
           when x"7C" =>
             Rotery_addr_mux_i <= write_reg(3 downto 0);
             -- Note the Gap in addresses for the read only Rot encoders?
@@ -600,6 +614,9 @@ begin
   shape1_b_sel <= shape1_b_sel_i;
   shape2_a_sel <= shape2_a_sel_i;
   shape2_b_sel <= shape2_b_sel_i;
+
+  video_fx_ctrl     <= video_fx_ctrl_i;
+  video_fx_bitplane <= video_fx_bitplane_i;
 
   Rotery_addr_mux     <= Rotery_addr_mux_i;
   Rotery_enc_preset_w <= Rotery_enc_preset_w_i;

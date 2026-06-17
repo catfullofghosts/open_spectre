@@ -132,7 +132,9 @@ entity cpu_reg_wrapper is
     shape1_a_sel   : out std_logic_vector(3 downto 0);
     shape1_b_sel   : out std_logic_vector(3 downto 0);
     shape2_a_sel   : out std_logic_vector(3 downto 0);
-    shape2_b_sel   : out std_logic_vector(3 downto 0)
+    shape2_b_sel   : out std_logic_vector(3 downto 0);
+    video_fx_ctrl     : out std_logic_vector(31 downto 0);
+    video_fx_bitplane : out std_logic_vector(31 downto 0)
 
   );
 end cpu_reg_wrapper;
@@ -211,6 +213,8 @@ architecture rtl of cpu_reg_wrapper is
   signal  i_shape1_b_sel   : std_logic_vector(3 downto 0);
   signal  i_shape2_a_sel   : std_logic_vector(3 downto 0);
   signal  i_shape2_b_sel   : std_logic_vector(3 downto 0);
+  signal  i_video_fx_ctrl     : std_logic_vector(31 downto 0);
+  signal  i_video_fx_bitplane : std_logic_vector(31 downto 0);
 
   
 begin
@@ -307,7 +311,9 @@ begin
       shape1_a_sel        => i_shape1_a_sel,
       shape1_b_sel        => i_shape1_b_sel,
       shape2_a_sel        => i_shape2_a_sel,
-      shape2_b_sel        => i_shape2_b_sel
+      shape2_b_sel        => i_shape2_b_sel,
+      video_fx_ctrl     => i_video_fx_ctrl,
+      video_fx_bitplane => i_video_fx_bitplane
 --      debug               => i_debug,
 --      exception_addr_o    => i_exception_addr_o
     );
@@ -373,8 +379,8 @@ begin
       shape1_b_sel        <= i_shape1_b_sel;
       shape2_a_sel        <= i_shape2_a_sel;
       shape2_b_sel        <= i_shape2_b_sel;
---      debug               <= i_debug;
---      exception_addr_o    <= i_exception_addr_o;
+      video_fx_ctrl       <= i_video_fx_ctrl;
+      video_fx_bitplane   <= i_video_fx_bitplane;
       end if;
     end process;
 

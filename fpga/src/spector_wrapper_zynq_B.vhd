@@ -297,7 +297,9 @@ architecture rtl of spector_wrapper_zynq is
   signal shape1_b_sel_reg   : std_logic_vector(3 downto 0);
   signal shape2_a_sel_reg   : std_logic_vector(3 downto 0);
   signal shape2_b_sel_reg   : std_logic_vector(3 downto 0);
-  
+  signal video_fx_ctrl      : std_logic_vector(31 downto 0);
+  signal video_fx_bitplane  : std_logic_vector(31 downto 0);
+
   -- Background video signals (for compositing)
   signal bg_video            : std_logic_vector(23 downto 0);
   signal bg_video_reg1       : std_logic_vector(23 downto 0);
@@ -312,6 +314,7 @@ architecture rtl of spector_wrapper_zynq is
   signal red          : std_logic_vector(7 downto 0);
   signal green        : std_logic_vector(7 downto 0);
   signal blue         : std_logic_vector(7 downto 0);
+  signal video_pre_fx : std_logic_vector(23 downto 0);
 
     attribute DONT_TOUCH                 : string;
   --  attribute MARK_DEBUG of clk_148_5    : signal is "TRUE";
@@ -442,7 +445,9 @@ begin
       shape1_a_sel        => shape1_a_sel_reg,
       shape1_b_sel        => shape1_b_sel_reg,
       shape2_a_sel        => shape2_a_sel_reg,
-      shape2_b_sel        => shape2_b_sel_reg
+      shape2_b_sel        => shape2_b_sel_reg,
+      video_fx_ctrl       => video_fx_ctrl,
+      video_fx_bitplane   => video_fx_bitplane
     );
 
   -------------------------------------------
@@ -766,32 +771,36 @@ begin
     end if;
   end process;
 
-  -- Video output with luma key compositing ------------ external video keyed is bypassed cos it doesnt work
+  -- Composite source, then final pixel effects before output
   process (pix_clk)
   begin
     if rising_edge (pix_clk) then
       if vid_in_mux = '0' then
-        -- When vid_in_mux is 0, just output background
-        video_out <= bg_video;
+        video_pre_fx <= bg_video;
       else
-        -- When vid_in_mux is 1, composite incoming video over background
         if luma_key_enable = '1' then
-          -- Luma key enabled: composite based on key signal
           if luma_key_valid = '1' then
-            -- Pixel is keyed (transparent), show background
-            video_out <= bg_video;
+            video_pre_fx <= bg_video;
           else
-            -- Pixel is opaque, show incoming video
-            video_out <= ext_video;--ext_video_keyed;
+            video_pre_fx <= ext_video;
           end if;
         else
-          -- Luma key disabled, just pass through incoming video
-          -- Note: ext_video is not pipelined, so we need to match the delay
-          video_out <= ext_video; --ext_video_keyed; -- Use keyed output even when disabled (it just passes through)
+          video_pre_fx <= ext_video;
         end if;
       end if;
-
     end if;
   end process;
+
+  video_effects_inst : entity work.video_effects
+    port map (
+      clk       => pix_clk,
+      rst       => reset,
+      h_sync    => h_sync,
+      v_sync    => v_sync,
+      video_in  => video_pre_fx,
+      fx_ctrl      => video_fx_ctrl,
+      fx_bitplane  => video_fx_bitplane,
+      video_out    => video_out
+    );
 
 end architecture;
