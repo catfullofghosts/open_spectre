@@ -134,7 +134,8 @@ entity cpu_reg_wrapper is
     shape2_a_sel   : out std_logic_vector(3 downto 0);
     shape2_b_sel   : out std_logic_vector(3 downto 0);
     video_fx_ctrl     : out std_logic_vector(31 downto 0);
-    video_fx_bitplane : out std_logic_vector(31 downto 0)
+    video_fx_bitplane : out std_logic_vector(31 downto 0);
+    video_fx_dither   : out std_logic_vector(31 downto 0)
 
   );
 end cpu_reg_wrapper;
@@ -215,6 +216,7 @@ architecture rtl of cpu_reg_wrapper is
   signal  i_shape2_b_sel   : std_logic_vector(3 downto 0);
   signal  i_video_fx_ctrl     : std_logic_vector(31 downto 0);
   signal  i_video_fx_bitplane : std_logic_vector(31 downto 0);
+  signal  i_video_fx_dither   : std_logic_vector(31 downto 0);
 
   
 begin
@@ -313,7 +315,8 @@ begin
       shape2_a_sel        => i_shape2_a_sel,
       shape2_b_sel        => i_shape2_b_sel,
       video_fx_ctrl     => i_video_fx_ctrl,
-      video_fx_bitplane => i_video_fx_bitplane
+      video_fx_bitplane => i_video_fx_bitplane,
+      video_fx_dither   => i_video_fx_dither
 --      debug               => i_debug,
 --      exception_addr_o    => i_exception_addr_o
     );
@@ -381,6 +384,7 @@ begin
       shape2_b_sel        <= i_shape2_b_sel;
       video_fx_ctrl       <= i_video_fx_ctrl;
       video_fx_bitplane   <= i_video_fx_bitplane;
+      video_fx_dither     <= i_video_fx_dither;
       end if;
     end process;
 

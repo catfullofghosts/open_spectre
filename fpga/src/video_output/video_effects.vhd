@@ -20,6 +20,10 @@ use ieee.numeric_std.all;
 -- video_fx_bitplane @ 0xE8 — per channel (R/G/B), 4 bits each:
 --   [3]    1=bypass (full 8-bit), 0=slice selected bit plane
 --   [2:0]  bit index 0 (LSB) .. 7 (MSB); replicated to 0x00 / 0xFF
+--
+-- video_fx_dither @ 0xEC — horizontal ordered dither (no line memory):
+--   [0]    1=enable, 0=bypass
+--   [2:1]  depth: 00=6-bit, 01=5-bit, 10=4-bit, 11=3-bit output per channel
 
 entity video_effects is
   port (
@@ -30,6 +34,7 @@ entity video_effects is
     video_in     : in  std_logic_vector(23 downto 0);
     fx_ctrl      : in  std_logic_vector(31 downto 0);
     fx_bitplane  : in  std_logic_vector(31 downto 0);
+    fx_dither    : in  std_logic_vector(31 downto 0);
     video_out    : out std_logic_vector(23 downto 0)
   );
 end entity video_effects;
@@ -38,10 +43,12 @@ architecture rtl of video_effects is
 
   signal fx_ctrl_r     : std_logic_vector(31 downto 0);
   signal fx_bitplane_r : std_logic_vector(31 downto 0);
+  signal fx_dither_r   : std_logic_vector(31 downto 0);
 
   signal h_sync_d  : std_logic;
   signal v_sync_d  : std_logic;
   signal line_odd  : std_logic := '0';
+  signal x_count   : unsigned(15 downto 0) := (others => '0');
 
   signal r_in  : std_logic_vector(7 downto 0);
   signal g_in  : std_logic_vector(7 downto 0);
@@ -105,6 +112,58 @@ architecture rtl of video_effects is
     end if;
   end function f_bitplane_slice;
 
+  function f_horiz_dither (
+    v     : std_logic_vector(7 downto 0);
+    phase : unsigned(1 downto 0);
+    depth : std_logic_vector(1 downto 0)
+  ) return std_logic_vector is
+    variable bias   : unsigned(7 downto 0);
+    variable sum    : unsigned(8 downto 0);
+    variable result : std_logic_vector(7 downto 0);
+  begin
+    case depth is
+      when "00"   => bias := resize(phase * 1, 8);
+      when "01"   => bias := resize(phase * 2, 8);
+      when "10"   => bias := resize(phase * 4, 8);
+      when others => bias := resize(phase * 8, 8);
+    end case;
+
+    sum := resize(unsigned(v), 9) + resize(bias, 9);
+
+    case depth is
+      when "00"   =>
+        if sum(8) = '1' then
+          result := "11111100";
+        else
+          result := std_logic_vector(sum(7 downto 0));
+          result(1 downto 0) := "00";
+        end if;
+      when "01"   =>
+        if sum(8) = '1' then
+          result := "11111000";
+        else
+          result := std_logic_vector(sum(7 downto 0));
+          result(2 downto 0) := "000";
+        end if;
+      when "10"   =>
+        if sum(8) = '1' then
+          result := "11110000";
+        else
+          result := std_logic_vector(sum(7 downto 0));
+          result(3 downto 0) := "0000";
+        end if;
+      when others =>
+        if sum(8) = '1' then
+          result := "11100000";
+        else
+          result := std_logic_vector(sum(7 downto 0));
+          result(4 downto 0) := "00000";
+        end if;
+    end case;
+
+    return result;
+  end function f_horiz_dither;
+
 begin
 
   r_in <= video_in(7 downto 0);
@@ -118,20 +177,28 @@ begin
       v_sync_d  <= v_sync;
       fx_ctrl_r     <= fx_ctrl;
       fx_bitplane_r <= fx_bitplane;
+      fx_dither_r   <= fx_dither;
 
       if rst = '1' then
         line_odd <= '0';
+        x_count  <= (others => '0');
       else
         if v_sync = '1' and v_sync_d = '0' then
           line_odd <= '0';
         elsif h_sync = '1' and h_sync_d = '0' then
           line_odd <= not line_odd;
         end if;
+
+        if h_sync = '1' and h_sync_d = '0' then
+          x_count <= (others => '0');
+        elsif h_sync = '0' then
+          x_count <= x_count + 1;
+        end if;
       end if;
     end if;
   end process p_sync;
 
-  p_color : process (r_in, g_in, b_in, fx_ctrl_r, fx_bitplane_r)
+  p_color : process (r_in, g_in, b_in, fx_ctrl_r, fx_bitplane_r, fx_dither_r, x_count)
     variable vr, vg, vb : std_logic_vector(7 downto 0);
     variable packed       : std_logic_vector(23 downto 0);
   begin
@@ -167,6 +234,12 @@ begin
     vr := f_bitplane_slice(vr, fx_bitplane_r(3 downto 0));
     vg := f_bitplane_slice(vg, fx_bitplane_r(7 downto 4));
     vb := f_bitplane_slice(vb, fx_bitplane_r(11 downto 8));
+
+    if fx_dither_r(0) = '1' then
+      vr := f_horiz_dither(vr, x_count(1 downto 0), fx_dither_r(2 downto 1));
+      vg := f_horiz_dither(vg, x_count(1 downto 0), fx_dither_r(2 downto 1));
+      vb := f_horiz_dither(vb, x_count(1 downto 0), fx_dither_r(2 downto 1));
+    end if;
 
     r_out <= vr;
     g_out <= vg;

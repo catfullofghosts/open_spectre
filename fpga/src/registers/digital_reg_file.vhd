@@ -147,6 +147,7 @@ entity digital_reg_file is
     -- Final video output effects (register 0xE4)
     video_fx_ctrl     : out std_logic_vector(31 downto 0);
     video_fx_bitplane : out std_logic_vector(31 downto 0);
+    video_fx_dither   : out std_logic_vector(31 downto 0);
 
     -- debug
     debug            : out std_logic_vector(127 downto 0);
@@ -276,6 +277,7 @@ architecture RTL of digital_reg_file is
   signal shape2_b_sel_i   : std_logic_vector(3 downto 0);
   signal video_fx_ctrl_i     : std_logic_vector(31 downto 0);
   signal video_fx_bitplane_i : std_logic_vector(31 downto 0) := x"00000FFF"; -- all channels bypass
+  signal video_fx_dither_i   : std_logic_vector(31 downto 0) := (others => '0'); -- dither bypass
   signal exception_addr : std_logic; -- toggles on address out of range error for reg file -- need better solution with reset + exception for sniffer
 
 begin
@@ -354,6 +356,8 @@ begin
   regs(ra(x"E4")) <= video_fx_ctrl_i;
   -- Bit plane slice: R[3:0] G[7:4] B[11:8]; bit3 per channel = bypass
   regs(ra(x"E8")) <= video_fx_bitplane_i;
+  -- Horizontal ordered dither: [0]=en, [2:1]=depth (6/5/4/3-bit)
+  regs(ra(x"EC")) <= video_fx_dither_i;
 
   -- hardware interface
 --  regs(ra(x"7C")) <= 0x"0000000" & Rotery_addr_mux_i;
@@ -505,6 +509,8 @@ begin
             video_fx_ctrl_i <= write_reg;
           when x"E8" =>
             video_fx_bitplane_i <= write_reg;
+          when x"EC" =>
+            video_fx_dither_i <= write_reg;
           when x"7C" =>
             Rotery_addr_mux_i <= write_reg(3 downto 0);
             -- Note the Gap in addresses for the read only Rot encoders?
@@ -617,6 +623,7 @@ begin
 
   video_fx_ctrl     <= video_fx_ctrl_i;
   video_fx_bitplane <= video_fx_bitplane_i;
+  video_fx_dither   <= video_fx_dither_i;
 
   Rotery_addr_mux     <= Rotery_addr_mux_i;
   Rotery_enc_preset_w <= Rotery_enc_preset_w_i;

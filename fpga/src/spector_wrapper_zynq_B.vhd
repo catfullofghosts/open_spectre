@@ -299,6 +299,7 @@ architecture rtl of spector_wrapper_zynq is
   signal shape2_b_sel_reg   : std_logic_vector(3 downto 0);
   signal video_fx_ctrl      : std_logic_vector(31 downto 0);
   signal video_fx_bitplane  : std_logic_vector(31 downto 0);
+  signal video_fx_dither    : std_logic_vector(31 downto 0);
 
   -- Background video signals (for compositing)
   signal bg_video            : std_logic_vector(23 downto 0);
@@ -447,7 +448,8 @@ begin
       shape2_a_sel        => shape2_a_sel_reg,
       shape2_b_sel        => shape2_b_sel_reg,
       video_fx_ctrl       => video_fx_ctrl,
-      video_fx_bitplane   => video_fx_bitplane
+      video_fx_bitplane   => video_fx_bitplane,
+      video_fx_dither     => video_fx_dither
     );
 
   -------------------------------------------
@@ -800,6 +802,7 @@ begin
       video_in  => video_pre_fx,
       fx_ctrl      => video_fx_ctrl,
       fx_bitplane  => video_fx_bitplane,
+      fx_dither    => video_fx_dither,
       video_out    => video_out
     );
 
