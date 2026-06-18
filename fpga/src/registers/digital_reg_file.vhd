@@ -148,6 +148,9 @@ entity digital_reg_file is
     video_fx_ctrl     : out std_logic_vector(31 downto 0);
     video_fx_bitplane : out std_logic_vector(31 downto 0);
     video_fx_dither   : out std_logic_vector(31 downto 0);
+    video_fx_mirror   : out std_logic_vector(31 downto 0);
+    video_fx_chromatic : out std_logic_vector(31 downto 0);
+    video_fx_sharpness : out std_logic_vector(31 downto 0);
 
     -- debug
     debug            : out std_logic_vector(127 downto 0);
@@ -278,6 +281,9 @@ architecture RTL of digital_reg_file is
   signal video_fx_ctrl_i     : std_logic_vector(31 downto 0);
   signal video_fx_bitplane_i : std_logic_vector(31 downto 0) := x"00000FFF"; -- all channels bypass
   signal video_fx_dither_i   : std_logic_vector(31 downto 0) := (others => '0'); -- dither bypass
+  signal video_fx_mirror_i   : std_logic_vector(31 downto 0) := x"000002D0"; -- half=360px, disabled
+  signal video_fx_chromatic_i : std_logic_vector(31 downto 0) := (others => '0');
+  signal video_fx_sharpness_i : std_logic_vector(31 downto 0) := (others => '0');
   signal exception_addr : std_logic; -- toggles on address out of range error for reg file -- need better solution with reset + exception for sniffer
 
 begin
@@ -358,6 +364,12 @@ begin
   regs(ra(x"E8")) <= video_fx_bitplane_i;
   -- Horizontal ordered dither: [0]=en, [2:1]=depth (6/5/4/3-bit)
   regs(ra(x"EC")) <= video_fx_dither_i;
+  -- Horizontal mirror: [0]=en, [11:1]=half line width (pixels)
+  regs(ra(x"F0")) <= video_fx_mirror_i;
+  -- Chromatic aberration: [0]=en, [3:1]=G delay, [6:4]=B delay (0-5 px)
+  regs(ra(x"F4")) <= video_fx_chromatic_i;
+  -- Sharpness/blur: [0]=en, [1]=mode (0=blur 1=sharp), [15:8]=strength
+  regs(ra(x"F8")) <= video_fx_sharpness_i;
 
   -- hardware interface
 --  regs(ra(x"7C")) <= 0x"0000000" & Rotery_addr_mux_i;
@@ -511,6 +523,12 @@ begin
             video_fx_bitplane_i <= write_reg;
           when x"EC" =>
             video_fx_dither_i <= write_reg;
+          when x"F0" =>
+            video_fx_mirror_i <= write_reg;
+          when x"F4" =>
+            video_fx_chromatic_i <= write_reg;
+          when x"F8" =>
+            video_fx_sharpness_i <= write_reg;
           when x"7C" =>
             Rotery_addr_mux_i <= write_reg(3 downto 0);
             -- Note the Gap in addresses for the read only Rot encoders?
@@ -624,6 +642,9 @@ begin
   video_fx_ctrl     <= video_fx_ctrl_i;
   video_fx_bitplane <= video_fx_bitplane_i;
   video_fx_dither   <= video_fx_dither_i;
+  video_fx_mirror   <= video_fx_mirror_i;
+  video_fx_chromatic <= video_fx_chromatic_i;
+  video_fx_sharpness <= video_fx_sharpness_i;
 
   Rotery_addr_mux     <= Rotery_addr_mux_i;
   Rotery_enc_preset_w <= Rotery_enc_preset_w_i;

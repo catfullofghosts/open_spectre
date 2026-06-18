@@ -24,26 +24,57 @@ use ieee.numeric_std.all;
 -- video_fx_dither @ 0xEC — horizontal ordered dither (no line memory):
 --   [0]    1=enable, 0=bypass
 --   [2:1]  depth: 00=6-bit, 01=5-bit, 10=4-bit, 11=3-bit output per channel
+--
+-- video_fx_mirror @ 0xF0 — horizontal mirror (half-line BRAM, no full frame):
+--   [0]      1=enable, 0=bypass
+--   [11:1]   half-line width in pixels (active half stored, second half reads reversed)
+--            mirror region spans 2 * half_width pixels; default half=360 (720-wide line)
+--
+-- video_fx_chromatic @ 0xF4 — RGB channel delay (chromatic aberration):
+--   [0]    1=enable
+--   [3:1]  green delay 0-5 pixels
+--   [6:4]  blue delay 0-5 pixels (red undelayed)
+--
+-- video_fx_sharpness @ 0xF8 — horizontal 3-tap blur/sharpen on luma:
+--   [0]    1=enable
+--   [1]    0=blur, 1=sharpen
+--   [15:8] strength 0-255
 
 entity video_effects is
   port (
-    clk          : in  std_logic;
-    rst          : in  std_logic;
-    h_sync       : in  std_logic;
-    v_sync       : in  std_logic;
-    video_in     : in  std_logic_vector(23 downto 0);
-    fx_ctrl      : in  std_logic_vector(31 downto 0);
-    fx_bitplane  : in  std_logic_vector(31 downto 0);
-    fx_dither    : in  std_logic_vector(31 downto 0);
-    video_out    : out std_logic_vector(23 downto 0)
+    clk             : in  std_logic;
+    rst             : in  std_logic;
+    h_sync          : in  std_logic;
+    v_sync          : in  std_logic;
+    video_in        : in  std_logic_vector(23 downto 0);
+    fx_ctrl         : in  std_logic_vector(31 downto 0);
+    fx_bitplane     : in  std_logic_vector(31 downto 0);
+    fx_dither       : in  std_logic_vector(31 downto 0);
+    fx_mirror       : in  std_logic_vector(31 downto 0);
+    fx_chromatic    : in  std_logic_vector(31 downto 0);
+    fx_sharpness    : in  std_logic_vector(31 downto 0);
+    video_out       : out std_logic_vector(23 downto 0)
   );
 end entity video_effects;
 
 architecture rtl of video_effects is
 
+  constant C_MAX_HALF : positive := 512;
+
+  type t_half_line_buf is array (0 to C_MAX_HALF - 1) of std_logic_vector(23 downto 0);
+
   signal fx_ctrl_r     : std_logic_vector(31 downto 0);
   signal fx_bitplane_r : std_logic_vector(31 downto 0);
   signal fx_dither_r   : std_logic_vector(31 downto 0);
+  signal fx_mirror_r    : std_logic_vector(31 downto 0);
+  signal fx_chromatic_r : std_logic_vector(31 downto 0);
+  signal fx_sharpness_r : std_logic_vector(31 downto 0);
+
+  signal de_active : std_logic;
+
+  signal line_buf : t_half_line_buf;
+  attribute ram_style : string;
+  attribute ram_style of line_buf : signal is "block";
 
   signal h_sync_d  : std_logic;
   signal v_sync_d  : std_logic;
@@ -57,11 +88,23 @@ architecture rtl of video_effects is
   signal g_out : std_logic_vector(7 downto 0);
   signal b_out : std_logic_vector(7 downto 0);
 
-  signal pixel_proc  : std_logic_vector(23 downto 0);
-  signal pixel_prev  : std_logic_vector(23 downto 0) := (others => '0');
-  signal pixel_logic : std_logic_vector(23 downto 0);
-  signal pixel_d1    : std_logic_vector(23 downto 0);
-  signal pixel_d2    : std_logic_vector(23 downto 0);
+  signal pixel_proc     : std_logic_vector(23 downto 0);
+  signal pixel_mirrored : std_logic_vector(23 downto 0);
+  signal pixel_prev     : std_logic_vector(23 downto 0) := (others => '0');
+  signal pixel_logic    : std_logic_vector(23 downto 0);
+  signal pixel_filtered : std_logic_vector(23 downto 0);
+  signal pixel_d1         : std_logic_vector(23 downto 0);
+  signal pixel_d2         : std_logic_vector(23 downto 0);
+
+  signal r_post_logic : std_logic_vector(7 downto 0);
+  signal g_post_logic : std_logic_vector(7 downto 0);
+  signal b_post_logic : std_logic_vector(7 downto 0);
+  signal r_chrom      : std_logic_vector(7 downto 0);
+  signal g_chrom      : std_logic_vector(7 downto 0);
+  signal b_chrom      : std_logic_vector(7 downto 0);
+  signal r_sharp      : std_logic_vector(7 downto 0);
+  signal g_sharp      : std_logic_vector(7 downto 0);
+  signal b_sharp      : std_logic_vector(7 downto 0);
 
   function f_reverse_byte (b : std_logic_vector(7 downto 0)) return std_logic_vector is
     variable v : std_logic_vector(7 downto 0);
@@ -170,6 +213,8 @@ begin
   g_in <= video_in(15 downto 8);
   b_in <= video_in(23 downto 16);
 
+  de_active <= '0' when h_sync = '1' else '1';
+
   p_sync : process (clk) is
   begin
     if rising_edge(clk) then
@@ -178,6 +223,9 @@ begin
       fx_ctrl_r     <= fx_ctrl;
       fx_bitplane_r <= fx_bitplane;
       fx_dither_r   <= fx_dither;
+      fx_mirror_r    <= fx_mirror;
+      fx_chromatic_r <= fx_chromatic;
+      fx_sharpness_r <= fx_sharpness;
 
       if rst = '1' then
         line_odd <= '0';
@@ -248,7 +296,86 @@ begin
 
   pixel_proc <= b_out & g_out & r_out;
 
-  pixel_logic <= f_logic_prev(pixel_proc, pixel_prev, fx_ctrl_r(12 downto 11));
+  p_mirror : process (clk) is
+    variable half_w   : unsigned(10 downto 0);
+    variable x_pos    : unsigned(15 downto 0);
+    variable wr_index : integer range 0 to C_MAX_HALF - 1;
+    variable rd_index : integer range 0 to C_MAX_HALF - 1;
+  begin
+    if rising_edge(clk) then
+      half_w := unsigned(fx_mirror_r(11 downto 1));
+      if half_w > C_MAX_HALF then
+        half_w := to_unsigned(C_MAX_HALF, half_w'length);
+      end if;
+      x_pos  := x_count;
+
+      pixel_mirrored <= pixel_proc;
+
+      if fx_mirror_r(0) = '1' and h_sync = '0' and half_w /= 0 then
+        if x_pos < half_w then
+          if x_pos < C_MAX_HALF then
+            wr_index := to_integer(x_pos);
+            line_buf(wr_index) <= pixel_proc;
+          end if;
+        elsif x_pos < (half_w & '0') then
+          rd_index := to_integer(half_w - 1 - (x_pos - half_w));
+          if rd_index < C_MAX_HALF then
+            pixel_mirrored <= line_buf(rd_index);
+          end if;
+        end if;
+      end if;
+    end if;
+  end process p_mirror;
+
+  pixel_logic <= f_logic_prev(pixel_mirrored, pixel_prev, fx_ctrl_r(12 downto 11));
+
+  r_post_logic <= pixel_logic(7 downto 0);
+  g_post_logic <= pixel_logic(15 downto 8);
+  b_post_logic <= pixel_logic(23 downto 16);
+
+  chromatic_inst : entity work.chromatic_abrasion_effect
+    port map (
+      clk       => clk,
+      rst       => rst,
+      enable    => fx_chromatic_r(0),
+      delay_g   => fx_chromatic_r(3 downto 1),
+      delay_b   => fx_chromatic_r(6 downto 4),
+      r_in      => r_post_logic,
+      g_in      => g_post_logic,
+      b_in      => b_post_logic,
+      hsync_in  => h_sync,
+      vsync_in  => v_sync,
+      de_in     => de_active,
+      r_out     => r_chrom,
+      g_out     => g_chrom,
+      b_out     => b_chrom,
+      hsync_out => open,
+      vsync_out => open,
+      de_out    => open
+    );
+
+  sharpness_inst : entity work.sharpness_effect
+    port map (
+      clk       => clk,
+      rst       => rst,
+      enable    => fx_sharpness_r(0),
+      mode      => fx_sharpness_r(1),
+      strength  => fx_sharpness_r(15 downto 8),
+      r_in      => r_chrom,
+      g_in      => g_chrom,
+      b_in      => b_chrom,
+      hsync_in  => h_sync,
+      vsync_in  => v_sync,
+      de_in     => de_active,
+      r_out     => r_sharp,
+      g_out     => g_sharp,
+      b_out     => b_sharp,
+      hsync_out => open,
+      vsync_out => open,
+      de_out    => open
+    );
+
+  pixel_filtered <= b_sharp & g_sharp & r_sharp;
 
   p_output : process (clk) is
   begin
@@ -256,20 +383,20 @@ begin
       if h_sync = '1' and h_sync_d = '0' then
         pixel_prev <= (others => '0');
       else
-        pixel_prev <= pixel_proc;
+        pixel_prev <= pixel_mirrored;
       end if;
 
-      pixel_d1 <= pixel_logic;
+      pixel_d1 <= pixel_filtered;
       pixel_d2 <= pixel_d1;
 
       if fx_ctrl_r(8) = '1' and line_odd = '1' then
         case fx_ctrl_r(10 downto 9) is
           when "01"   => video_out <= pixel_d1;
           when "10"   => video_out <= pixel_d2;
-          when others => video_out <= pixel_logic;
+          when others => video_out <= pixel_filtered;
         end case;
       else
-        video_out <= pixel_logic;
+        video_out <= pixel_filtered;
       end if;
     end if;
   end process p_output;

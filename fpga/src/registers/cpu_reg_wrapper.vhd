@@ -135,7 +135,10 @@ entity cpu_reg_wrapper is
     shape2_b_sel   : out std_logic_vector(3 downto 0);
     video_fx_ctrl     : out std_logic_vector(31 downto 0);
     video_fx_bitplane : out std_logic_vector(31 downto 0);
-    video_fx_dither   : out std_logic_vector(31 downto 0)
+    video_fx_dither   : out std_logic_vector(31 downto 0);
+    video_fx_mirror   : out std_logic_vector(31 downto 0);
+    video_fx_chromatic : out std_logic_vector(31 downto 0);
+    video_fx_sharpness : out std_logic_vector(31 downto 0)
 
   );
 end cpu_reg_wrapper;
@@ -217,6 +220,9 @@ architecture rtl of cpu_reg_wrapper is
   signal  i_video_fx_ctrl     : std_logic_vector(31 downto 0);
   signal  i_video_fx_bitplane : std_logic_vector(31 downto 0);
   signal  i_video_fx_dither   : std_logic_vector(31 downto 0);
+  signal  i_video_fx_mirror   : std_logic_vector(31 downto 0);
+  signal  i_video_fx_chromatic : std_logic_vector(31 downto 0);
+  signal  i_video_fx_sharpness : std_logic_vector(31 downto 0);
 
   
 begin
@@ -316,7 +322,10 @@ begin
       shape2_b_sel        => i_shape2_b_sel,
       video_fx_ctrl     => i_video_fx_ctrl,
       video_fx_bitplane => i_video_fx_bitplane,
-      video_fx_dither   => i_video_fx_dither
+      video_fx_dither   => i_video_fx_dither,
+      video_fx_mirror   => i_video_fx_mirror,
+      video_fx_chromatic => i_video_fx_chromatic,
+      video_fx_sharpness => i_video_fx_sharpness
 --      debug               => i_debug,
 --      exception_addr_o    => i_exception_addr_o
     );
@@ -385,6 +394,9 @@ begin
       video_fx_ctrl       <= i_video_fx_ctrl;
       video_fx_bitplane   <= i_video_fx_bitplane;
       video_fx_dither     <= i_video_fx_dither;
+      video_fx_mirror     <= i_video_fx_mirror;
+      video_fx_chromatic  <= i_video_fx_chromatic;
+      video_fx_sharpness  <= i_video_fx_sharpness;
       end if;
     end process;
 
