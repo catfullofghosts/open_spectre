@@ -24,6 +24,8 @@ use unisim.vcomponents.all;
 use ieee.std_logic_arith.all;
 use ieee.std_logic_unsigned.all;
 
+use work.overlay_sprite_pkg.all;
+
 entity cpu_reg_wrapper is
   port (
     clk     : in std_logic;
@@ -138,7 +140,9 @@ entity cpu_reg_wrapper is
     video_fx_dither   : out std_logic_vector(31 downto 0);
     video_fx_mirror   : out std_logic_vector(31 downto 0);
     video_fx_chromatic : out std_logic_vector(31 downto 0);
-    video_fx_sharpness : out std_logic_vector(31 downto 0)
+    video_fx_sharpness : out std_logic_vector(31 downto 0);
+    overlay_global_en  : out std_logic;
+    overlay_sprites    : out t_sprite_array
 
   );
 end cpu_reg_wrapper;
@@ -223,6 +227,8 @@ architecture rtl of cpu_reg_wrapper is
   signal  i_video_fx_mirror   : std_logic_vector(31 downto 0);
   signal  i_video_fx_chromatic : std_logic_vector(31 downto 0);
   signal  i_video_fx_sharpness : std_logic_vector(31 downto 0);
+  signal  i_overlay_global_en  : std_logic;
+  signal  i_overlay_sprites     : t_sprite_array;
 
   
 begin
@@ -325,7 +331,9 @@ begin
       video_fx_dither   => i_video_fx_dither,
       video_fx_mirror   => i_video_fx_mirror,
       video_fx_chromatic => i_video_fx_chromatic,
-      video_fx_sharpness => i_video_fx_sharpness
+      video_fx_sharpness => i_video_fx_sharpness,
+      overlay_global_en  => i_overlay_global_en,
+      overlay_sprites    => i_overlay_sprites
 --      debug               => i_debug,
 --      exception_addr_o    => i_exception_addr_o
     );
@@ -397,6 +405,8 @@ begin
       video_fx_mirror     <= i_video_fx_mirror;
       video_fx_chromatic  <= i_video_fx_chromatic;
       video_fx_sharpness  <= i_video_fx_sharpness;
+      overlay_global_en   <= i_overlay_global_en;
+      overlay_sprites     <= i_overlay_sprites;
       end if;
     end process;
 

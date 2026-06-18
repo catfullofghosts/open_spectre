@@ -26,6 +26,8 @@ use ieee.numeric_std.all;
 library UNISIM;
 use UNISIM.vcomponents.all;
 
+use work.overlay_sprite_pkg.all;
+
 entity digital_reg_file is
   generic (
     reg_version_id : std_logic_vector(7 downto 0) := x"00";
@@ -151,6 +153,9 @@ entity digital_reg_file is
     video_fx_mirror   : out std_logic_vector(31 downto 0);
     video_fx_chromatic : out std_logic_vector(31 downto 0);
     video_fx_sharpness : out std_logic_vector(31 downto 0);
+    -- Overlay sprites (shared BRAM atlas, up to C_NUM_SPRITES slots)
+    overlay_global_en : out std_logic;
+    overlay_sprites   : out t_sprite_array;
 
     -- debug
     debug            : out std_logic_vector(127 downto 0);
@@ -162,7 +167,7 @@ end entity digital_reg_file;
 architecture RTL of digital_reg_file is
 
   type regs32 is array (natural range <>) of std_logic_vector(31 downto 0);
-  signal regs : regs32(63 downto 0)
+  signal regs : regs32(127 downto 0)
   := (others => (others => '0'));
 
   -- Function for converting byte adresses to an index
@@ -284,6 +289,15 @@ architecture RTL of digital_reg_file is
   signal video_fx_mirror_i   : std_logic_vector(31 downto 0) := x"000002D0"; -- half=360px, disabled
   signal video_fx_chromatic_i : std_logic_vector(31 downto 0) := (others => '0');
   signal video_fx_sharpness_i : std_logic_vector(31 downto 0) := (others => '0');
+  signal overlay_global_en_i : std_logic := '0';
+  signal overlay_sprites_i   : t_sprite_array := (others => (
+    enable => '0',
+    x      => (others => '0'),
+    y      => (others => '0'),
+    width  => (others => '0'),
+    height => (others => '0'),
+    base   => (others => '0')
+  ));
   signal exception_addr : std_logic; -- toggles on address out of range error for reg file -- need better solution with reset + exception for sniffer
 
 begin
@@ -297,7 +311,7 @@ begin
       if regs_en = '0' then
         read_reg <= x"00000000";
       else
-        read_reg <= regs(ra(regs_addr(7 downto 0)));
+        read_reg <= regs(ra(regs_addr));
       end if;
     end if;
   end process;
@@ -370,6 +384,17 @@ begin
   regs(ra(x"F4")) <= video_fx_chromatic_i;
   -- Sharpness/blur: [0]=en, [1]=mode (0=blur 1=sharp), [15:8]=strength
   regs(ra(x"F8")) <= video_fx_sharpness_i;
+  -- Overlay master enable
+  regs(ra(x"FC")) <= "0000000000000000000000000000000" & overlay_global_en_i;
+
+  g_sprite_read : for i in 0 to C_NUM_SPRITES - 1 generate
+    constant c_base : unsigned(12 downto 0) :=
+      unsigned(C_SPRITE_REG_LO) + to_unsigned(i * C_SPRITE_STRIDE, 13);
+  begin
+    regs(ra(std_logic_vector(c_base + 0))) <= "000000000" & overlay_sprites_i(i).y & overlay_sprites_i(i).x & overlay_sprites_i(i).enable;
+    regs(ra(std_logic_vector(c_base + 4))) <= "000000000" & overlay_sprites_i(i).height & '0' & overlay_sprites_i(i).width;
+    regs(ra(std_logic_vector(c_base + 8))) <= "000000000000000000000" & overlay_sprites_i(i).base;
+  end generate g_sprite_read;
 
   -- hardware interface
 --  regs(ra(x"7C")) <= 0x"0000000" & Rotery_addr_mux_i;
@@ -412,9 +437,35 @@ begin
   -- WRITE: Get the data from the incoming write port and pass it to the internal signal for each reg
   ---------------------------------------------------------------------------
   process (regs_clk)
+    variable v_sprite_idx : integer range 0 to C_NUM_SPRITES - 1;
+    variable v_sprite_off : unsigned(3 downto 0);
   begin
     if rising_edge(regs_clk) then
       if (write_en = '1') then
+        if addr_reg = x"FC" then
+          overlay_global_en_i <= write_reg(0);
+        elsif unsigned(addr_reg) >= unsigned(C_SPRITE_REG_LO)
+              and unsigned(addr_reg) < unsigned(C_SPRITE_REG_LO) + C_NUM_SPRITES * C_SPRITE_STRIDE then
+          v_sprite_idx := to_integer(
+            (unsigned(addr_reg) - unsigned(C_SPRITE_REG_LO)) / C_SPRITE_STRIDE
+          );
+          v_sprite_off := unsigned(addr_reg(3 downto 0));
+          if v_sprite_idx >= 0 and v_sprite_idx < C_NUM_SPRITES then
+            case v_sprite_off is
+              when x"0" =>
+                overlay_sprites_i(v_sprite_idx).enable <= write_reg(0);
+                overlay_sprites_i(v_sprite_idx).x      <= write_reg(11 downto 1);
+                overlay_sprites_i(v_sprite_idx).y      <= write_reg(22 downto 12);
+              when x"4" =>
+                overlay_sprites_i(v_sprite_idx).width  <= write_reg(10 downto 0);
+                overlay_sprites_i(v_sprite_idx).height <= write_reg(21 downto 11);
+              when x"8" =>
+                overlay_sprites_i(v_sprite_idx).base   <= write_reg(10 downto 0);
+              when others =>
+                null;
+            end case;
+          end if;
+        else
         case addr_reg(7 downto 0) is
           when x"04" =>
             matrix_out_addr_int <= write_reg(5 downto 0);
@@ -558,6 +609,7 @@ begin
 
             -- do nothing
         end case;
+        end if;
       end if;
     end if;
   end process;
@@ -645,6 +697,9 @@ begin
   video_fx_mirror   <= video_fx_mirror_i;
   video_fx_chromatic <= video_fx_chromatic_i;
   video_fx_sharpness <= video_fx_sharpness_i;
+
+  overlay_global_en <= overlay_global_en_i;
+  overlay_sprites   <= overlay_sprites_i;
 
   Rotery_addr_mux     <= Rotery_addr_mux_i;
   Rotery_enc_preset_w <= Rotery_enc_preset_w_i;

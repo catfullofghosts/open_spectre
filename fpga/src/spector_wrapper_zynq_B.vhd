@@ -18,6 +18,8 @@ use ieee.numeric_std.all;
 library UNISIM;
 use UNISIM.vcomponents.all;
 
+use work.overlay_sprite_pkg.all;
+
 entity spector_wrapper_zynq is
   port (
     pix_clk : in std_logic;
@@ -303,6 +305,21 @@ architecture rtl of spector_wrapper_zynq is
   signal video_fx_mirror    : std_logic_vector(31 downto 0);
   signal video_fx_chromatic : std_logic_vector(31 downto 0);
   signal video_fx_sharpness : std_logic_vector(31 downto 0);
+  signal overlay_global_en  : std_logic;
+  signal overlay_sprites      : t_sprite_array;
+  signal overlay_key        : std_logic;
+  signal overlay_rgb        : std_logic_vector(23 downto 0);
+
+  signal reg_en               : std_logic;
+  signal reg_we               : std_logic_vector(3 downto 0);
+  signal reg_addr             : std_logic_vector(12 downto 0);
+  signal reg_wdata            : std_logic_vector(31 downto 0);
+  signal reg_rdata            : std_logic_vector(31 downto 0);
+  signal overlay_bram_en      : std_logic;
+  signal overlay_bram_we      : std_logic_vector(3 downto 0);
+  signal overlay_bram_addr    : std_logic_vector(10 downto 0);
+  signal overlay_bram_wdata   : std_logic_vector(31 downto 0);
+  signal overlay_bram_rdata   : std_logic_vector(31 downto 0);
 
   -- Background video signals (for compositing)
   signal bg_video            : std_logic_vector(23 downto 0);
@@ -359,17 +376,41 @@ begin
 
   --
 
+  overlay_cpu_mux_inst : entity work.overlay_cpu_mux
+    generic map (
+      G_BYTE_BASE  => std_logic_vector(to_unsigned(16#400#, 13)),
+      G_ADDR_WIDTH => 11
+    )
+    port map (
+      cpu_clk   => regs_clk,
+      cpu_en    => regs_en,
+      cpu_we    => regs_wen,
+      cpu_addr  => regs_addr,
+      cpu_wdata => regs_wr_data,
+      cpu_rdata => regs_rd_data,
+      reg_en      => reg_en,
+      reg_we      => reg_we,
+      reg_addr    => reg_addr,
+      reg_wdata   => reg_wdata,
+      reg_rdata   => reg_rdata,
+      bram_en     => overlay_bram_en,
+      bram_we     => overlay_bram_we,
+      bram_addr   => overlay_bram_addr,
+      bram_wdata  => overlay_bram_wdata,
+      bram_rdata  => overlay_bram_rdata
+    );
+
   cpu_reg_wrapper_inst : entity work.cpu_reg_wrapper
     port map
     (
       clk                 => regs_clk,
       pix_clk             => pix_clk,
       rst                 => reset_n,
-      regs_en             => regs_en,
-      regs_wen            => regs_wen,
-      regs_addr           => regs_addr,
-      regs_wr_data        => regs_wr_data,
-      regs_rd_data        => regs_rd_data,
+      regs_en             => reg_en,
+      regs_wen            => reg_we,
+      regs_addr           => reg_addr,
+      regs_wr_data        => reg_wdata,
+      regs_rd_data        => reg_rdata,
       matrix_out_addr     => matrix_in_addr,
       matrix_mask_out     => matrix_mask_in,
       matrix_load         => matrix_load,
@@ -455,7 +496,31 @@ begin
       video_fx_dither     => video_fx_dither,
       video_fx_mirror     => video_fx_mirror,
       video_fx_chromatic  => video_fx_chromatic,
-      video_fx_sharpness  => video_fx_sharpness
+      video_fx_sharpness  => video_fx_sharpness,
+      overlay_global_en   => overlay_global_en,
+      overlay_sprites     => overlay_sprites
+    );
+
+  overlay_framebuffer_inst : entity work.overlay_framebuffer
+    generic map (
+      G_DEPTH      => 2048,
+      G_ADDR_WIDTH => 11
+    )
+    port map (
+      cpu_clk    => regs_clk,
+      cpu_en     => overlay_bram_en,
+      cpu_we     => overlay_bram_we,
+      cpu_addr   => overlay_bram_addr,
+      cpu_wdata  => overlay_bram_wdata,
+      cpu_rdata  => overlay_bram_rdata,
+      pix_clk    => pix_clk,
+      pix_rst    => reset,
+      h_sync     => h_sync,
+      v_sync     => v_sync,
+      global_enable => overlay_global_en,
+      sprites      => overlay_sprites,
+      overlay_key => overlay_key,
+      overlay_rgb => overlay_rgb
     );
 
   -------------------------------------------
@@ -761,19 +826,23 @@ begin
             blue       => blue
         );
 
-  -- Select background video based on col_en_bypass
-  -- Add pipeline delay to match luma_key pipeline (2 cycles)
+  -- Select background video based on col_en_bypass, then overlay BRAM sprite
   process (pix_clk)
+    variable encoder_video : std_logic_vector(23 downto 0);
   begin
     if rising_edge (pix_clk) then
-      -- Stage 1: Select background
       if col_en_bypass = '1' then
-        bg_video_reg1 <= y_out & u_out & v_out; -- colour encoder bypassed for now
+        encoder_video := y_out & u_out & v_out;
       else
-        bg_video_reg1 <= blue & green & red; -- something is up with this the whole colorange isnt covered, does it need an offset to make it work, analoge looks like it is cut off
+        encoder_video := blue & green & red;
       end if;
-      
-      -- Stage 2: Pipeline delay to match luma_key
+
+      if overlay_key = '1' then
+        bg_video_reg1 <= overlay_rgb;
+      else
+        bg_video_reg1 <= encoder_video;
+      end if;
+
       bg_video_reg2 <= bg_video_reg1;
       bg_video <= bg_video_reg2;
     end if;

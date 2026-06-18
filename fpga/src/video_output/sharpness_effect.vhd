@@ -67,6 +67,7 @@ begin
         variable luminance_ratio : UNSIGNED(15 downto 0);
         variable luminance_diff : SIGNED(16 downto 0);
         variable temp_calc : UNSIGNED(15 downto 0);
+        variable scaled_ch : UNSIGNED(15 downto 0);
     begin
         if rising_edge(clk) then
             if rst = '1' then
@@ -156,23 +157,26 @@ begin
                     -- This preserves the original color ratios while applying sharpening
                     if unsigned(luminance_center(7 downto 0)) > 0 then
                         luminance_ratio := (blended_luminance(7 downto 0) * 255) / unsigned(luminance_center(7 downto 0));
-                        
-                        if (unsigned(pixel_center(7 downto 0)) * luminance_ratio(7 downto 0)) / 255 > 255 then
+
+                        scaled_ch := (unsigned(pixel_center(7 downto 0)) * luminance_ratio(7 downto 0)) / 255;
+                        if scaled_ch > 255 then
                             r_out <= (others => '1');
                         else
-                            r_out <= std_logic_vector(((unsigned(pixel_center(7 downto 0)) * luminance_ratio(7 downto 0)) / 255)(7 downto 0));
+                            r_out <= std_logic_vector(scaled_ch(7 downto 0));
                         end if;
-                        
-                        if (unsigned(pixel_center(15 downto 8)) * luminance_ratio(7 downto 0)) / 255 > 255 then
+
+                        scaled_ch := (unsigned(pixel_center(15 downto 8)) * luminance_ratio(7 downto 0)) / 255;
+                        if scaled_ch > 255 then
                             g_out <= (others => '1');
                         else
-                            g_out <= std_logic_vector(((unsigned(pixel_center(15 downto 8)) * luminance_ratio(7 downto 0)) / 255)(7 downto 0));
+                            g_out <= std_logic_vector(scaled_ch(7 downto 0));
                         end if;
-                        
-                        if (unsigned(pixel_center(23 downto 16)) * luminance_ratio(7 downto 0)) / 255 > 255 then
+
+                        scaled_ch := (unsigned(pixel_center(23 downto 16)) * luminance_ratio(7 downto 0)) / 255;
+                        if scaled_ch > 255 then
                             b_out <= (others => '1');
                         else
-                            b_out <= std_logic_vector(((unsigned(pixel_center(23 downto 16)) * luminance_ratio(7 downto 0)) / 255)(7 downto 0));
+                            b_out <= std_logic_vector(scaled_ch(7 downto 0));
                         end if;
                     else
                         r_out <= pixel_center(7 downto 0);
