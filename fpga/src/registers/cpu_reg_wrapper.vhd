@@ -142,7 +142,23 @@ entity cpu_reg_wrapper is
     video_fx_chromatic : out std_logic_vector(31 downto 0);
     video_fx_sharpness : out std_logic_vector(31 downto 0);
     overlay_global_en  : out std_logic;
-    overlay_sprites    : out t_sprite_array
+    overlay_sprites    : out t_sprite_array;
+
+    frame_stats_luma_min : in  std_logic_vector(7 downto 0);
+    frame_stats_luma_max : in  std_logic_vector(7 downto 0);
+    frame_stats_luma_avg : in  std_logic_vector(7 downto 0);
+    frame_stats_r_min    : in  std_logic_vector(7 downto 0);
+    frame_stats_r_max    : in  std_logic_vector(7 downto 0);
+    frame_stats_r_avg    : in  std_logic_vector(7 downto 0);
+    frame_stats_g_min    : in  std_logic_vector(7 downto 0);
+    frame_stats_g_max    : in  std_logic_vector(7 downto 0);
+    frame_stats_g_avg    : in  std_logic_vector(7 downto 0);
+    frame_stats_b_min    : in  std_logic_vector(7 downto 0);
+    frame_stats_b_max    : in  std_logic_vector(7 downto 0);
+    frame_stats_b_avg    : in  std_logic_vector(7 downto 0);
+    frame_stats_frame_id : in  std_logic_vector(7 downto 0);
+    frame_stats_hash      : in  std_logic_vector(31 downto 0);
+    frame_stats_pix_count : in  std_logic_vector(31 downto 0)
 
   );
 end cpu_reg_wrapper;
@@ -333,7 +349,22 @@ begin
       video_fx_chromatic => i_video_fx_chromatic,
       video_fx_sharpness => i_video_fx_sharpness,
       overlay_global_en  => i_overlay_global_en,
-      overlay_sprites    => i_overlay_sprites
+      overlay_sprites    => i_overlay_sprites,
+      frame_stats_luma_min => frame_stats_luma_min,
+      frame_stats_luma_max => frame_stats_luma_max,
+      frame_stats_luma_avg => frame_stats_luma_avg,
+      frame_stats_r_min    => frame_stats_r_min,
+      frame_stats_r_max    => frame_stats_r_max,
+      frame_stats_r_avg    => frame_stats_r_avg,
+      frame_stats_g_min    => frame_stats_g_min,
+      frame_stats_g_max    => frame_stats_g_max,
+      frame_stats_g_avg    => frame_stats_g_avg,
+      frame_stats_b_min    => frame_stats_b_min,
+      frame_stats_b_max    => frame_stats_b_max,
+      frame_stats_b_avg    => frame_stats_b_avg,
+      frame_stats_frame_id => frame_stats_frame_id,
+      frame_stats_hash      => frame_stats_hash,
+      frame_stats_pix_count => frame_stats_pix_count
 --      debug               => i_debug,
 --      exception_addr_o    => i_exception_addr_o
     );

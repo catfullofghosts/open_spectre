@@ -336,6 +336,23 @@ architecture rtl of spector_wrapper_zynq is
   signal green        : std_logic_vector(7 downto 0);
   signal blue         : std_logic_vector(7 downto 0);
   signal video_pre_fx : std_logic_vector(23 downto 0);
+  signal video_fx_out : std_logic_vector(23 downto 0);
+
+  signal frame_stats_luma_min : std_logic_vector(7 downto 0);
+  signal frame_stats_luma_max : std_logic_vector(7 downto 0);
+  signal frame_stats_luma_avg : std_logic_vector(7 downto 0);
+  signal frame_stats_r_min    : std_logic_vector(7 downto 0);
+  signal frame_stats_r_max    : std_logic_vector(7 downto 0);
+  signal frame_stats_r_avg    : std_logic_vector(7 downto 0);
+  signal frame_stats_g_min    : std_logic_vector(7 downto 0);
+  signal frame_stats_g_max    : std_logic_vector(7 downto 0);
+  signal frame_stats_g_avg    : std_logic_vector(7 downto 0);
+  signal frame_stats_b_min    : std_logic_vector(7 downto 0);
+  signal frame_stats_b_max    : std_logic_vector(7 downto 0);
+  signal frame_stats_b_avg    : std_logic_vector(7 downto 0);
+  signal frame_stats_frame_id : std_logic_vector(7 downto 0);
+  signal frame_stats_hash      : std_logic_vector(31 downto 0);
+  signal frame_stats_pix_count : std_logic_vector(31 downto 0);
 
     attribute DONT_TOUCH                 : string;
   --  attribute MARK_DEBUG of clk_148_5    : signal is "TRUE";
@@ -498,7 +515,22 @@ begin
       video_fx_chromatic  => video_fx_chromatic,
       video_fx_sharpness  => video_fx_sharpness,
       overlay_global_en   => overlay_global_en,
-      overlay_sprites     => overlay_sprites
+      overlay_sprites     => overlay_sprites,
+      frame_stats_luma_min => frame_stats_luma_min,
+      frame_stats_luma_max => frame_stats_luma_max,
+      frame_stats_luma_avg => frame_stats_luma_avg,
+      frame_stats_r_min    => frame_stats_r_min,
+      frame_stats_r_max    => frame_stats_r_max,
+      frame_stats_r_avg    => frame_stats_r_avg,
+      frame_stats_g_min    => frame_stats_g_min,
+      frame_stats_g_max    => frame_stats_g_max,
+      frame_stats_g_avg    => frame_stats_g_avg,
+      frame_stats_b_min    => frame_stats_b_min,
+      frame_stats_b_max    => frame_stats_b_max,
+      frame_stats_b_avg    => frame_stats_b_avg,
+      frame_stats_frame_id => frame_stats_frame_id,
+      frame_stats_hash      => frame_stats_hash,
+      frame_stats_pix_count => frame_stats_pix_count
     );
 
   overlay_framebuffer_inst : entity work.overlay_framebuffer
@@ -881,7 +913,35 @@ begin
       fx_mirror    => video_fx_mirror,
       fx_chromatic => video_fx_chromatic,
       fx_sharpness => video_fx_sharpness,
-      video_out    => video_out
+      video_out    => video_fx_out
+    );
+
+  frame_video_stats_inst : entity work.frame_video_stats
+    generic map (
+      G_FILTER_FRAMES => 4
+    )
+    port map (
+      clk       => pix_clk,
+      rst       => reset,
+      h_sync    => h_sync,
+      v_sync    => v_sync,
+      video_in  => video_fx_out,
+      video_out => video_out,
+      stats_luma_min => frame_stats_luma_min,
+      stats_luma_max => frame_stats_luma_max,
+      stats_luma_avg => frame_stats_luma_avg,
+      stats_r_min    => frame_stats_r_min,
+      stats_r_max    => frame_stats_r_max,
+      stats_r_avg    => frame_stats_r_avg,
+      stats_g_min    => frame_stats_g_min,
+      stats_g_max    => frame_stats_g_max,
+      stats_g_avg    => frame_stats_g_avg,
+      stats_b_min    => frame_stats_b_min,
+      stats_b_max    => frame_stats_b_max,
+      stats_b_avg    => frame_stats_b_avg,
+      stats_frame_id => frame_stats_frame_id,
+      stats_frame_hash      => frame_stats_hash,
+      stats_frame_pix_count => frame_stats_pix_count
     );
 
 end architecture;

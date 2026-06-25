@@ -157,6 +157,23 @@ entity digital_reg_file is
     overlay_global_en : out std_logic;
     overlay_sprites   : out t_sprite_array;
 
+    -- Final video frame stats (read-only, filtered over 4 frames)
+    frame_stats_luma_min : in std_logic_vector(7 downto 0);
+    frame_stats_luma_max : in std_logic_vector(7 downto 0);
+    frame_stats_luma_avg : in std_logic_vector(7 downto 0);
+    frame_stats_r_min    : in std_logic_vector(7 downto 0);
+    frame_stats_r_max    : in std_logic_vector(7 downto 0);
+    frame_stats_r_avg    : in std_logic_vector(7 downto 0);
+    frame_stats_g_min    : in std_logic_vector(7 downto 0);
+    frame_stats_g_max    : in std_logic_vector(7 downto 0);
+    frame_stats_g_avg    : in std_logic_vector(7 downto 0);
+    frame_stats_b_min    : in std_logic_vector(7 downto 0);
+    frame_stats_b_max    : in std_logic_vector(7 downto 0);
+    frame_stats_b_avg    : in std_logic_vector(7 downto 0);
+    frame_stats_frame_id : in std_logic_vector(7 downto 0);
+    frame_stats_hash      : in std_logic_vector(31 downto 0);
+    frame_stats_pix_count : in std_logic_vector(31 downto 0);
+
     -- debug
     debug            : out std_logic_vector(127 downto 0);
     exception_addr_o : out std_logic
@@ -395,6 +412,14 @@ begin
     regs(ra(std_logic_vector(c_base + 4))) <= "000000000" & overlay_sprites_i(i).height & '0' & overlay_sprites_i(i).width;
     regs(ra(std_logic_vector(c_base + 8))) <= "000000000000000000000" & overlay_sprites_i(i).base;
   end generate g_sprite_read;
+
+  -- Frame video stats (read-only @ 0x180, bytes increase with address)
+  regs(ra(x"180")) <= frame_stats_frame_id & frame_stats_luma_avg & frame_stats_luma_max & frame_stats_luma_min;
+  regs(ra(x"184")) <= frame_stats_g_min & frame_stats_r_avg & frame_stats_r_max & frame_stats_r_min;
+  regs(ra(x"188")) <= frame_stats_b_max & frame_stats_b_min & frame_stats_g_avg & frame_stats_g_max;
+  regs(ra(x"18C")) <= x"000000" & frame_stats_b_avg;
+  regs(ra(x"190")) <= frame_stats_hash;
+  regs(ra(x"194")) <= frame_stats_pix_count;
 
   -- hardware interface
 --  regs(ra(x"7C")) <= 0x"0000000" & Rotery_addr_mux_i;
