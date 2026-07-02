@@ -900,21 +900,23 @@ begin
     end if;
   end process;
 
-  video_effects_inst : entity work.video_effects
-    port map (
-      clk       => pix_clk,
-      rst       => reset,
-      h_sync    => h_sync,
-      v_sync    => v_sync,
-      video_in  => video_pre_fx,
-      fx_ctrl      => video_fx_ctrl,
-      fx_bitplane  => video_fx_bitplane,
-      fx_dither    => video_fx_dither,
-      fx_mirror    => video_fx_mirror,
-      fx_chromatic => video_fx_chromatic,
-      fx_sharpness => video_fx_sharpness,
-      video_out    => video_fx_out
-    );
+--  video_effects_inst : entity work.video_effects
+--    port map (
+--      clk       => pix_clk,
+--      rst       => reset,
+--      h_sync    => h_sync,
+--      v_sync    => v_sync,
+--      video_in  => video_pre_fx,
+--      fx_ctrl      => video_fx_ctrl,
+--      fx_bitplane  => video_fx_bitplane,
+--      fx_dither    => video_fx_dither,
+--      fx_mirror    => video_fx_mirror,
+--      fx_chromatic => video_fx_chromatic,
+--      fx_sharpness => video_fx_sharpness,
+--      video_out    => video_fx_out
+--    );
+
+video_out <= video_pre_fx;
 
 --  frame_video_stats_inst : entity work.frame_video_stats
 --    generic map (

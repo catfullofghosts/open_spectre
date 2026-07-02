@@ -378,19 +378,19 @@ if __name__ == "__main__":
     wr_reg('78',int("2", 16)) #bypass colour encoder , dotn devide pix clk
 # 0x40000078 = 0x2 bypasses color
 
-    # rst_digital_side_matrix(pullup = True) 
+    rst_digital_side_matrix(pullup = True) 
    
-    # rst_annaloge_side_matrix(16)
-    # rst_annaloge_side_matrix(17)
+    rst_annaloge_side_matrix(16)
+    rst_annaloge_side_matrix(17)
 
-    # prog_digital_side_matrix(53, 1)
-    # prog_digital_side_matrix(52, 1)
-    # prog_digital_side_matrix(51, 1)
+    prog_digital_side_matrix(53, 1)
+    prog_digital_side_matrix(52, 1)
+    prog_digital_side_matrix(51, 1)
 
-    # # # # chroma 2
-    # prog_digital_side_matrix(56, 1)
-    # prog_digital_side_matrix(55, 1)
-    # prog_digital_side_matrix(54, 1)
+    # # # chroma 2
+    prog_digital_side_matrix(56, 1)
+    prog_digital_side_matrix(55, 1)
+    prog_digital_side_matrix(54, 1)
 
 
     ################################################################
@@ -403,16 +403,16 @@ if __name__ == "__main__":
     # with vertical sync enabled only freqs of 1 or 0 work, may need to adjust the counter range for this sync
     
     # Horixontal test
-    # wr_reg('68',int("40f000f0", 16)) #-- look at adding a way to de sync the second oscilaor
-    # prog_annaloge_side_matrix(16,1) # routes osc1 sin to luma out
+    wr_reg('68',int("40f000f0", 16)) #-- look at adding a way to de sync the second oscilaor
+    prog_annaloge_side_matrix(16,1) # routes osc1 sin to luma out
     
     # # vertical test
-    # wr_reg('68',int("80000000", 16)) #-- look at adding a way to de sync the second oscilaor
-    # prog_annaloge_side_matrix(16,1) # routes osc1 sin to luma out
+    wr_reg('68',int("80000000", 16)) #-- look at adding a way to de sync the second oscilaor
+    prog_annaloge_side_matrix(16,1) # routes osc1 sin to luma out
 
     # unsynced test  running slow
-    # wr_reg('68',int("100fffff", 16)) #-- look at adding a way to de sync the second oscilaor
-    # prog_annaloge_side_matrix(16,1) # routes osc1 sin to luma out
+    wr_reg('68',int("100fffff", 16)) #-- look at adding a way to de sync the second oscilaor
+    prog_annaloge_side_matrix(16,1) # routes osc1 sin to luma out
 
     # #test osc changing freq slowly 
     # freq = "40400040"

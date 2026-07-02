@@ -1,3 +1,28 @@
+2/7/2026:
+
+video effects and frame stats are broken
+
+new overlay and pallite stuff is untested
+
+dsm to analoge matrix doent work
+
+delay works
+
+-- any shape stuff that has been deiscivered by debug
+
+-- add control for the counter pix clock devider, so the lines can get more and less chunky --- it creates an odd 3 line smearing, shuld reset oh hs!!
+
+-- add blanking values to blanking video out
+
+-- debug why counters dont seem to run when i change resolution
+
+-- chenging the pixel devision creats vertical offsets
+
+-- te4st luma key!!
+
+
+
+----------------
 check new build:
 
 counters only seem to work at lowest res? are they not reset on a format change or clock loss?
