@@ -2,7 +2,9 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
--- Final-stage pixel video effects (controlled via video_fx_ctrl register).
+-- Pipeline (registered stages for timing):
+--   color stage1/2 (+2) -> mirror BRAM (+1) -> logic prev (+1)
+--   -> chromatic (+1) -> sharpness (+3 when enabled, +0 bypass)
 -- video_in / video_out packing: B(23:16) & G(15:8) & R(7:0) — matches spector_wrapper bg path.
 --
 -- video_fx_ctrl bit map:
@@ -89,9 +91,11 @@ architecture rtl of video_effects is
   signal b_out : std_logic_vector(7 downto 0);
 
   signal pixel_proc     : std_logic_vector(23 downto 0);
+  signal pixel_color_s1 : std_logic_vector(23 downto 0);
   signal pixel_mirrored : std_logic_vector(23 downto 0);
   signal pixel_prev     : std_logic_vector(23 downto 0) := (others => '0');
   signal pixel_logic    : std_logic_vector(23 downto 0);
+  signal pixel_logic_r  : std_logic_vector(23 downto 0);
   signal pixel_filtered : std_logic_vector(23 downto 0);
   signal pixel_d1         : std_logic_vector(23 downto 0);
   signal pixel_d2         : std_logic_vector(23 downto 0);
@@ -246,53 +250,77 @@ begin
     end if;
   end process p_sync;
 
-  p_color : process (r_in, g_in, b_in, fx_ctrl_r, fx_bitplane_r, fx_dither_r, x_count)
+  p_color_stage1 : process (clk) is
     variable vr, vg, vb : std_logic_vector(7 downto 0);
     variable packed       : std_logic_vector(23 downto 0);
   begin
-    vr := r_in;
-    vg := g_in;
-    vb := b_in;
+    if rising_edge(clk) then
+      if rst = '1' then
+        pixel_color_s1 <= (others => '0');
+      else
+        vr := r_in;
+        vg := g_in;
+        vb := b_in;
 
-    if fx_ctrl_r(0) = '1' then
-      vr := not vr;
-    end if;
-    if fx_ctrl_r(1) = '1' then
-      vg := not vg;
-    end if;
-    if fx_ctrl_r(2) = '1' then
-      vb := not vb;
-    end if;
+        if fx_ctrl_r(0) = '1' then
+          vr := not vr;
+        end if;
+        if fx_ctrl_r(1) = '1' then
+          vg := not vg;
+        end if;
+        if fx_ctrl_r(2) = '1' then
+          vb := not vb;
+        end if;
 
-    packed := f_apply_swap(vr, vg, vb, fx_ctrl_r(4 downto 3));
-    vb     := packed(23 downto 16);
-    vg     := packed(15 downto 8);
-    vr     := packed(7 downto 0);
+        packed := f_apply_swap(vr, vg, vb, fx_ctrl_r(4 downto 3));
+        vb     := packed(23 downto 16);
+        vg     := packed(15 downto 8);
+        vr     := packed(7 downto 0);
 
-    if fx_ctrl_r(5) = '1' then
-      vr := f_reverse_byte(vr);
-    end if;
-    if fx_ctrl_r(6) = '1' then
-      vg := f_reverse_byte(vg);
-    end if;
-    if fx_ctrl_r(7) = '1' then
-      vb := f_reverse_byte(vb);
-    end if;
+        if fx_ctrl_r(5) = '1' then
+          vr := f_reverse_byte(vr);
+        end if;
+        if fx_ctrl_r(6) = '1' then
+          vg := f_reverse_byte(vg);
+        end if;
+        if fx_ctrl_r(7) = '1' then
+          vb := f_reverse_byte(vb);
+        end if;
 
-    vr := f_bitplane_slice(vr, fx_bitplane_r(3 downto 0));
-    vg := f_bitplane_slice(vg, fx_bitplane_r(7 downto 4));
-    vb := f_bitplane_slice(vb, fx_bitplane_r(11 downto 8));
+        vr := f_bitplane_slice(vr, fx_bitplane_r(3 downto 0));
+        vg := f_bitplane_slice(vg, fx_bitplane_r(7 downto 4));
+        vb := f_bitplane_slice(vb, fx_bitplane_r(11 downto 8));
 
-    if fx_dither_r(0) = '1' then
-      vr := f_horiz_dither(vr, x_count(1 downto 0), fx_dither_r(2 downto 1));
-      vg := f_horiz_dither(vg, x_count(1 downto 0), fx_dither_r(2 downto 1));
-      vb := f_horiz_dither(vb, x_count(1 downto 0), fx_dither_r(2 downto 1));
+        pixel_color_s1 <= vb & vg & vr;
+      end if;
     end if;
+  end process p_color_stage1;
 
-    r_out <= vr;
-    g_out <= vg;
-    b_out <= vb;
-  end process p_color;
+  p_color_stage2 : process (clk) is
+    variable vr, vg, vb : std_logic_vector(7 downto 0);
+  begin
+    if rising_edge(clk) then
+      if rst = '1' then
+        r_out <= (others => '0');
+        g_out <= (others => '0');
+        b_out <= (others => '0');
+      else
+        vr := pixel_color_s1(7 downto 0);
+        vg := pixel_color_s1(15 downto 8);
+        vb := pixel_color_s1(23 downto 16);
+
+        if fx_dither_r(0) = '1' then
+          vr := f_horiz_dither(vr, x_count(1 downto 0), fx_dither_r(2 downto 1));
+          vg := f_horiz_dither(vg, x_count(1 downto 0), fx_dither_r(2 downto 1));
+          vb := f_horiz_dither(vb, x_count(1 downto 0), fx_dither_r(2 downto 1));
+        end if;
+
+        r_out <= vr;
+        g_out <= vg;
+        b_out <= vb;
+      end if;
+    end if;
+  end process p_color_stage2;
 
   pixel_proc <= b_out & g_out & r_out;
 
@@ -329,9 +357,20 @@ begin
 
   pixel_logic <= f_logic_prev(pixel_mirrored, pixel_prev, fx_ctrl_r(12 downto 11));
 
-  r_post_logic <= pixel_logic(7 downto 0);
-  g_post_logic <= pixel_logic(15 downto 8);
-  b_post_logic <= pixel_logic(23 downto 16);
+  p_logic_reg : process (clk) is
+  begin
+    if rising_edge(clk) then
+      if rst = '1' then
+        pixel_logic_r <= (others => '0');
+      else
+        pixel_logic_r <= pixel_logic;
+      end if;
+    end if;
+  end process p_logic_reg;
+
+  r_post_logic <= pixel_logic_r(7 downto 0);
+  g_post_logic <= pixel_logic_r(15 downto 8);
+  b_post_logic <= pixel_logic_r(23 downto 16);
 
   chromatic_inst : entity work.chromatic_abrasion_effect
     port map (

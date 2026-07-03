@@ -126,7 +126,7 @@ begin
   cy_pixel <= "0000" & pos_v;
   h_sync_n <= not h_sync;
   v_sync_n <= not v_sync;
-  rst_n <= not rst;
+  rst_n <= rst; -- incoming reset is already inverted so just change its name
 
   process (clk)
   begin
@@ -165,7 +165,7 @@ begin
     (
       i_clk        => clk,
       i_rstb       => rst_n,
-      i_sync_reset => h_sync_n, -- is one when video is active 0 other wise that means that the ramp restarts at each line
+      i_sync_reset => h_sync, -- is one when video is active 0 other wise that means that the ramp restarts at each line
       i_enable     => '1',
       i_repeat     => '1',
       i_fcw        => zoom_h(8 downto 0),
@@ -177,7 +177,7 @@ begin
     (
       i_clk        => clk,
       i_rstb       => rst_n,
-      i_sync_reset => v_sync_n, -- is one when video is active 0 other wise that means that the ramp restarts at frame 
+      i_sync_reset => v_sync, -- is one when video is active 0 other wise that means that the ramp restarts at frame 
       i_enable     => vramp_en,
       i_repeat     => '1',
       i_fcw        => zoom_v(8 downto 0),
