@@ -194,7 +194,6 @@ architecture Behavioral of analog_side is
   
   signal dsm_lo_i_padded       :  std_logic_vector(11 downto 0);
   signal dsm_hi_i_padded       :  std_logic_vector(11 downto 0);
-  signal dsm_lo_i_slew         :  std_logic_vector(11 downto 0); -- lpf version of the incoming square wave
   signal dsm_lo_i_att          :  std_logic_vector(11 downto 0);
   signal dsm_hi_i_att          :  std_logic_vector(11 downto 0);
   
@@ -209,7 +208,6 @@ architecture Behavioral of analog_side is
   attribute MARK_DEBUG of outputs : signal is "TRUE";
   
   attribute MARK_DEBUG of dsm_lo_i_padded : signal is "TRUE";
-  attribute MARK_DEBUG of dsm_lo_i_slew : signal is "TRUE";
   attribute MARK_DEBUG of dsm_lo_i_att : signal is "TRUE";
 
 
@@ -293,7 +291,8 @@ begin
   mixer_inputs(7)  <= audio_in_b  & "00";
   mixer_inputs(8)  <= audio_in_sig & "00";
   
-  dsm_hi_i_padded <= dsm_hi_i     & "00";
+  -- dsm_hi: matrix out 34, unfiltered. dsm_lo: matrix out 35, LPF in spector_wrapper.
+  dsm_hi_i_padded <= dsm_hi_i & "00";
   dsm_hi_att : entity work.AlphaBlend
         port map (
                 clk => clk,
@@ -303,29 +302,12 @@ begin
                   result => dsm_hi_i_att);
   mixer_inputs(9)  <= dsm_hi_i_att;       
   
-  -- This input form the digital matrix has a lpf on it
-   dsm_lo_i_padded <= dsm_lo_i     & "00";
-    
---   slew_dsm_lo : entity work.moving_average -- may have to tune this delta value
---       generic map (
---        G_NBIT => 12,
---        G_MAX_DELTA => 50
---       )
---       port map (
---        i_clk => clk,
---        i_rstb => rst,
---        i_sync_reset => rst,
---        i_data_ena => '1',
---        i_data => dsm_lo_i_padded,
---        o_data_valid => open,
---        o_data => dsm_lo_i_slew
---       );
-dsm_lo_i_slew <= dsm_lo_i_padded; -- does this get dsm lo working!?
-  
+  dsm_lo_i_padded <= dsm_lo_i & "00";
+
   dsm_lo_att : entity work.AlphaBlend
         port map (
                 clk => clk,
-                signal1 => dsm_lo_i_slew,
+                signal1 => dsm_lo_i_padded,
                   signal2 => c_zero_12,
                   alpha => dsm_lo_alpha,
                   result => dsm_lo_i_att);
@@ -403,15 +385,15 @@ dsm_lo_i_slew <= dsm_lo_i_padded; -- does this get dsm lo working!?
   port map(
   clk => clk,
   A => outputs(9),
-  B => zoom_v_2,
-  SUM => mixed_zoom_h_2
+  B => pos_v_2,
+  SUM => mixed_pos_v_2
   );
   zoom_h_2_mix : entity work.AdderSub_12bit_Clamp 
   port map(
   clk => clk,
   A => outputs(10),
   B => zoom_h_2,
-  SUM => mixed_pos_v_2
+  SUM => mixed_zoom_h_2
   );
   zoom_v_2_mix : entity work.AdderSub_12bit_Clamp 
   port map(

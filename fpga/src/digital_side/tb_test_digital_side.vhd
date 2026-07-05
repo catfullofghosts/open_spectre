@@ -67,6 +67,7 @@ begin
       h_sync         => h_sync,
       v_sync         => v_sync,
       pix_clk        => clk_25_in,
+      line_clk       => h_sync,
       rst            => rst,
       YCRCB          => YCRCB,
       matrix_in_addr => matrix_in_addr,
@@ -74,7 +75,8 @@ begin
       matrix_mask_in => matrix_mask_in,
       invert_matrix  => invert_matrix,
       ext_vid_in     => ext_vid_in,
-      vid_span       => vid_span
+      vid_span       => vid_span,
+      edge_width     => "01"
     );
 
   clk_process : process

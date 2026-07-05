@@ -117,8 +117,9 @@ entity cpu_reg_wrapper is
     cb_level       : out std_logic_vector(11 downto 0);
     video_active_o : out std_logic;
     -- Pixel clock and video input control
-    pix_clk_div_sel     : out std_logic; -- 0 = /2, 1 = /4 for pix_clk_en
+    pix_clk_div_sel     : out std_logic; -- 0 = /2, 1 = /4 for X and Y digital counters
     ext_vid_in_mux_sel  : out std_logic; -- 0 = luma calc, 1 = y_out
+    edge_width_sel      : out std_logic_vector(1 downto 0);
     -- Luma key control
     luma_key_enable     : out std_logic;
     luma_key_direction  : out std_logic; -- 0 = key < threshold, 1 = key > threshold
@@ -221,6 +222,7 @@ architecture rtl of cpu_reg_wrapper is
   -- Pixel clock and video input control
   signal  i_pix_clk_div_sel    : std_logic;
   signal  i_ext_vid_in_mux_sel  : std_logic;
+  signal  i_edge_width_sel      : std_logic_vector(1 downto 0);
   -- Luma key control
   signal  i_luma_key_enable     : std_logic;
   signal  i_luma_key_direction  : std_logic;
@@ -329,6 +331,7 @@ begin
       video_active_o      => i_video_active_o,
       pix_clk_div_sel     => i_pix_clk_div_sel,
       ext_vid_in_mux_sel  => i_ext_vid_in_mux_sel,
+      edge_width_sel      => i_edge_width_sel,
       luma_key_enable     => i_luma_key_enable,
       luma_key_direction  => i_luma_key_direction,
       luma_key_thresh_low => i_luma_key_thresh_low,
@@ -417,6 +420,7 @@ begin
       video_active_o      <= i_video_active_o;
       pix_clk_div_sel     <= i_pix_clk_div_sel;
       ext_vid_in_mux_sel  <= i_ext_vid_in_mux_sel;
+      edge_width_sel      <= i_edge_width_sel;
       luma_key_enable     <= i_luma_key_enable;
       luma_key_direction  <= i_luma_key_direction;
       luma_key_thresh_low <= i_luma_key_thresh_low;

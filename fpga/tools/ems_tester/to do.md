@@ -4,22 +4,23 @@ video effects and frame stats are broken
 
 new overlay and pallite stuff is untested
 
-dsm to analoge matrix doent work
+dsm to analoge matrix doent work <- check in next build>
 
 delay works
 
--- any shape stuff that has been deiscivered by debug
+-- any shape stuff that has been deiscivered by debug ,- should be fixed now
 
--- add control for the counter pix clock devider, so the lines can get more and less chunky --- it creates an odd 3 line smearing, shuld reset oh hs!!
+-- add control for the counter pix clock devider, so the lines can get more and less chunky --- it creates an odd 3 line smearing, shuld reset oh hs!! <- check next build >
 
 -- add blanking values to blanking video out
 
 -- debug why counters dont seem to run when i change resolution
 
--- chenging the pixel devision creats vertical offsets
+-- chenging the pixel devision creats vertical offsets <- check in nect buiuld>
 
 -- te4st luma key!!
 
+check app changes to slider order work as well as number box to set value
 
 
 ----------------

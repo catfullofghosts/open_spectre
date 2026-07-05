@@ -578,11 +578,40 @@ class SpinBoxEnterFilter(QObject):
 
 class RegisterControlWidget(QWidget):
     """Widget for controlling registers with sliders and number boxes"""
+    SHAPE_SLIDER_MAX = 1000
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.registers = {}
         self.register_values = {}  # Track current value of each register address: {addr: value}
         self.init_ui()
+
+    def _track_register(self, addr, name, bits, bit_offset, reg_widget):
+        self.registers[name] = {
+            'addr': addr,
+            'bits': bits,
+            'bit_offset': bit_offset,
+            'widget': reg_widget,
+        }
+        if addr.startswith('0x') or addr.startswith('0X'):
+            offset = addr[2:]
+        else:
+            offset = addr
+        full_addr = f"0x400000{offset}"
+        if full_addr not in self.register_values:
+            self.register_values[full_addr] = 0
+
+    def _add_section(self, scroll_layout, title, register_defs):
+        section = QGroupBox(title)
+        section_layout = QVBoxLayout(section)
+        for reg_def in register_defs:
+            addr, name, label, bits, min_val, max_val, bit_offset = reg_def
+            reg_widget = self.create_register_control(
+                addr, name, label, bits, min_val, max_val, bit_offset
+            )
+            section_layout.addWidget(reg_widget)
+            self._track_register(addr, name, bits, bit_offset, reg_widget)
+        scroll_layout.addWidget(section)
         
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -592,122 +621,92 @@ class RegisterControlWidget(QWidget):
         scroll.setWidgetResizable(True)
         scroll_widget = QWidget()
         scroll_layout = QVBoxLayout(scroll_widget)
-        
-        # Register definitions from digital_reg_file.vhd (starting from 0x24)
-        register_defs = [
-            # Video Span (0x24)
-            ("0x24", "vid_span", "Video Span", 8, 0, 255, 0),  # bits 7:0
-            
-            # Shape Gen 1 & 2 (0x38-0x54) - each register has two 12-bit fields
-            ("0x38", "pos_h_1", "Shape Gen 1 - Position H", 12, 0, 4095, 0),
-            ("0x38", "pos_h_2", "Shape Gen 2 - Position H", 12, 0, 4095, 16),
-            ("0x3C", "pos_v_1", "Shape Gen 1 - Position V", 12, 0, 4095, 0),
-            ("0x3C", "pos_v_2", "Shape Gen 2 - Position V", 12, 0, 4095, 16),
-            ("0x40", "zoom_h_1", "Shape Gen 1 - Zoom H", 12, 0, 4095, 0),
-            ("0x40", "zoom_h_2", "Shape Gen 2 - Zoom H", 12, 0, 4095, 16),
-            ("0x44", "zoom_v_1", "Shape Gen 1 - Zoom V", 12, 0, 4095, 0),
-            ("0x44", "zoom_v_2", "Shape Gen 2 - Zoom V", 12, 0, 4095, 16),
-            ("0x48", "circle_1", "Shape Gen 1 - Circle", 12, 0, 4095, 0),
-            ("0x48", "circle_2", "Shape Gen 2 - Circle", 12, 0, 4095, 16),
-            ("0x4C", "gear_1", "Shape Gen 1 - Gear", 12, 0, 4095, 0),
-            ("0x4C", "gear_2", "Shape Gen 2 - Gear", 12, 0, 4095, 16),
-            ("0x50", "lantern_1", "Shape Gen 1 - Lantern", 12, 0, 4095, 0),
-            ("0x50", "lantern_2", "Shape Gen 2 - Lantern", 12, 0, 4095, 16),
-            ("0x54", "fizz_1", "Shape Gen 1 - Fizz", 12, 0, 4095, 0),
-            ("0x54", "fizz_2", "Shape Gen 2 - Fizz", 12, 0, 4095, 16),
-            
-            # Random Gen (0x60, 0x64)
-            ("0x60", "noise_freq", "Noise Frequency", 14, 0, 16383, 0),  # bits 13:0
-            ("0x60", "slew_in", "Slew In", 3, 0, 7, 17),  # bits 19:17
-            ("0x60", "slowdown_sel", "Slowdown Select", 2, 0, 3, 28),  # bits 29:28
-            ("0x64", "cycle_recycle", "Cycle Recycle", 1, 0, 1, 0),  # bit 0
-            ("0x64", "noise_rst", "Noise Reset", 1, 0, 1, 1),  # bit 1
-            
-            # OSC 1 (0x68)
-            ("0x68", "osc_1_freq", "OSC 1 Frequency", 14, 0, 16383, 0),
-            ("0x68", "osc_1_derv", "OSC 1 Derivative", 8, 0, 255, 16),
-            ("0x68", "sync_sel_osc1", "OSC 1 Sync Select", 2, 0, 3, 30),
-            ("0x68", "speed1", "OSC 1 Speed", 1, 0, 1, 28),
-            
-            # OSC 2 (0x6C)
-            ("0x6C", "osc_2_freq", "OSC 2 Frequency", 14, 0, 16383, 0),
-            ("0x6C", "osc_2_derv", "OSC 2 Derivative", 8, 0, 255, 16),
-            ("0x6C", "sync_sel_osc2", "OSC 2 Sync Select", 2, 0, 3, 30),
-            ("0x6C", "speed2", "OSC 2 Speed", 1, 0, 1, 28),
-            
-            # OSC 1 PWM & Wave Select (0x70)
-            ("0x70", "osc_1_pwm_duty", "OSC 1 PWM Duty", 9, 0, 511, 0),  # bits 8:0
-            ("0x70", "osc_1_wave_sel", "OSC 1 Wave Select", 2, 0, 3, 10),  # bits 11:10
-            
-            # OSC 2 PWM & Wave Select (0x74)
-            ("0x74", "osc_2_pwm_duty", "OSC 2 PWM Duty", 9, 0, 511, 0),  # bits 8:0
-            ("0x74", "osc_2_wave_sel", "OSC 2 Wave Select", 2, 0, 3, 10),  # bits 11:10
-            
-            # YUV Levels (0x58, 0x5C)
-            ("0x58", "y_level", "Y Level", 12, 0, 4095, 0),  # bits 11:0
-            ("0x58", "cr_level", "Cr Level", 12, 0, 4095, 16),  # bits 27:16
-            ("0x5C", "cb_level", "Cb Level", 12, 0, 4095, 0),  # bits 11:0
-            
-            # Video Control (0x78)
+
+        shape_max = self.SHAPE_SLIDER_MAX
+        shape1_defs = [
+            ("0x38", "pos_h_1", "Position H", 12, 0, shape_max, 0),
+            ("0x3C", "pos_v_1", "Position V", 12, 0, shape_max, 0),
+            ("0x40", "zoom_h_1", "Zoom H", 12, 0, shape_max, 0),
+            ("0x44", "zoom_v_1", "Zoom V", 12, 0, shape_max, 0),
+            ("0x48", "circle_1", "Circle", 12, 0, shape_max, 0),
+            ("0x4C", "gear_1", "Gear", 12, 0, shape_max, 0),
+            ("0x50", "lantern_1", "Lantern", 12, 0, shape_max, 0),
+            ("0x54", "fizz_1", "Fizz", 12, 0, shape_max, 0),
+            ("0xE0", "shape1_a_sel", "Shape A Select", 4, 0, 15, 0),
+            ("0xE0", "shape1_b_sel", "Shape B Select", 4, 0, 15, 4),
+        ]
+        shape2_defs = [
+            ("0x38", "pos_h_2", "Position H", 12, 0, shape_max, 16),
+            ("0x3C", "pos_v_2", "Position V", 12, 0, shape_max, 16),
+            ("0x40", "zoom_h_2", "Zoom H", 12, 0, shape_max, 16),
+            ("0x44", "zoom_v_2", "Zoom V", 12, 0, shape_max, 16),
+            ("0x48", "circle_2", "Circle", 12, 0, shape_max, 16),
+            ("0x4C", "gear_2", "Gear", 12, 0, shape_max, 16),
+            ("0x50", "lantern_2", "Lantern", 12, 0, shape_max, 16),
+            ("0x54", "fizz_2", "Fizz", 12, 0, shape_max, 16),
+            ("0xE0", "shape2_a_sel", "Shape A Select", 4, 0, 15, 8),
+            ("0xE0", "shape2_b_sel", "Shape B Select", 4, 0, 15, 12),
+        ]
+        osc1_defs = [
+            ("0x68", "osc_1_freq", "Frequency", 14, 0, 16383, 0),
+            ("0x68", "osc_1_derv", "Derivative", 8, 0, 255, 16),
+            ("0x68", "sync_sel_osc1", "Sync Select", 2, 0, 3, 30),
+            ("0x68", "speed1", "Speed", 1, 0, 1, 28),
+            ("0x70", "osc_1_pwm_duty", "PWM Duty", 9, 0, 511, 0),
+            ("0x70", "osc_1_wave_sel", "Wave Select", 2, 0, 3, 10),
+            ("0xCC", "osc1_alpha", "Alpha", 12, 0, 4095, 0),
+        ]
+        osc2_defs = [
+            ("0x6C", "osc_2_freq", "Frequency", 14, 0, 16383, 0),
+            ("0x6C", "osc_2_derv", "Derivative", 8, 0, 255, 16),
+            ("0x6C", "sync_sel_osc2", "Sync Select", 2, 0, 3, 30),
+            ("0x6C", "speed2", "Speed", 1, 0, 1, 28),
+            ("0x74", "osc_2_pwm_duty", "PWM Duty", 9, 0, 511, 0),
+            ("0x74", "osc_2_wave_sel", "Wave Select", 2, 0, 3, 10),
+            ("0xD0", "osc2_alpha", "Alpha", 12, 0, 4095, 0),
+        ]
+        other_defs = [
+            ("0x24", "vid_span", "Video Span", 8, 0, 255, 0),
+            ("0x60", "noise_freq", "Noise Frequency", 14, 0, 16383, 0),
+            ("0x60", "slew_in", "Slew In", 3, 0, 7, 17),
+            ("0x60", "slowdown_sel", "Slowdown Select", 2, 0, 3, 28),
+            ("0x64", "cycle_recycle", "Cycle Recycle", 1, 0, 1, 0),
+            ("0x64", "noise_rst", "Noise Reset", 1, 0, 1, 1),
+            ("0x58", "y_level", "Y Level", 12, 0, 4095, 0),
+            ("0x58", "cr_level", "Cr Level", 12, 0, 4095, 16),
+            ("0x5C", "cb_level", "Cb Level", 12, 0, 4095, 0),
             ("0x78", "video_active", "Video Active", 1, 0, 1, 0),
             ("0x78", "col_en_bypass", "Color Enable Bypass", 1, 0, 1, 1),
-            ("0x78", "pix_clk_div_sel", "Pixel Clock Div Select", 1, 0, 1, 2),
+            ("0x78", "pix_clk_div_sel", "Pixel/Line Div Select (/2 or /4)", 1, 0, 1, 2),
             ("0x78", "ext_vid_in_mux_sel", "External Video In Mux Select", 1, 0, 1, 3),
-            
-            # Luma Key (0xC8)
+            ("0x78", "edge_width_sel", "Edge Detect Width (2/4/6/8 px)", 2, 0, 3, 4),
             ("0xC8", "luma_key_enable", "Luma Key Enable", 1, 0, 1, 31),
             ("0xC8", "luma_key_direction", "Luma Key Direction", 1, 0, 1, 30),
-            ("0xC8", "luma_key_thresh_high", "Luma Key Threshold High", 8, 0, 255, 8),  # bits 15:8
-            ("0xC8", "luma_key_thresh_low", "Luma Key Threshold Low", 8, 0, 255, 0),  # bits 7:0
-            
-            # Alpha Controls (0xCC-0xDC)
-            ("0xCC", "osc1_alpha", "OSC 1 Alpha", 12, 0, 4095, 0),  # bits 11:0
-            ("0xD0", "osc2_alpha", "OSC 2 Alpha", 12, 0, 4095, 0),  # bits 11:0
-            ("0xD4", "dsm_hi_alpha", "DSM High Alpha", 12, 0, 4095, 0),  # bits 11:0
-            ("0xD8", "dsm_lo_alpha", "DSM Low Alpha", 12, 0, 4095, 0),  # bits 11:0
-            ("0xDC", "noise_alpha", "Noise Alpha", 12, 0, 4095, 0),  # bits 11:0
-            
-            # Shape Select Controls (0xE0) - all 4 fields in one register
-            ("0xE0", "shape1_a_sel", "Shape 1 A Select", 4, 0, 15, 0),   # bits 3:0
-            ("0xE0", "shape1_b_sel", "Shape 1 B Select", 4, 0, 15, 4),   # bits 7:4
-            ("0xE0", "shape2_a_sel", "Shape 2 A Select", 4, 0, 15, 8),   # bits 11:8
-            ("0xE0", "shape2_b_sel", "Shape 2 B Select", 4, 0, 15, 12),  # bits 15:12
+            ("0xC8", "luma_key_thresh_high", "Luma Key Threshold High", 8, 0, 255, 8),
+            ("0xC8", "luma_key_thresh_low", "Luma Key Threshold Low", 8, 0, 255, 0),
+            ("0xD4", "dsm_hi_alpha", "DSM High Alpha", 12, 0, 4095, 0),
+            ("0xD8", "dsm_lo_alpha", "DSM Low Alpha", 12, 0, 4095, 0),
+            ("0xDC", "noise_alpha", "Noise Alpha", 12, 0, 4095, 0),
         ]
-        
-        # Create controls for each register
-        for reg_def in register_defs:
-            addr, name, label, bits, min_val, max_val, bit_offset = reg_def
-            
-            reg_widget = self.create_register_control(addr, name, label, bits, min_val, max_val, bit_offset)
-            scroll_layout.addWidget(reg_widget)
-            self.registers[name] = {
-                'addr': addr,
-                'bits': bits,
-                'bit_offset': bit_offset,
-                'widget': reg_widget
-            }
-            
-            # Initialize register value tracking (full address as key)
-            if addr.startswith('0x') or addr.startswith('0X'):
-                offset = addr[2:]
-            else:
-                offset = addr
-            full_addr = f"0x400000{offset}"
-            if full_addr not in self.register_values:
-                self.register_values[full_addr] = 0  # Initialize to 0
+
+        self._add_section(scroll_layout, "Shape Gen 1", shape1_defs)
+        self._add_section(scroll_layout, "Shape Gen 2", shape2_defs)
+        self._add_section(scroll_layout, "OSC 1", osc1_defs)
+        self._add_section(scroll_layout, "OSC 2", osc2_defs)
+        self._add_section(scroll_layout, "Other Controls", other_defs)
         
         scroll_layout.addStretch()
         scroll.setWidget(scroll_widget)
         layout.addWidget(scroll)
         
     def create_register_control(self, addr, name, label, bits, min_val, max_val, bit_offset=0):
-        """Create a widget with label, slider, and number box for a register"""
-        group = QGroupBox(f"{label} ({addr})")
-        layout = QHBoxLayout(group)
-        
-        # Label
-        label_widget = QLabel(f"{label}:")
-        label_widget.setMinimumWidth(200)
+        """Create a row with label, slider, and number box for a register field."""
+        row = QWidget()
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        label_widget = QLabel(f"{label} ({addr}):")
+        label_widget.setMinimumWidth(180)
         layout.addWidget(label_widget)
         
         # Slider
@@ -750,20 +749,32 @@ class RegisterControlWidget(QWidget):
         
         slider.valueChanged.connect(update_number_box)
         slider.sliderReleased.connect(lambda s=slider: self.on_slider_released(s))
-        
-        # Only update slider from number box, don't trigger writes
+
+        # Sync slider from spinbox while typing; commit + write on Enter only
         number_box.valueChanged.connect(update_slider)
-        
-        # Install event filter to catch Enter key presses
-        enter_filter = SpinBoxEnterFilter(lambda n=number_box: self.on_number_box_enter(n))
+        number_box.lineEdit().returnPressed.connect(
+            lambda nb=number_box: self.on_spinbox_commit(nb)
+        )
+        enter_filter = SpinBoxEnterFilter(
+            lambda nb=number_box: self.on_spinbox_commit(nb)
+        )
         number_box.installEventFilter(enter_filter)
         
         layout.addWidget(slider)
         layout.addWidget(number_box)
         layout.addStretch()
-        
-        return group
+
+        return row
     
+    def on_spinbox_commit(self, number_box):
+        """Commit typed value and write register (same as slider release)."""
+        number_box.interpretText()
+        slider = number_box.slider
+        slider.blockSignals(True)
+        slider.setValue(number_box.value())
+        slider.blockSignals(False)
+        self.on_slider_released(slider)
+
     def on_slider_released(self, slider):
         """Handle slider release - send register write command"""
         print(f"[Register Control] Slider released: {slider.reg_name}")
@@ -817,61 +828,6 @@ class RegisterControlWidget(QWidget):
         except Exception as e:
             if parent:
                 parent.log_text.append(f"Register write error ({slider.reg_name}): {str(e)}")
-                QMessageBox.critical(self, "Error", f"Failed to write register: {str(e)}")
-    
-    def on_number_box_enter(self, number_box):
-        """Handle Enter key in number box - send register write command"""
-        print(f"[Register Control] Number box Enter pressed: {number_box.reg_name}")
-        parent = self.parent()
-        while parent and not isinstance(parent, XSDBGUIApp):
-            parent = parent.parent()
-        
-        if not parent or not parent.connected or not parent.xsct:
-            QMessageBox.warning(self, "Warning", "Not connected to XSDB")
-            return
-        
-        try:
-            value = number_box.value()
-            addr = number_box.reg_addr
-            bits = number_box.reg_bits
-            bit_offset = number_box.reg_bit_offset
-            print(f"[Register Control] Writing {number_box.reg_name}: value={value}, addr={addr}, bits={bits}, bit_offset={bit_offset}")
-            
-            # Construct full address: 0x400000{offset}
-            if addr.startswith('0x') or addr.startswith('0X'):
-                offset = addr[2:]
-            else:
-                offset = addr
-            full_addr = f"0x400000{offset}"
-            
-            # Get current tracked value for this register (not from hardware)
-            current_val = self.register_values.get(full_addr, 0)
-            
-            # Create mask for the bits we're updating
-            mask = ((1 << bits) - 1) << bit_offset
-            # Clear the bits we're updating
-            new_val = current_val & ~mask
-            # Set the new bits
-            new_val = new_val | ((value & ((1 << bits) - 1)) << bit_offset)
-            
-            # Update tracked value
-            self.register_values[full_addr] = new_val
-            
-            # Write the full register value to hardware
-            command = f"mwr -force {full_addr} {hex(new_val)}"
-            print(f"[Register Control] {command}")  # Print to terminal
-            if bit_offset == 0 and bits == 32:
-                print(f"[Register Control] Writing full register {full_addr} = {hex(new_val)}")
-            else:
-                print(f"[Register Control] Updated field {number_box.reg_name} = {value} (bits {bit_offset+bits-1}:{bit_offset}), full register value: {hex(new_val)}")
-            
-            parent.xsct.do(command)
-            parent.log_text.append(f"[Number Box] Wrote {number_box.reg_name} = {value} to {full_addr} (full value: {hex(new_val)})")
-            QApplication.processEvents()  # Update UI
-                
-        except Exception as e:
-            if parent:
-                parent.log_text.append(f"Register write error ({number_box.reg_name}): {str(e)}")
                 QMessageBox.critical(self, "Error", f"Failed to write register: {str(e)}")
 
 

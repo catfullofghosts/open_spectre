@@ -6,75 +6,72 @@
 --  \____/|_|    |______|_| \_|      |_____/|_|    |______\_____|  |_|  |_|  \_\______|
 --                               ______                                                
 --                              |______|                                               
--- Module Name: 
+-- Module Name: monstable_4
 -- Created: Early 2023
--- Description: 
--- Dependencies: 
+-- Description: Four edge outputs; outs 2/3 are width-stretched rising/falling edges.
+-- Dependencies: edge_detector
 -- Additional Comments: You can view the project here: https://github.com/cfoge/OPEN_SPECTRE-
-
--- created by   :   RD Jordan
 
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 
-
 entity monstable_4 is
-  Port ( 
-        input  : in std_logic;
-        clk  : in std_logic;
-        output : out STD_LOGIC_VECTOR (3 downto 0)
+  port (
+    input      : in  std_logic;
+    clk        : in  std_logic;
+    edge_width : in  std_logic_vector(1 downto 0); -- 00=2px, 01=4px, 10=6px, 11=8px
+    output     : out std_logic_vector(3 downto 0)
   );
 end monstable_4;
 
 architecture Behavioral of monstable_4 is
-signal ed_o0, ed_o1, ed_o2, ed_o3 : std_logic;
-signal ed_o2_d,ed_o2_d2,ed_o2_d3, ed_o3_d,ed_o3_d2,ed_o3_d3, ed_o2_stretch, ed_o3_stretch  : std_logic;
+
+  signal rise_pulse : std_logic;
+  signal fall_pulse : std_logic;
+  signal rise_d     : std_logic_vector(6 downto 0);
+  signal fall_d     : std_logic_vector(6 downto 0);
+
+  function f_stretch (
+    pulse : std_logic;
+    d     : std_logic_vector(6 downto 0);
+    width : std_logic_vector(1 downto 0)
+  ) return std_logic is
+  begin
+    case width is
+      when "00"   => return pulse or d(0);
+      when "01"   => return pulse or d(0) or d(1) or d(2);
+      when "10"   => return pulse or d(0) or d(1) or d(2) or d(3) or d(4);
+      when others => return pulse or d(0) or d(1) or d(2) or d(3) or d(4) or d(5) or d(6);
+    end case;
+  end function f_stretch;
 
 begin
-    ed_1: entity work.edge_detector
-        port map (
-            x => input,
-            clk => clk,
-            rising_edge_O => ed_o0
-        );
-     ed_2: entity work.edge_detector
-        port map (
-            x => input,
-            clk => clk,
-            falling_edge_O => ed_o1
-        );
-     ed_3: entity work.edge_detector
-        port map (
-            x => input,
-            clk => clk,
-            rising_edge_O => ed_o2
-        );
-     ed_4: entity work.edge_detector
-        port map (
-            x => input,
-            clk => clk,
-            falling_edge_O => ed_o3
-        );
-        
-        process(clk) -- edge width stretched 3 clks, does it need to be more?
-        begin
-            if rising_edge(clk) then
-                ed_o2_d <= ed_o2;
-                ed_o2_d2 <= ed_o2_d;
-                ed_o2_d3 <= ed_o2_d2;
-                ed_o3_d <= ed_o3;
-                ed_o3_d2 <= ed_o3_d;
-                ed_o3_d3 <= ed_o3_d2;    
-            end if;    
-        end process;
-        
-        
-        ed_o2_stretch <= ed_o2 or ed_o2_d or ed_o2_d2 or ed_o2_d3;
-        ed_o3_stretch <= ed_o3 or ed_o3_d or ed_o3_d2 or ed_o3_d3;
-        
-        output(0) <= ed_o0;
-        output(1) <= ed_o1;
-        output(2) <=  ed_o2_stretch;
-        output(3) <=  ed_o3_stretch;
+
+  ed_rise : entity work.edge_detector
+    port map (
+      x             => input,
+      clk           => clk,
+      rising_edge_O => rise_pulse
+    );
+
+  ed_fall : entity work.edge_detector
+    port map (
+      x              => input,
+      clk            => clk,
+      falling_edge_O => fall_pulse
+    );
+
+  stretch_delay : process (clk)
+  begin
+    if rising_edge(clk) then
+      rise_d <= rise_pulse & rise_d(6 downto 1);
+      fall_d <= fall_pulse & fall_d(6 downto 1);
+    end if;
+  end process;
+
+  output(0) <= rise_pulse;
+  output(1) <= fall_pulse;
+  output(2) <= f_stretch(rise_pulse, rise_d, edge_width);
+  output(3) <= f_stretch(fall_pulse, fall_d, edge_width);
 
 end Behavioral;

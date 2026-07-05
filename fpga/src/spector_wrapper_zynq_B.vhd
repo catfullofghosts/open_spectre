@@ -49,7 +49,8 @@ architecture rtl of spector_wrapper_zynq is
   -----------------------------------------------------------------
   -- Clocks
 --  signal pix_clk    : std_logic;
-  signal pix_clk_en : std_logic := '0'; -- enable signal (half rate of clk_148_5)
+  signal pix_clk_en  : std_logic := '0'; -- divided pixel enable for X counter
+  signal line_clk_en : std_logic := '0'; -- divided line enable for Y counter
 
   ---------------------------------------------------------------
   -- Video Timing generator
@@ -281,6 +282,7 @@ architecture rtl of spector_wrapper_zynq is
   -- Pixel clock and video input control from CPU registers
   signal pix_clk_div_sel    : std_logic;
   signal ext_vid_in_mux_sel : std_logic;
+  signal edge_width_sel     : std_logic_vector(1 downto 0);
   -- Luma key control
   signal luma_key_enable     : std_logic;
   signal luma_key_direction  : std_logic;
@@ -495,6 +497,7 @@ begin
       video_active_o      => video_active_o,
       pix_clk_div_sel     => pix_clk_div_sel,
       ext_vid_in_mux_sel  => ext_vid_in_mux_sel,
+      edge_width_sel      => edge_width_sel,
       luma_key_enable     => luma_key_enable,
       luma_key_direction  => luma_key_direction,
       luma_key_thresh_low => luma_key_thresh_low,
@@ -558,18 +561,31 @@ begin
   -------------------------------------------
   -- Digital Side
   -------------------------------------------
-  pixel_clk_en_p : process (pix_clk) ---- TEMP FOR NOW NEEDS adjustible so we can pick the aperent resolution of the digital side
+  pixel_clk_en_p : process (pix_clk)
     variable clk_div_counter : unsigned(1 downto 0) := "00";
+    variable line_div_counter : unsigned(1 downto 0) := "00";
+    variable div_sel_d        : std_logic := '0';
+    variable h_sync_d         : std_logic := '0';
+    variable v_sync_d         : std_logic := '0';
   begin
     if rising_edge (pix_clk) then
-      if pix_clk_div_sel = '0' then
-        -- /2 division (original behavior) - toggle every clock
+      -- Re-phase pixel divider at start of each line
+      if h_sync = '1' and h_sync_d = '0' then
+        pix_clk_en <= '0';
+        clk_div_counter := "00";
+      elsif div_sel_d /= pix_clk_div_sel then
+        pix_clk_en <= '0';
+        clk_div_counter := "00";
+        line_clk_en <= '0';
+        line_div_counter := "00";
+      elsif pix_clk_div_sel = '0' then
+        -- /2: one digital pixel every 2 source pixels
         pix_clk_en <= not pix_clk_en;
         clk_div_counter := "00";
       else
-        -- /4 division - toggle every 2 clocks (counter 0 and 2)
+        -- /4: one digital pixel every 4 source pixels
         clk_div_counter := clk_div_counter + 1;
-        if clk_div_counter(0) = '0' then  -- toggle when counter is even (0 or 2)
+        if clk_div_counter(0) = '0' then
           pix_clk_en <= not pix_clk_en;
         end if;
         if clk_div_counter = "11" then
@@ -577,10 +593,34 @@ begin
         end if;
       end if;
 
+      -- Re-phase line divider at start of each frame; step on each hsync edge
+      if v_sync = '1' and v_sync_d = '0' then
+        line_clk_en <= '0';
+        line_div_counter := "00";
+      elsif h_sync = '1' and h_sync_d = '0' then
+        if pix_clk_div_sel = '0' then
+          -- /2: one digital line every 2 video lines
+          line_clk_en <= not line_clk_en;
+          line_div_counter := "00";
+        else
+          -- /4: one digital line every 4 video lines
+          line_div_counter := line_div_counter + 1;
+          if line_div_counter(0) = '0' then
+            line_clk_en <= not line_clk_en;
+          end if;
+          if line_div_counter = "11" then
+            line_div_counter := "00";
+          end if;
+        end if;
+      end if;
+
+      h_sync_d  := h_sync;
+      v_sync_d  := v_sync;
+      div_sel_d := pix_clk_div_sel;
+
       -- Mux for ext_vid_in: select between luma calculation or y_out
       if ext_vid_in_mux_sel = '0' then
         ext_vid_in <= std_logic_vector( ( unsigned(ext_video(23 downto 16)) + unsigned(ext_video(15 downto 8)) + unsigned(ext_video(7 downto 0)) ) /3) ;
-        -- calculate luma of incoming video
       else
         ext_vid_in <= y_out;
       end if;
@@ -594,7 +634,8 @@ begin
       sys_clk        => pix_clk,
       h_sync         => h_sync_n, -- needs delya = to shape gen delay
       v_sync         => v_sync_n, -- needs delya = to shape gen delay
-      pix_clk        => pix_clk_en, -- pixel clk (is actualy enables on every pixel clock)
+      pix_clk        => pix_clk_en,  -- divided pixel enable for X counter
+      line_clk       => line_clk_en, -- divided line enable for Y counter
       rst            => reset_n,
       YCRCB          => YCRCB,
       matrix_in_addr => matrix_in_addr,
@@ -603,6 +644,7 @@ begin
       invert_matrix  => invert_matrix,
       ext_vid_in     => ext_vid_in,
       vid_span       => vid_span,
+      edge_width     => edge_width_sel,
       osc1_sqr       => osc_1_sqr_o,
       osc2_sqr       => osc_2_sqr_o,
       random1        => noise_1_o,
@@ -625,8 +667,30 @@ begin
   -------------------------------------------
   -- Analog Side
   -------------------------------------------
-  dsm_hi_i      <= acm_out1_o & acm_out1_o & acm_out1_o & acm_out1_o & acm_out1_o & acm_out1_o & acm_out1_o & acm_out1_o & acm_out1_o & acm_out1_o; -- this signla from digital side has no slew
-  dsm_lo_nofilt <= acm_out2_o & acm_out2_o & acm_out2_o & acm_out2_o & acm_out2_o & acm_out2_o & acm_out2_o & acm_out2_o & acm_out2_o & acm_out2_o;
+  -- Digital matrix outs 34/35 (acm_out1/acm_out2) -> analog mixer ins 9/10 (dsm_hi/dsm_lo)
+  acm_to_dsm_p : process (pix_clk)
+  begin
+    if rising_edge(pix_clk) then
+      dsm_hi_i      <= (others => acm_out1_o); -- out 34, unfiltered
+      dsm_lo_nofilt <= (others => acm_out2_o); -- out 35, LPF applied below
+    end if;
+  end process;
+
+  dsm_lo_lpf : entity work.moving_average
+    generic map(
+      G_NBIT      => 10,
+      G_MAX_DELTA => 2 -- tune on hardware; larger = faster slew
+    )
+    port map
+    (
+      i_clk        => pix_clk,
+      i_rstb       => reset,       -- active-high reset (legacy port name)
+      i_sync_reset => '0',
+      i_data_ena   => '1',
+      i_data       => dsm_lo_nofilt,
+      o_data_valid => open,
+      o_data       => dsm_lo_i
+    );
 
   -- Pipeline registers for noise and Y/Cr/Cb signals to break combinatorial paths
   noise_pipeline_p : process (pix_clk)
@@ -648,22 +712,6 @@ begin
       v_alpha_reg <= v_alpha;
     end if;
   end process;
-
-  slew_dsm_low : entity work.moving_average -- dsm_low is a slewed version of dsm hi
-    generic map(
-      G_NBIT      => 10,
-      G_MAX_DELTA => 2 -- fine turne with actual x5
-    )
-    port map
-    (
-      i_clk        => pix_clk,
-      i_rstb       => reset,
-      i_sync_reset => reset,
-      i_data_ena   => '1',
-      i_data       => dsm_lo_nofilt,
-      o_data_valid => open,
-      o_data       => dsm_lo_i
-    );
 
   YUV_in <= YCRCB;-- pass the video out from the digital side to the analoge side
 

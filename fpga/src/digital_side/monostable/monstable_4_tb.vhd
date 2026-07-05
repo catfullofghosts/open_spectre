@@ -25,12 +25,14 @@ architecture behavior of monstable_4_tb is
     signal clk : std_logic := '0';
     signal output : STD_LOGIC_VECTOR (3 downto 0);
 
+    signal edge_width : std_logic_vector(1 downto 0) := "00";
 begin
     dut: entity work.monstable_4
         port map (
-            input => input,
-            clk => clk,
-            output => output
+            input      => input,
+            clk        => clk,
+            edge_width => edge_width,
+            output     => output
         );
 
     -- Clock generation process

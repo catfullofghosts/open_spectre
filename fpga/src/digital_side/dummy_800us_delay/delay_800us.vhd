@@ -8,8 +8,8 @@
 --                              |______|                                               
 -- Module Name: delay_800us
 -- Description: BRAM-backed circular delay line for the digital matrix feedback path.
---              Default depth targets ~800 us when sampled at pix_clk/2 (74.25 MHz).
---              depth = delay_seconds * sample_rate  (e.g. 800e-6 * 74.25e6 = 59_400)
+--              Default depth targets ~400 us when sampled at full pixel clock (148.5 MHz).
+--              depth = delay_seconds * sample_rate  (e.g. 400e-6 * 148.5e6 = 59_400)
 --
 -- Additional Comments: https://github.com/cfoge/OPEN_SPECTRE
 
@@ -20,7 +20,7 @@ use ieee.numeric_std.all;
 entity delay_800us is
   generic (
     g_WIDTH : positive := 2;
-    g_DEPTH : positive := 59400  -- ~800 us @ 74.25 MHz (148.5 MHz pixel clk / 2)
+    g_DEPTH : positive := 59400  -- ~400 us @ 148.5 MHz full pixel clock
   );
   port (
     i_rst_sync : in std_logic;

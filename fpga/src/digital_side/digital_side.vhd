@@ -29,7 +29,8 @@ entity digital_side is
     sys_clk   : in std_logic;
     h_sync      : in std_logic; -- Hsync
     v_sync       : in std_logic; -- Vsync
-    pix_clk : in std_logic; -- pixel clk (is actualy enables on every pixel clock)
+    pix_clk  : in std_logic; -- divided pixel enable for X counter
+    line_clk : in std_logic; -- divided line enable for Y counter
     rst       : in std_logic;
     YCRCB   : out std_logic_vector (23 downto 0);
 
@@ -40,6 +41,7 @@ entity digital_side is
     invert_matrix  : in std_logic_vector(63 downto 0); --inverts a matrix input globaly
     ext_vid_in     : in std_logic_vector(7 downto 0);
     vid_span       : in std_logic_vector(7 downto 0);
+    edge_width     : in std_logic_vector(1 downto 0); -- 00=2px, 01=4px, 10=6px, 11=8px
 
     -- inputs form analoge side
     osc1_sqr : in std_logic :='0';
@@ -138,8 +140,11 @@ architecture Behavioral of digital_side is
   signal B  : std_logic_vector(7 downto 0);
   --External signals
   signal pix_clk_d      : std_logic;
-  signal pix_clk_d2      : std_logic;
+  signal pix_clk_d2     : std_logic;
   signal pix_clk_i      : std_logic;
+  signal line_clk_d     : std_logic;
+  signal line_clk_d2    : std_logic;
+  signal line_clk_i     : std_logic;
   signal h_sync_d      : std_logic;
   signal h_sync_d2      : std_logic;
   signal h_sync_i      : std_logic;
@@ -190,6 +195,10 @@ cdc_pix_100 : process(clk)
         pix_clk_d <= pix_clk;
         pix_clk_d2 <= pix_clk_d;
         pix_clk_i <= pix_clk_d2;
+
+        line_clk_d <= line_clk;
+        line_clk_d2 <= line_clk_d;
+        line_clk_i <= line_clk_d2;
         
         v_sync_d <= v_sync;
         v_sync_d2 <= v_sync_d;
@@ -219,7 +228,7 @@ cdc_pix_100 : process(clk)
     map (
     clk    => clk, 
     rst    => v_sync_i, --vsync reset to stop rolling
-    counter_up => h_sync_i,
+    counter_up => line_clk_i,
     count  => y_count_low_hi
     );
 
@@ -266,15 +275,16 @@ cdc_pix_100 : process(clk)
   edge : entity work.monstable_4
     port
     map(
-    input  => edge_detector_in,
-    clk    => clk,
-    output => edge_detector_out
+    input      => edge_detector_in,
+    clk        => clk,
+    edge_width => edge_width,
+    output     => edge_detector_out
     );
 
   delay_in_vec <= '0' & delay_in;
   delay_out       <= delay_out_vec(0);
   
-  delay_800 : entity work.delay_800us -- BRAM delay ~800 us at pix_clk/2 (74.25 MHz sample rate)
+  delay_800 : entity work.delay_800us -- BRAM delay sampled at full pixel clock
     generic
     map(
     g_WIDTH => 2,
@@ -285,13 +295,11 @@ cdc_pix_100 : process(clk)
     i_rst_sync => rst,
     i_clk      => clk,
 
-    -- FIFO Write Interface
-    i_wr_en   => pix_clk_i, --'1',
+    i_wr_en   => '1',
     i_wr_data => delay_in_vec,
     o_full    => open,
 
-    -- FIFO Read Interface
-    i_rd_en   => pix_clk_i,--'1',
+    i_rd_en   => '1',
     o_rd_data => delay_out_vec,
     o_empty   => open
 

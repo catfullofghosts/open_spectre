@@ -128,8 +128,9 @@ entity digital_reg_file is
     cb_level       : out std_logic_vector(11 downto 0);
     video_active_O : out std_logic;
     -- Pixel clock and video input control
-    pix_clk_div_sel     : out std_logic; -- 0 = /2, 1 = /4 for pix_clk_en
+    pix_clk_div_sel     : out std_logic; -- 0 = /2, 1 = /4 for X and Y digital counters
     ext_vid_in_mux_sel  : out std_logic; -- 0 = luma calc, 1 = y_out
+    edge_width_sel      : out std_logic_vector(1 downto 0); -- edge stretch: 00=2px 01=4px 10=6px 11=8px
     -- Luma key control
     luma_key_enable     : out std_logic;
     luma_key_direction  : out std_logic; -- 0 = key < threshold, 1 = key > threshold
@@ -284,6 +285,7 @@ architecture RTL of digital_reg_file is
   -- Pixel clock and video input control
   signal pix_clk_div_sel_i    : std_logic;
   signal ext_vid_in_mux_sel_i : std_logic;
+  signal edge_width_sel_i     : std_logic_vector(1 downto 0) := "00"; -- default 2px edge width
   -- Luma key control
   signal luma_key_enable_i     : std_logic;
   signal luma_key_direction_i  : std_logic;
@@ -377,7 +379,7 @@ begin
   -- output y,cr,cb levels (moved to make room for osc registers)
   regs(ra(x"58")) <= x"0" & cr_level_i & x"0" & y_level_i;
   regs(ra(x"5C")) <= x"00000" & cb_level_i;
-  regs(ra(x"78")) <= x"000000" & "0000" & ext_vid_in_mux_sel_i & pix_clk_div_sel_i & col_en_bypass_i & video_active;
+  regs(ra(x"78")) <= x"000000" & "00" & edge_width_sel_i & ext_vid_in_mux_sel_i & pix_clk_div_sel_i & col_en_bypass_i & video_active;
   -- Luma key control
   regs(ra(x"C8")) <= luma_key_enable_i & luma_key_direction_i & "00000000000000" & luma_key_thresh_high_i & luma_key_thresh_low_i;
   -- Alpha controls for analog side
@@ -573,6 +575,7 @@ begin
             col_en_bypass_i <= write_reg(1);
             pix_clk_div_sel_i <= write_reg(2);
             ext_vid_in_mux_sel_i <= write_reg(3);
+            edge_width_sel_i <= write_reg(5 downto 4);
           when x"C8" =>
             luma_key_enable_i <= write_reg(31);
             luma_key_direction_i <= write_reg(30);
@@ -699,6 +702,7 @@ begin
   video_active_O <= video_active;
   pix_clk_div_sel <= pix_clk_div_sel_i;
   ext_vid_in_mux_sel <= ext_vid_in_mux_sel_i;
+  edge_width_sel <= edge_width_sel_i;
   
   luma_key_enable <= luma_key_enable_i;
   luma_key_direction <= luma_key_direction_i;
