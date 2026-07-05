@@ -120,6 +120,7 @@ entity cpu_reg_wrapper is
     pix_clk_div_sel     : out std_logic; -- 0 = /2, 1 = /4 for X and Y digital counters
     ext_vid_in_mux_sel  : out std_logic; -- 0 = luma calc, 1 = y_out
     edge_width_sel      : out std_logic_vector(1 downto 0);
+    ca_rule             : out std_logic_vector(7 downto 0);
     -- Luma key control
     luma_key_enable     : out std_logic;
     luma_key_direction  : out std_logic; -- 0 = key < threshold, 1 = key > threshold
@@ -223,6 +224,7 @@ architecture rtl of cpu_reg_wrapper is
   signal  i_pix_clk_div_sel    : std_logic;
   signal  i_ext_vid_in_mux_sel  : std_logic;
   signal  i_edge_width_sel      : std_logic_vector(1 downto 0);
+  signal  i_ca_rule             : std_logic_vector(7 downto 0);
   -- Luma key control
   signal  i_luma_key_enable     : std_logic;
   signal  i_luma_key_direction  : std_logic;
@@ -332,6 +334,7 @@ begin
       pix_clk_div_sel     => i_pix_clk_div_sel,
       ext_vid_in_mux_sel  => i_ext_vid_in_mux_sel,
       edge_width_sel      => i_edge_width_sel,
+      ca_rule             => i_ca_rule,
       luma_key_enable     => i_luma_key_enable,
       luma_key_direction  => i_luma_key_direction,
       luma_key_thresh_low => i_luma_key_thresh_low,
@@ -421,6 +424,7 @@ begin
       pix_clk_div_sel     <= i_pix_clk_div_sel;
       ext_vid_in_mux_sel  <= i_ext_vid_in_mux_sel;
       edge_width_sel      <= i_edge_width_sel;
+      ca_rule             <= i_ca_rule;
       luma_key_enable     <= i_luma_key_enable;
       luma_key_direction  <= i_luma_key_direction;
       luma_key_thresh_low <= i_luma_key_thresh_low;

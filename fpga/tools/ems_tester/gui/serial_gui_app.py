@@ -524,7 +524,7 @@ class SerialGUIApp(QMainWindow):
             return 11
         elif 55 <= row <= 56:  # audio
             return 12
-        elif row == 57:  # extinput
+        elif row == 57:  # ca_out
             return 13
         elif 58 <= row <= 62:  # gap
             return 14

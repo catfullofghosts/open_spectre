@@ -76,7 +76,7 @@ MATRIX_IN_MAP["random1"] = 53
 MATRIX_IN_MAP["random2"] = 54
 MATRIX_IN_MAP["audio_T"] = 55
 MATRIX_IN_MAP["audio_B"] = 56
-MATRIX_IN_MAP["extinput"] = 57
+MATRIX_IN_MAP["ca_out"] = 57
 MATRIX_IN_MAP["vcc"] = 63  # '1' used to set all outputs
 
 def resolve_matrix_in(value):

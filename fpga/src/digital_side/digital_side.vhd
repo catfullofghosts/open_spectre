@@ -42,6 +42,7 @@ entity digital_side is
     ext_vid_in     : in std_logic_vector(7 downto 0);
     vid_span       : in std_logic_vector(7 downto 0);
     edge_width     : in std_logic_vector(1 downto 0); -- 00=2px, 01=4px, 10=6px, 11=8px
+    ca_rule        : in std_logic_vector(7 downto 0);  -- elementary CA rule 0-255
 
     -- inputs form analoge side
     osc1_sqr : in std_logic :='0';
@@ -50,7 +51,6 @@ entity digital_side is
     random2  : in std_logic :='0';
     audio_T  : in std_logic :='0';
     audio_B  : in std_logic :='0';
-    extinput : in std_logic :='0';
     
     shape1_a : in std_logic :='0';
     shape1_b : in std_logic :='0';
@@ -113,6 +113,7 @@ architecture Behavioral of digital_side is
   signal overlay_gate_out  : std_logic_vector(3 downto 0);
   signal ff_out_a          : std_logic;
   signal ff_out_b          : std_logic;
+  signal ca_out            : std_logic;
 
   signal comp_output : std_logic_vector (6 downto 0);
 
@@ -281,6 +282,16 @@ cdc_pix_100 : process(clk)
     output     => edge_detector_out
     );
 
+  ca_1d : entity work.ca_1d_stream
+    port map (
+      clk     => clk,
+      rst     => h_sync_i,
+      step_en => pix_clk_i,
+      rule    => ca_rule,
+      inject  => inv_in(1),
+      ca_out  => ca_out
+    );
+
   delay_in_vec <= '0' & delay_in;
   delay_out       <= delay_out_vec(0);
   
@@ -398,13 +409,11 @@ cdc_pix_100 : process(clk)
   matrix_in(54)           <= random2  ; -- 
   matrix_in(55)           <= audio_T  ; -- 
   matrix_in(56)           <= audio_B  ; -- 
-  matrix_in(57)           <= extinput ; -- 
+  matrix_in(57)           <= ca_out;
 
   matrix_in(63)           <= '1' ; -- 1 used to set all outputs in simulation
-  --matrix in extras add later
-  -- special x/y counter 1?
-  -- celular automita
-  -- sequancer???
+  --matrix in extras
+  -- matrix_in(58-62) spare
 
   -- MATRIX OUT
   xy_inv_in(17 downto 0) <= matrix_out(17 downto 0);

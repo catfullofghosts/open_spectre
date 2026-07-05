@@ -76,7 +76,8 @@ begin
       invert_matrix  => invert_matrix,
       ext_vid_in     => ext_vid_in,
       vid_span       => vid_span,
-      edge_width     => "01"
+      edge_width     => "01",
+      ca_rule        => x"1E"
     );
 
   clk_process : process

@@ -267,9 +267,9 @@ class MatrixGridWidget(QWidget):
                 return 11
             elif 55 <= row <= 56:  # audio
                 return 12
-            elif row == 57:  # extinput
+            elif row == 57:  # ca_out
                 return 13
-            elif 58 <= row <= 62:  # gap
+            elif 58 <= row <= 62:  # spare
                 return 14
             elif row == 63:  # vcc
                 return 15
@@ -688,11 +688,15 @@ class RegisterControlWidget(QWidget):
             ("0xD8", "dsm_lo_alpha", "DSM Low Alpha", 12, 0, 4095, 0),
             ("0xDC", "noise_alpha", "Noise Alpha", 12, 0, 4095, 0),
         ]
+        digital_defs = [
+            ("0x100", "ca_rule", "1D CA Rule (Wolfram 0-255)", 8, 0, 255, 0),
+        ]
 
         self._add_section(scroll_layout, "Shape Gen 1", shape1_defs)
         self._add_section(scroll_layout, "Shape Gen 2", shape2_defs)
         self._add_section(scroll_layout, "OSC 1", osc1_defs)
         self._add_section(scroll_layout, "OSC 2", osc2_defs)
+        self._add_section(scroll_layout, "Digital Matrix", digital_defs)
         self._add_section(scroll_layout, "Other Controls", other_defs)
         
         scroll_layout.addStretch()

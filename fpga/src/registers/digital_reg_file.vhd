@@ -131,6 +131,7 @@ entity digital_reg_file is
     pix_clk_div_sel     : out std_logic; -- 0 = /2, 1 = /4 for X and Y digital counters
     ext_vid_in_mux_sel  : out std_logic; -- 0 = luma calc, 1 = y_out
     edge_width_sel      : out std_logic_vector(1 downto 0); -- edge stretch: 00=2px 01=4px 10=6px 11=8px
+    ca_rule             : out std_logic_vector(7 downto 0);  -- 1D CA Wolfram rule 0-255
     -- Luma key control
     luma_key_enable     : out std_logic;
     luma_key_direction  : out std_logic; -- 0 = key < threshold, 1 = key > threshold
@@ -286,6 +287,7 @@ architecture RTL of digital_reg_file is
   signal pix_clk_div_sel_i    : std_logic;
   signal ext_vid_in_mux_sel_i : std_logic;
   signal edge_width_sel_i     : std_logic_vector(1 downto 0) := "00"; -- default 2px edge width
+  signal ca_rule_i            : std_logic_vector(7 downto 0) := x"1E"; -- default Rule 30
   -- Luma key control
   signal luma_key_enable_i     : std_logic;
   signal luma_key_direction_i  : std_logic;
@@ -380,6 +382,7 @@ begin
   regs(ra(x"58")) <= x"0" & cr_level_i & x"0" & y_level_i;
   regs(ra(x"5C")) <= x"00000" & cb_level_i;
   regs(ra(x"78")) <= x"000000" & "00" & edge_width_sel_i & ext_vid_in_mux_sel_i & pix_clk_div_sel_i & col_en_bypass_i & video_active;
+  regs(ra(x"100")) <= x"000000" & ca_rule_i;
   -- Luma key control
   regs(ra(x"C8")) <= luma_key_enable_i & luma_key_direction_i & "00000000000000" & luma_key_thresh_high_i & luma_key_thresh_low_i;
   -- Alpha controls for analog side
@@ -576,6 +579,8 @@ begin
             pix_clk_div_sel_i <= write_reg(2);
             ext_vid_in_mux_sel_i <= write_reg(3);
             edge_width_sel_i <= write_reg(5 downto 4);
+          when x"100" =>
+            ca_rule_i <= write_reg(7 downto 0);
           when x"C8" =>
             luma_key_enable_i <= write_reg(31);
             luma_key_direction_i <= write_reg(30);
@@ -703,6 +708,7 @@ begin
   pix_clk_div_sel <= pix_clk_div_sel_i;
   ext_vid_in_mux_sel <= ext_vid_in_mux_sel_i;
   edge_width_sel <= edge_width_sel_i;
+  ca_rule        <= ca_rule_i;
   
   luma_key_enable <= luma_key_enable_i;
   luma_key_direction <= luma_key_direction_i;
