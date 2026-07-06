@@ -36,6 +36,7 @@
 #include <stdlib.h>
 #include "xil_types.h"
 #include "xil_cache.h"
+#include "xil_io.h"
 #include "timer_ps/timer_ps.h"
 #include "xparameters.h"
 
@@ -206,6 +207,20 @@ static float fast_log2(float x)
 #define SCU_TIMER_ID XPAR_SCUTIMER_BASEADDR
 #define UART_BASEADDR XPAR_XUARTPS_0_BASEADDR
 
+#if defined(XPAR_AXI_BRAM_CTRL_0_S_AXI_BASEADDR)
+#define REGS_BRAM_BASEADDR XPAR_AXI_BRAM_CTRL_0_S_AXI_BASEADDR
+#elif defined(XPAR_AXI_BRAM_CTRL_0_BASEADDR)
+#define REGS_BRAM_BASEADDR XPAR_AXI_BRAM_CTRL_0_BASEADDR
+#else
+#error "Overlay test requires AXI BRAM controller base address macro"
+#endif
+
+#define OVERLAY_BRAM_BYTE_BASE        0x00000400U
+#define OVERLAY_BRAM_WORDS            2048U
+#define OVERLAY_REG_GLOBAL_ENABLE     0x000000FCU
+#define OVERLAY_REG_SPRITE_BASE       0x00000100U
+#define OVERLAY_REG_SPRITE_STRIDE     0x00000010U
+
 /* ------------------------------------------------------------ */
 /*				Global Variables								*/
 /* ------------------------------------------------------------ */
@@ -218,6 +233,18 @@ XAxiVdma vdma;
 VideoCapture videoCapt;
 INTC intc;
 char fRefresh; //flag used to trigger a refresh of the Menu on video detect
+
+static u32 g_overlayRandState = 0xC0DEC0DEU;
+
+static u32 DemoNextRandom(void);
+static void DemoOverlayWriteReg(u32 regOffset, u32 value);
+static u32 DemoOverlayReadReg(u32 regOffset);
+static void DemoOverlayWriteWord(u32 wordAddr, u32 value);
+static u32 DemoOverlayReadWord(u32 wordAddr);
+static void DemoOverlaySetSprite(u32 spriteIdx, u32 enable, u32 x, u32 y, u32 width, u32 height, u32 baseWord);
+static void DemoOverlayDisableAllSprites(void);
+static void DemoOverlayPatternTest(void);
+static void DemoSpriteRandomTest(u32 displayWidth, u32 displayHeight);
 
 /*
  * Framebuffers for video data
@@ -457,6 +484,14 @@ void DemoRun()
 		case 'I':
 			DemoEffectMenu();
 			break;
+		case 'j':
+		case 'J':
+			DemoOverlayPatternTest();
+			break;
+		case 'k':
+		case 'K':
+			DemoSpriteRandomTest(dispCtrl.vMode.width, dispCtrl.vMode.height);
+			break;
 		case 'q':
 			break;
 		case 'r':
@@ -504,6 +539,8 @@ void DemoPrintMenu()
 	xil_printf("G - Lissajous Pattern (animated)\n\r");
 	xil_printf("H - Flow Field Pattern (animated)\n\r");
 	xil_printf("I - Apply Video Effects Menu\n\r");
+	xil_printf("J - Overlay VRAM Pattern Test (with transparency)\n\r");
+	xil_printf("K - Sprite VRAM Test (random position)\n\r");
 	xil_printf("q - Quit\n\r");
 	xil_printf("\n\r");
 	xil_printf("\n\r");
@@ -1617,6 +1654,197 @@ void DemoISR(void *callBackRef, void *pVideo)
 {
 	char *data = (char *) callBackRef;
 	*data = 1; //set fRefresh to 1
+}
+
+static u32 DemoNextRandom(void)
+{
+	g_overlayRandState = g_overlayRandState * 1664525U + 1013904223U;
+	return g_overlayRandState;
+}
+
+static void DemoOverlayWriteReg(u32 regOffset, u32 value)
+{
+	Xil_Out32(REGS_BRAM_BASEADDR + regOffset, value);
+}
+
+static u32 DemoOverlayReadReg(u32 regOffset)
+{
+	return Xil_In32(REGS_BRAM_BASEADDR + regOffset);
+}
+
+static void DemoOverlayWriteWord(u32 wordAddr, u32 value)
+{
+	Xil_Out32(REGS_BRAM_BASEADDR + OVERLAY_BRAM_BYTE_BASE + (wordAddr << 2), value);
+}
+
+static u32 DemoOverlayReadWord(u32 wordAddr)
+{
+	return Xil_In32(REGS_BRAM_BASEADDR + OVERLAY_BRAM_BYTE_BASE + (wordAddr << 2));
+}
+
+static void DemoOverlaySetSprite(u32 spriteIdx, u32 enable, u32 x, u32 y, u32 width, u32 height, u32 baseWord)
+{
+	u32 spriteBase;
+	u32 ctrlWord;
+	u32 sizeWord;
+	u32 baseAddrWord;
+
+	if (spriteIdx >= 8U)
+	{
+		return;
+	}
+
+	spriteBase = OVERLAY_REG_SPRITE_BASE + spriteIdx * OVERLAY_REG_SPRITE_STRIDE;
+	ctrlWord = ((y & 0x7FFU) << 12) | ((x & 0x7FFU) << 1) | (enable & 0x1U);
+	sizeWord = ((height & 0x7FFU) << 11) | (width & 0x7FFU);
+	baseAddrWord = (baseWord & 0x7FFU);
+
+	DemoOverlayWriteReg(spriteBase + 0x0U, ctrlWord);
+	DemoOverlayWriteReg(spriteBase + 0x4U, sizeWord);
+	DemoOverlayWriteReg(spriteBase + 0x8U, baseAddrWord);
+}
+
+static void DemoOverlayDisableAllSprites(void)
+{
+	u32 i;
+	for (i = 0; i < 8U; i++)
+	{
+		DemoOverlaySetSprite(i, 0U, 0U, 0U, 0U, 0U, 0U);
+	}
+}
+
+static void DemoOverlayPatternTest(void)
+{
+	u32 i;
+	u32 x;
+	u32 y;
+	u32 rgbaWord;
+	u32 readBackErrors = 0U;
+	const u32 patternWidth = 64U;
+	const u32 patternHeight = 16U;
+	const u32 patternWords = patternWidth * patternHeight; /* 1024 words */
+
+	if (patternWords > OVERLAY_BRAM_WORDS)
+	{
+		xil_printf("\n\rOverlay test pattern does not fit BRAM.\n\r");
+		return;
+	}
+
+	for (i = 0U; i < patternWords; i++)
+	{
+		x = i % patternWidth;
+		y = i / patternWidth;
+		/* Visible checker + transparent holes to test overlay keying path. */
+		if (((x + y) & 0x3U) == 0U)
+		{
+			rgbaWord = 0x00000000U; /* transparent */
+		}
+		else
+		{
+			u32 red = (x * 9U) & 0xFFU;
+			u32 green = (y * 15U + x * 3U) & 0xFFU;
+			u32 blue = ((x ^ y) * 19U) & 0xFFU;
+			rgbaWord = 0x80000000U | (blue << 16) | (green << 8) | red;
+		}
+		DemoOverlayWriteWord(i, rgbaWord);
+	}
+
+	/* Read a sparse subset back to validate CPU mux + BRAM write path. */
+	for (i = 0U; i < patternWords; i += 17U)
+	{
+		x = i % patternWidth;
+		y = i / patternWidth;
+		if (((x + y) & 0x3U) == 0U)
+		{
+			rgbaWord = 0x00000000U;
+		}
+		else
+		{
+			u32 red = (x * 9U) & 0xFFU;
+			u32 green = (y * 15U + x * 3U) & 0xFFU;
+			u32 blue = ((x ^ y) * 19U) & 0xFFU;
+			rgbaWord = 0x80000000U | (blue << 16) | (green << 8) | red;
+		}
+
+		if (DemoOverlayReadWord(i) != rgbaWord)
+		{
+			readBackErrors++;
+		}
+	}
+
+	DemoOverlayDisableAllSprites();
+	DemoOverlaySetSprite(0U, 1U, 64U, 64U, patternWidth, patternHeight, 0U);
+	DemoOverlayWriteReg(OVERLAY_REG_GLOBAL_ENABLE, 1U);
+
+	xil_printf("\n\rOverlay test loaded: sprite0=%dx%d @ (64,64), BRAM words=%d\n\r",
+	           (int)patternWidth, (int)patternHeight, (int)patternWords);
+	xil_printf("Overlay global enable=%d, readback errors=%d\n\r",
+	           (int)(DemoOverlayReadReg(OVERLAY_REG_GLOBAL_ENABLE) & 0x1U),
+	           (int)readBackErrors);
+}
+
+static void DemoSpriteRandomTest(u32 displayWidth, u32 displayHeight)
+{
+	u32 i;
+	u32 x;
+	u32 y;
+	u32 pixelWord;
+	u32 randX;
+	u32 randY;
+	const u32 spriteIdx = 1U;
+	const u32 spriteWidth = 32U;
+	const u32 spriteHeight = 16U;
+	const u32 spriteWords = spriteWidth * spriteHeight; /* 512 words */
+	const u32 spriteBaseWord = 1024U;                   /* after overlay test block */
+	u32 maxX;
+	u32 maxY;
+	u32 posX;
+	u32 posY;
+
+	if ((spriteBaseWord + spriteWords) > OVERLAY_BRAM_WORDS)
+	{
+		xil_printf("\n\rSprite test data does not fit overlay BRAM.\n\r");
+		return;
+	}
+
+	for (i = 0U; i < spriteWords; i++)
+	{
+		x = i % spriteWidth;
+		y = i / spriteWidth;
+
+		/* "Information" style sprite: border + row/column encoded intensity bars. */
+		if (x == 0U || y == 0U || x == (spriteWidth - 1U) || y == (spriteHeight - 1U))
+		{
+			pixelWord = 0x80FFFFFFU;
+		}
+		else if ((y & 0x3U) == 0U || (x & 0x7U) == 0U)
+		{
+			u32 red = (x * 6U) & 0xFFU;
+			u32 green = (y * 14U) & 0xFFU;
+			u32 blue = ((x + y) * 10U) & 0xFFU;
+			pixelWord = 0x80000000U | (blue << 16) | (green << 8) | red;
+		}
+		else
+		{
+			pixelWord = 0x00000000U; /* transparent interior gaps */
+		}
+
+		DemoOverlayWriteWord(spriteBaseWord + i, pixelWord);
+	}
+
+	randX = DemoNextRandom();
+	randY = DemoNextRandom();
+	maxX = (displayWidth > spriteWidth) ? (displayWidth - spriteWidth) : 0U;
+	maxY = (displayHeight > spriteHeight) ? (displayHeight - spriteHeight) : 0U;
+	posX = (maxX > 0U) ? (randX % (maxX + 1U)) : 0U;
+	posY = (maxY > 0U) ? (randY % (maxY + 1U)) : 0U;
+
+	/* Keep overlay enabled and move/update sprite slot every run. */
+	DemoOverlayWriteReg(OVERLAY_REG_GLOBAL_ENABLE, 1U);
+	DemoOverlaySetSprite(spriteIdx, 1U, posX, posY, spriteWidth, spriteHeight, spriteBaseWord);
+
+	xil_printf("\n\rSprite test loaded: sprite%d=%dx%d @ (%d,%d), baseWord=%d\n\r",
+	           (int)spriteIdx, (int)spriteWidth, (int)spriteHeight, (int)posX, (int)posY, (int)spriteBaseWord);
 }
 
 
