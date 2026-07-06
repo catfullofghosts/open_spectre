@@ -42,7 +42,7 @@ begin
         right_r  <= '0';
         ca_out_r <= '0';
       elsif step_edge = '1' then
-        pattern := left_r & center_r & right_r;
+        pattern <= left_r & center_r & right_r;
         ca_out_r <= rule(to_integer(unsigned(pattern)));
 
         left_r   <= center_r;
