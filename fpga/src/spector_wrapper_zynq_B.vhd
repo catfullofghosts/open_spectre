@@ -357,11 +357,43 @@ architecture rtl of spector_wrapper_zynq is
   signal frame_stats_pix_count : std_logic_vector(31 downto 0);
 
     attribute DONT_TOUCH                 : string;
+    attribute MARK_DEBUG                 : string;
+    attribute KEEP                       : string;
+    attribute KEEP_HIERARCHY             : string;
   --  attribute MARK_DEBUG of clk_148_5    : signal is "TRUE";
-    attribute DONT_TOUCH of luma_key_enable    : signal is "TRUE";
-    attribute DONT_TOUCH of luma_key_direction : signal is "TRUE";
-    attribute DONT_TOUCH of acm_out1_o        : signal is "TRUE";
-    attribute DONT_TOUCH of acm_out2_o        : signal is "TRUE";
+--    attribute DONT_TOUCH of luma_key_enable    : signal is "TRUE";
+--    attribute DONT_TOUCH of luma_key_direction : signal is "TRUE";
+--    attribute DONT_TOUCH of acm_out1_o        : signal is "TRUE";
+--    attribute DONT_TOUCH of acm_out2_o        : signal is "TRUE";
+--    attribute DONT_TOUCH of reg_en            : signal is "TRUE";
+--    attribute DONT_TOUCH of reg_we            : signal is "TRUE";
+--    attribute DONT_TOUCH of reg_addr          : signal is "TRUE";
+--    attribute DONT_TOUCH of reg_wdata         : signal is "TRUE";
+--    attribute DONT_TOUCH of reg_rdata         : signal is "TRUE";
+--    attribute DONT_TOUCH of overlay_global_en : signal is "TRUE";
+--    attribute DONT_TOUCH of overlay_bram_en   : signal is "TRUE";
+--    attribute DONT_TOUCH of overlay_bram_we   : signal is "TRUE";
+--    attribute DONT_TOUCH of overlay_bram_addr : signal is "TRUE";
+--    attribute DONT_TOUCH of overlay_bram_wdata: signal is "TRUE";
+--    attribute DONT_TOUCH of overlay_bram_rdata: signal is "TRUE";
+--    attribute MARK_DEBUG of reg_en            : signal is "TRUE";
+--    attribute MARK_DEBUG of overlay_global_en : signal is "TRUE";
+--    attribute MARK_DEBUG of overlay_bram_en   : signal is "TRUE";
+--    attribute KEEP of reg_en                  : signal is "TRUE";
+--    attribute KEEP of overlay_global_en       : signal is "TRUE";
+--    attribute KEEP of overlay_bram_en         : signal is "TRUE";
+--    attribute DONT_TOUCH of overlay_key       : signal is "TRUE";
+--    attribute DONT_TOUCH of overlay_rgb       : signal is "TRUE";
+--    attribute MARK_DEBUG of overlay_key       : signal is "TRUE";
+--    attribute MARK_DEBUG of overlay_rgb       : signal is "TRUE";
+--    attribute KEEP of overlay_key             : signal is "TRUE";
+--    attribute KEEP of overlay_rgb             : signal is "TRUE";
+--    attribute DONT_TOUCH of overlay_cpu_mux_inst : label is "TRUE";
+--    attribute DONT_TOUCH of cpu_reg_wrapper_inst : label is "TRUE";
+--    attribute DONT_TOUCH of overlay_framebuffer_inst : label is "TRUE";
+--    attribute KEEP_HIERARCHY of overlay_cpu_mux_inst : label is "TRUE";
+--    attribute KEEP_HIERARCHY of cpu_reg_wrapper_inst : label is "TRUE";
+--    attribute KEEP_HIERARCHY of overlay_framebuffer_inst : label is "TRUE";
   --  attribute MARK_DEBUG of v_out        : signal is "TRUE";
   --  attribute MARK_DEBUG of shape1_a     : signal is "TRUE";
   --  attribute MARK_DEBUG of shape1_b     : signal is "TRUE";
@@ -550,7 +582,7 @@ begin
       cpu_wdata  => overlay_bram_wdata,
       cpu_rdata  => overlay_bram_rdata,
       pix_clk    => pix_clk,
-      pix_rst    => reset,
+      pix_rst    => reset_n,
       h_sync     => h_sync,
       v_sync     => v_sync,
       global_enable => overlay_global_en,
@@ -685,7 +717,7 @@ begin
     port map
     (
       i_clk        => pix_clk,
-      i_rstb       => reset,       -- active-high reset (legacy port name)
+      i_rstb       => reset_n,     -- keep LPF out of permanent reset when PLL is locked
       i_sync_reset => '0',
       i_data_ena   => '1',
       i_data       => dsm_lo_nofilt,

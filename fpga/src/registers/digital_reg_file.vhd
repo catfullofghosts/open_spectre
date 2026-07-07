@@ -472,7 +472,8 @@ begin
   begin
     if rising_edge(regs_clk) then
       if (write_en = '1') then
-        if addr_reg = x"FC" then
+        -- Decode overlay global enable by low byte to avoid width-mismatch compares.
+        if addr_reg(7 downto 0) = x"FC" then
           overlay_global_en_i <= write_reg(0);
         elsif unsigned(addr_reg) >= unsigned(C_SPRITE_REG_LO)
               and unsigned(addr_reg) < unsigned(C_SPRITE_REG_LO) + C_NUM_SPRITES * C_SPRITE_STRIDE then

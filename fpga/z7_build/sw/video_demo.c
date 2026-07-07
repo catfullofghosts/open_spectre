@@ -244,7 +244,7 @@ static u32 DemoOverlayReadWord(u32 wordAddr);
 static void DemoOverlaySetSprite(u32 spriteIdx, u32 enable, u32 x, u32 y, u32 width, u32 height, u32 baseWord);
 static void DemoOverlayDisableAllSprites(void);
 static void DemoOverlayPatternTest(void);
-static void DemoSpriteRandomTest(u32 displayWidth, u32 displayHeight);
+static void DemoSpriteRandomTest(u32 displayWidth, u32 displayHeight, u32 activeStartX, u32 activeStartY);
 
 /*
  * Framebuffers for video data
@@ -379,8 +379,28 @@ void DemoRun()
 		/* Store the first character in the UART receive FIFO and echo it */
 		if (XUartPs_IsReceiveData(UART_BASEADDR))
 		{
+			char rxChar;
 			userInput = XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-			xil_printf("%c", userInput);
+
+			/* Ignore trailing CR/LF characters that some terminals append. */
+			while (XUartPs_IsReceiveData(UART_BASEADDR))
+			{
+				rxChar = (char)XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
+				if (rxChar != '\r' && rxChar != '\n')
+				{
+					userInput = rxChar;
+				}
+			}
+
+			if (userInput != '\r' && userInput != '\n')
+			{
+				xil_printf("%c", userInput);
+			}
+			else
+			{
+				/* Treat naked CR/LF as "refresh menu", not an invalid command. */
+				userInput = 'r';
+			}
 		}
 		else  //Refresh triggered by video detect interrupt
 		{
@@ -490,7 +510,12 @@ void DemoRun()
 			break;
 		case 'k':
 		case 'K':
-			DemoSpriteRandomTest(dispCtrl.vMode.width, dispCtrl.vMode.height);
+			DemoSpriteRandomTest(
+				dispCtrl.vMode.width,
+				dispCtrl.vMode.height,
+				dispCtrl.vMode.hmax - dispCtrl.vMode.hpe,
+				dispCtrl.vMode.vmax - dispCtrl.vMode.vpe
+			);
 			break;
 		case 'q':
 			break;
@@ -1720,6 +1745,10 @@ static void DemoOverlayPatternTest(void)
 	u32 y;
 	u32 rgbaWord;
 	u32 readBackErrors = 0U;
+	u32 activeStartX;
+	u32 activeStartY;
+	u32 spriteX;
+	u32 spriteY;
 	const u32 patternWidth = 64U;
 	const u32 patternHeight = 16U;
 	const u32 patternWords = patternWidth * patternHeight; /* 1024 words */
@@ -1773,17 +1802,21 @@ static void DemoOverlayPatternTest(void)
 	}
 
 	DemoOverlayDisableAllSprites();
-	DemoOverlaySetSprite(0U, 1U, 64U, 64U, patternWidth, patternHeight, 0U);
+	activeStartX = dispCtrl.vMode.hmax - dispCtrl.vMode.hpe;
+	activeStartY = dispCtrl.vMode.vmax - dispCtrl.vMode.vpe;
+	spriteX = activeStartX + 32U;
+	spriteY = activeStartY + 32U;
+	DemoOverlaySetSprite(0U, 1U, spriteX, spriteY, patternWidth, patternHeight, 0U);
 	DemoOverlayWriteReg(OVERLAY_REG_GLOBAL_ENABLE, 1U);
 
-	xil_printf("\n\rOverlay test loaded: sprite0=%dx%d @ (64,64), BRAM words=%d\n\r",
-	           (int)patternWidth, (int)patternHeight, (int)patternWords);
+	xil_printf("\n\rOverlay test loaded: sprite0=%dx%d @ (%d,%d), BRAM words=%d\n\r",
+	           (int)patternWidth, (int)patternHeight, (int)spriteX, (int)spriteY, (int)patternWords);
 	xil_printf("Overlay global enable=%d, readback errors=%d\n\r",
 	           (int)(DemoOverlayReadReg(OVERLAY_REG_GLOBAL_ENABLE) & 0x1U),
 	           (int)readBackErrors);
 }
 
-static void DemoSpriteRandomTest(u32 displayWidth, u32 displayHeight)
+static void DemoSpriteRandomTest(u32 displayWidth, u32 displayHeight, u32 activeStartX, u32 activeStartY)
 {
 	u32 i;
 	u32 x;
@@ -1836,8 +1869,8 @@ static void DemoSpriteRandomTest(u32 displayWidth, u32 displayHeight)
 	randY = DemoNextRandom();
 	maxX = (displayWidth > spriteWidth) ? (displayWidth - spriteWidth) : 0U;
 	maxY = (displayHeight > spriteHeight) ? (displayHeight - spriteHeight) : 0U;
-	posX = (maxX > 0U) ? (randX % (maxX + 1U)) : 0U;
-	posY = (maxY > 0U) ? (randY % (maxY + 1U)) : 0U;
+	posX = activeStartX + ((maxX > 0U) ? (randX % (maxX + 1U)) : 0U);
+	posY = activeStartY + ((maxY > 0U) ? (randY % (maxY + 1U)) : 0U);
 
 	/* Keep overlay enabled and move/update sprite slot every run. */
 	DemoOverlayWriteReg(OVERLAY_REG_GLOBAL_ENABLE, 1U);
@@ -1845,6 +1878,7 @@ static void DemoSpriteRandomTest(u32 displayWidth, u32 displayHeight)
 
 	xil_printf("\n\rSprite test loaded: sprite%d=%dx%d @ (%d,%d), baseWord=%d\n\r",
 	           (int)spriteIdx, (int)spriteWidth, (int)spriteHeight, (int)posX, (int)posY, (int)spriteBaseWord);
+	xil_printf("Active window starts near (%d,%d)\n\r", (int)activeStartX, (int)activeStartY);
 }
 
 

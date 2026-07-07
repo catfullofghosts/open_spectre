@@ -579,6 +579,7 @@ class SpinBoxEnterFilter(QObject):
 class RegisterControlWidget(QWidget):
     """Widget for controlling registers with sliders and number boxes"""
     SHAPE_SLIDER_MAX = 1000
+    REG_BASE_ADDR = 0x40000000
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -593,13 +594,14 @@ class RegisterControlWidget(QWidget):
             'bit_offset': bit_offset,
             'widget': reg_widget,
         }
-        if addr.startswith('0x') or addr.startswith('0X'):
-            offset = addr[2:]
-        else:
-            offset = addr
-        full_addr = f"0x400000{offset}"
+        full_addr = self._resolve_full_addr(addr)
         if full_addr not in self.register_values:
             self.register_values[full_addr] = 0
+
+    def _resolve_full_addr(self, addr):
+        """Resolve register offset string to absolute 32-bit AXI address."""
+        offset = int(addr, 16) if isinstance(addr, str) else int(addr)
+        return f"0x{(self.REG_BASE_ADDR + offset):08X}"
 
     def _add_section(self, scroll_layout, title, register_defs):
         section = QGroupBox(title)
@@ -797,12 +799,8 @@ class RegisterControlWidget(QWidget):
             bit_offset = slider.reg_bit_offset
             print(f"[Register Control] Writing {slider.reg_name}: value={value}, addr={addr}, bits={bits}, bit_offset={bit_offset}")
             
-            # Construct full address: 0x400000{offset}
-            if addr.startswith('0x') or addr.startswith('0X'):
-                offset = addr[2:]
-            else:
-                offset = addr
-            full_addr = f"0x400000{offset}"
+            # Construct full address from register offset.
+            full_addr = self._resolve_full_addr(addr)
             
             # Get current tracked value for this register (not from hardware)
             current_val = self.register_values.get(full_addr, 0)

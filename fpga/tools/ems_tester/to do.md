@@ -2,13 +2,13 @@
 
 video effects and frame stats are broken
 
-new overlay and pallite stuff is untested
+new overlay and pallite stuff is untested -- need to add debug
 
-dsm to analoge matrix doent work <- check in next build>
+dsm to analoge matrix doent work <- check in next build> -- was in reset
 
-delay works
+delay works -- is it masked by vertical or horizontal interupt?
 
--- any shape stuff that has been deiscivered by debug ,- should be fixed now
+-- any shape stuff that has been deiscivered by debug ,- should be fixed now -- it is
 
 -- add control for the counter pix clock devider, so the lines can get more and less chunky --- it creates an odd 3 line smearing, shuld reset oh hs!! <- check next build >
 
@@ -18,7 +18,7 @@ delay works
 
 -- chenging the pixel devision creats vertical offsets <- check in nect buiuld>
 
--- te4st luma key!!
+-- te4st luma key!! -- need to re activate
 
 check app changes to slider order work as well as number box to set value
 

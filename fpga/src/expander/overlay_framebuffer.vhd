@@ -148,9 +148,11 @@ begin
         x_pos <= (others => '0');
         y_pos <= (others => '0');
       else
-        if v_sync = '1' and v_sync_d = '0' then
+        -- Reset Y at frame boundary on either v_sync edge so this still runs
+        -- if timing polarity changes between modes.
+        if v_sync /= v_sync_d then
           y_pos <= (others => '0');
-        elsif h_sync = '1' and h_sync_d = '0' and v_sync = '0' then
+        elsif h_sync = '1' and h_sync_d = '0' then
           y_pos <= y_pos + 1;
         end if;
 
