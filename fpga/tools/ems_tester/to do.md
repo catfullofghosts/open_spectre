@@ -1,26 +1,36 @@
 2/7/2026:
 
+check oscilators sync select what should those be connected to?
+does osc sinwave look right compare to actual video
+when sync is 2 = vertical sync highest freek isnt high enough
+also when vert sync sinwave looks blocky
+osc alph (and maybe all alpha) results in a hard line on the left edge before the alpha takes effect
+
+edge detector width regs dont work on edge detect 1 and 2 only 3 and 4, also sometime a signal gets stuck going through the edge detector?? and we see the full signal not just the edge
+* are there really 4 edges out? why
+
 video effects and frame stats are broken
 
-new overlay and pallite stuff is untested -- need to add debug
+debug 1bit CA cant see anything
 
-dsm to analoge matrix doent work <- check in next build> -- was in reset
+new overlay and pallite stuff is untested -- need to add debug!!!!
+
+dsm to analoge matrix doent work <- check in next build> -- was in reset !! works now but filter is too strong!
 
 delay works -- is it masked by vertical or horizontal interupt?
 
 -- any shape stuff that has been deiscivered by debug ,- should be fixed now -- it is
 
--- add control for the counter pix clock devider, so the lines can get more and less chunky --- it creates an odd 3 line smearing, shuld reset oh hs!! <- check next build >
+working, registers only write %2 but it works in x and y directions-- add control for the counter pix clock devider, so the lines can get more and less chunky --- it creates an odd 3 line smearing, shuld reset oh hs!! <- check next build >
 
 -- add blanking values to blanking video out
 
 -- debug why counters dont seem to run when i change resolution
 
--- chenging the pixel devision creats vertical offsets <- check in nect buiuld>
 
 -- te4st luma key!! -- need to re activate
 
-check app changes to slider order work as well as number box to set value
+DONE ---check app changes to slider order work as well as number box to set value
 
 
 ----------------
