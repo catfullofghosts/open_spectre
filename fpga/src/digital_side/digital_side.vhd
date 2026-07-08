@@ -248,6 +248,7 @@ cdc_pix_100 : process(clk)
     port
     map (
     clk   => clk,
+    frame_sync => h_sync_i;
     hz6   => slow_cnt_6,
     hz3   => slow_cnt_3,
     hz1_5 => slow_cnt_1_5,
