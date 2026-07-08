@@ -22,6 +22,7 @@ use IEEE.STD_LOGIC_1164.ALL;
 entity slow_counter is
     Port ( clk : in STD_LOGIC;
            enable: in std_logic := '1';    -- enable input
+           frame_sync : in in STD_LOGIC; -- used to make it so a slow counter cant start mid way across a frame horizontaly, it looks shit
            hz6 : out STD_LOGIC;
            hz3 : out STD_LOGIC;
            hz1_5 : out STD_LOGIC;
@@ -32,6 +33,9 @@ end slow_counter;
 
 architecture Behavioral of slow_counter is
 
+      signal hz6i,hz3i,hz1_5i,hz_6i,hz_4i,hz_2i      : std_logic;
+      signal frame_sync_d                            : std_logic;
+
 begin
 
 hz6_counter : entity work.pulse_generator
@@ -41,7 +45,7 @@ hz6_counter : entity work.pulse_generator
     port map(
         clk => clk,
         enable => enable,
-        output => hz6
+        output => hz6i
     );
     
 hz3_counter : entity work.pulse_generator
@@ -51,7 +55,7 @@ hz3_counter : entity work.pulse_generator
     port map(
         clk => clk,
         enable => enable,
-        output => hz3
+        output => hz3i
     );
 
 hz1_5_counter : entity work.pulse_generator
@@ -61,7 +65,7 @@ hz1_5_counter : entity work.pulse_generator
     port map(
         clk => clk,
         enable => enable,
-        output => hz1_5
+        output => hz1_5i
     );
 
 hz_6_counter : entity work.pulse_generator
@@ -71,7 +75,7 @@ hz_6_counter : entity work.pulse_generator
     port map(
         clk => clk,
         enable => enable,
-        output => hz_6
+        output => hz_6i
     );
     
 hz_4_counter : entity work.pulse_generator
@@ -81,7 +85,7 @@ hz_4_counter : entity work.pulse_generator
     port map(
         clk => clk,
         enable => enable,
-        output => hz_4
+        output => hz_4i
     );
 
 hz_2_counter : entity work.pulse_generator
@@ -91,7 +95,22 @@ hz_2_counter : entity work.pulse_generator
     port map(
         clk => clk,
         enable => enable,
-        output => hz_2
+        output => hz_2i
     );
+
+process (clk)
+begin
+    if rising_edge(clk) then -- keeps outputs stable untill the horz sync so that a counter cant have its pixel start mid way along the x of a frame
+        frame_sync_d <= frame_sync;
+        if frame_sync = '1' and frame_sync_d = '0' then
+            hz6    <= hz6i;
+            hz3    <= hz3i;
+            hz1_5  <= hz1_5i;
+            hz_6   <= hz_6i;
+            hz_4   <= hz_4i;
+            hz_2   <= hz_2i;
+        end if;
+    end if;
+end process;
 
 end Behavioral;
