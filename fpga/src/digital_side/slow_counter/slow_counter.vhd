@@ -22,7 +22,7 @@ use IEEE.STD_LOGIC_1164.ALL;
 entity slow_counter is
     Port ( clk : in STD_LOGIC;
            enable: in std_logic := '1';    -- enable input
-           frame_sync : in in STD_LOGIC; -- used to make it so a slow counter cant start mid way across a frame horizontaly, it looks shit
+           frame_sync : in STD_LOGIC; -- used to make it so a slow counter cant start mid way across a frame horizontaly, it looks shit
            hz6 : out STD_LOGIC;
            hz3 : out STD_LOGIC;
            hz1_5 : out STD_LOGIC;

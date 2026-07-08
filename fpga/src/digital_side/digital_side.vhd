@@ -248,7 +248,7 @@ cdc_pix_100 : process(clk)
     port
     map (
     clk   => clk,
-    frame_sync => h_sync_i;
+    frame_sync => h_sync_i,
     hz6   => slow_cnt_6,
     hz3   => slow_cnt_3,
     hz1_5 => slow_cnt_1_5,
@@ -289,7 +289,7 @@ cdc_pix_100 : process(clk)
       rst     => v_sync_i, -- was v_sync_i, but that would make every row identical given the same iput
       step_en => pix_clk_i,
       rule    => ca_rule,
-      inject  => inv_in(1) xor inv_in(2),
+      inject  => inv_in(1),
       ca_out  => ca_out
     );
 
