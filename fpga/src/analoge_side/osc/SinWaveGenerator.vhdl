@@ -39,7 +39,7 @@ architecture Behavioral of SinWaveGenerator is
 
     signal phase_accumulator,phase_accumulatorB:  integer range 0 to 360;--unsigned(13 downto 0) := (others => '0');  -- Use 12 bits for phase accumulator
     signal rom_address, rom_address_dist : integer range 0 to 360;
-    signal sine_table, sine_table_dist,sin_table_xmod : STD_LOGIC_VECTOR(11 downto 0);
+    signal sine_table, sine_table_dist,wave_table_xmod : STD_LOGIC_VECTOR(11 downto 0);
     signal sine_table_summed, sine_table_summed_limited : STD_LOGIC_VECTOR(12 downto 0);
     signal square_i : STD_LOGIC := '0';
     signal sync_edge : STD_LOGIC := '0';
@@ -647,7 +647,7 @@ begin
                 ramp_reverse_value <= waveform_div_result_reg;
             when "11" =>   -- Triangle
                 triangle_value <= waveform_div_result_reg;
-            when others => -- Sine: no update needed (uses sin_table_xmod)
+            when others => -- Sine: no update needed (uses wave_table_xmod)
                 null;
         end case;
         
@@ -678,8 +678,20 @@ begin
     atten_val_inv <= 4095 - atten_val_d;
 
     -- Step 2: use it to attenuate main sine (using pipelined sine_table_d and atten_val_inv)
-    mult_resultB := unsigned(sine_table_d) * atten_val_inv;
-    sin_table_xmod <= std_logic_vector(mult_resultB(23 downto 12));
+    case wave_sel is
+                when "00" =>   -- Sine wave
+                    mult_resultB := unsigned(sine_table_d) * atten_val_inv;
+                    wave_out <= wave_table_xmod;
+                when "01" =>   -- Ramp up
+                    mult_resultB := unsigned(ramp_value) * atten_val_inv;
+                when "10" =>   -- Ramp down
+                    mult_resultB := unsigned(ramp_reverse_value) * atten_val_inv;
+                when "11" =>   -- Triangle
+                    mult_resultB := unsigned(triangle_value) * atten_val_inv;
+                when others =>
+                    mult_resultB := unsigned(sine_table_d) * atten_val_inv; -- Default to sine
+            end case;
+    wave_table_xmod <= std_logic_vector(mult_resultB(23 downto 12));
   end if;
 end process;
     
@@ -699,24 +711,7 @@ end process;
 --        end process;
 
     -- Waveform output mux
-    process(clk)
-    begin
-        if rising_edge(clk) then
-            case wave_sel is
-                when "00" =>   -- Sine wave
-                    wave_out <= sin_table_xmod;
-                when "01" =>   -- Ramp up
-                    wave_out <= ramp_value;
-                when "10" =>   -- Ramp down
-                    wave_out <= ramp_reverse_value;
-                when "11" =>   -- Triangle
-                    wave_out <= triangle_value;
-                when others =>
-                    wave_out <= sin_table_xmod; -- Default to sine
-            end case;
-        end if;
-    end process;
-    
+
     square_out <= square_i;
 
 end Behavioral;

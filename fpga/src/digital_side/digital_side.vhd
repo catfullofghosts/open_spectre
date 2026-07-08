@@ -282,13 +282,13 @@ cdc_pix_100 : process(clk)
     output     => edge_detector_out
     );
 
-  ca_1d : entity work.ca_1d_stream
+  ca_1d : entity work.ca_1d_stream -- EXTRA 1 bit CA 
     port map (
       clk     => clk,
       rst     => h_sync_i,
       step_en => pix_clk_i,
       rule    => ca_rule,
-      inject  => inv_in(1),
+      inject  => inv_in(1) xor inv_in(2),
       ca_out  => ca_out
     );
 

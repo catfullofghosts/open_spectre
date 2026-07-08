@@ -1,6 +1,6 @@
 -- Streaming 1D elementary cellular automaton (Wolfram rule 0-255).
 -- Steps on each rising edge of step_en (digital X counter rate).
--- inject is the right-neighbour source (shared with inv_in(1) / matrix out 27).
+-- inject is the right-neighbour source (shared with inv_in(1) xored with inv_in(2) / matrix out 27 , 28).
 
 library ieee;
 use ieee.std_logic_1164.all;

@@ -33,15 +33,15 @@ architecture Behavioral of monstable_4 is
 
   function f_stretch (
     pulse : std_logic;
-    d     : std_logic_vector(6 downto 0);
+    d     : std_logic_vector(10 downto 0);
     width : std_logic_vector(1 downto 0)
   ) return std_logic is
   begin
     case width is
-      when "00"   => return pulse or d(0);
-      when "01"   => return pulse or d(0) or d(1) or d(2);
-      when "10"   => return pulse or d(0) or d(1) or d(2) or d(3) or d(4);
-      when others => return pulse or d(0) or d(1) or d(2) or d(3) or d(4) or d(5) or d(6);
+      when "00"   => return pulse or d(0) or d(1) or d(2); -- by defult the thicker edge is 4 pix wide
+      when "01"   => return pulse or d(0) or d(1) or d(2) or d(3) or d(4) or d(5); -- 7 pix wide
+      when "10"   => return pulse or d(0) or d(1) or d(2) or d(3) or d(4) or d(5) or d(6) or d(7) or d(8); -- 10pix wide
+      when others => return pulse or d(0) or d(1) or d(2) or d(3) or d(4) or d(5) or d(6) or d(7) or d(8) or d(9) or d(10); -- 12pix wide
     end case;
   end function f_stretch;
 
@@ -61,11 +61,11 @@ begin
       falling_edge_O => fall_pulse
     );
 
-  stretch_delay : process (clk)
+  stretch_delay : process (clk) -- shift reg both rising and falling edges to get thicker lines in the case statement above
   begin
     if rising_edge(clk) then
-      rise_d <= rise_pulse & rise_d(6 downto 1);
-      fall_d <= fall_pulse & fall_d(6 downto 1);
+      rise_d <= rise_pulse & rise_d(9 downto 1);
+      fall_d <= fall_pulse & fall_d(9 downto 1);
     end if;
   end process;
 

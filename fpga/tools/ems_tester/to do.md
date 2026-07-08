@@ -7,11 +7,11 @@ also when vert sync sinwave looks blocky
 osc alph (and maybe all alpha) results in a hard line on the left edge before the alpha takes effect
 
 edge detector width regs dont work on edge detect 1 and 2 only 3 and 4, also sometime a signal gets stuck going through the edge detector?? and we see the full signal not just the edge
-* are there really 4 edges out? why
+* are there really 4 edges out? why == first 2 are thin secodn 2 are thick (now has regs driving thickenss)
 
 video effects and frame stats are broken
 
-debug 1bit CA cant see anything
+debug 1bit CA cant see anything!!! you need to feed it with invert 1, maybe it should be fed by count 9 at satartup by SW
 
 new overlay and pallite stuff is untested -- need to add debug!!!!
 

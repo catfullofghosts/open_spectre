@@ -594,6 +594,8 @@ begin
   -------------------------------------------
   -- Digital Side
   -------------------------------------------
+
+  ----------- Counter devider to change the perceved resolution of the digital side -----------------
   pixel_clk_en_p : process (pix_clk)
     variable clk_div_counter : unsigned(1 downto 0) := "00";
     variable line_div_counter : unsigned(1 downto 0) := "00";
@@ -712,7 +714,7 @@ begin
   dsm_lo_lpf : entity work.moving_average
     generic map(
       G_NBIT      => 10,
-      G_MAX_DELTA => 2 -- tune on hardware; larger = faster slew
+      G_MAX_DELTA => 8-- was 2 last time -- tune on hardware; larger = faster slew
     )
     port map
     (
