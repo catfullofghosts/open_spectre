@@ -285,7 +285,7 @@ cdc_pix_100 : process(clk)
   ca_1d : entity work.ca_1d_stream -- EXTRA 1 bit CA 
     port map (
       clk     => clk,
-      rst     => h_sync_i,
+      rst     => v_sync_i, -- was v_sync_i, but that would make every row identical given the same iput
       step_en => pix_clk_i,
       rule    => ca_rule,
       inject  => inv_in(1) xor inv_in(2),
