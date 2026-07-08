@@ -22,19 +22,21 @@ architecture rtl of ca_1d_stream is
   signal left_r   : std_logic := '0';
   signal center_r : std_logic := '0';
   signal right_r  : std_logic := '0';
-  signal step_d   : std_logic := '0';
+  signal step_d,step_d2   : std_logic := '0';
   signal step_edge : std_logic := '0';
   signal pattern  : std_logic_vector(2 downto 0);
   signal ca_out_r : std_logic := '0';
 
 begin
 
-  step_edge <= '1' when step_d = '0' and step_en = '1' else '0';
+
 
   process (clk)
   begin
     if rising_edge(clk) then
       step_d <= step_en;
+      step_d2 <= step_d;
+      step_edge <= '1' when step_d = '0' and step_en = '1' else '0';
 
       if rst = '1' then
         left_r   <= '0';
