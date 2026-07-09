@@ -160,42 +160,60 @@ class color:
     END = "\033[0m"
 # add ability to check single reg from search term in reg/reg name
 
+def _pulse_digital_matrix_load():
+            command = f"mwr -force  0x40000008 0x1"
+            xsct.do(command) # needs gracefull fail state
+            command = f"mwr -force  0x40000008 0x0"
+            xsct.do(command) # needs gracefull fail state
+
+
+def _commit_digital_matrix_mask(matrix_out, mask_lower, mask_upper):
+            """Write a complete 64-bit mask (both halves) and pulse load once."""
+            resolved_matrix_out = resolve_matrix_out(matrix_out)
+
+            command = f"mwr -force  0x40000004 {hex(resolved_matrix_out)}"
+            print(command)
+            xsct.do(command) # needs gracefull fail state
+
+            command = f"mwr -force  0x40000010 {hex(mask_lower)}"
+            print(command)
+            xsct.do(command) # needs gracefull fail state
+
+            command = f"mwr -force  0x40000014 {hex(mask_upper)}"
+            print(command)
+            xsct.do(command) # needs gracefull fail state
+
+            _pulse_digital_matrix_load()
+
+
+def _digital_matrix_mask_from_inputs(matrix_in):
+            """Build lower/upper mask halves from one or more matrix inputs."""
+            pins = matrix_in if isinstance(matrix_in, list) else [matrix_in]
+            mask_lower = 0
+            mask_upper = 0
+            for pin in [resolve_matrix_in(p) for p in pins]:
+                if pin <= 31:
+                    mask_lower |= 1 << pin
+                else:
+                    mask_upper |= 1 << (pin % 32)
+            return mask_lower, mask_upper
+
+
 def rst_digital_side_matrix(matrix_out=None, pullup = False):    
             # If no argument passed, step through all matrix_out values 0-56
             if matrix_out is None:
                 for out_val in range(57):  # 0 to 56 inclusive backwards to avoid the apperence of pin removal causing the viodeo the freakout
                     rst_digital_side_matrix(56-out_val)
                 return
-            
-            # Resolve matrix_out name to number if needed
-            resolved_matrix_out = resolve_matrix_out(matrix_out)
-            
-            # Read register value using XSCT
-            command = f"mwr -force  0x40000004 {hex(resolved_matrix_out)}"
 
-            output = xsct.do(command) # needs gracefull fail state
-            if pullup == False:
-                command = f"mwr -force  0x40000010 0x0" # first value to set!!
+            if pullup:
+                mask_lower = 0x32
+                mask_upper = 0x32
             else:
-                 command = f"mwr -force  0x40000010 0x32" # pullup
+                mask_lower = 0
+                mask_upper = 0
 
-            output = xsct.do(command) # needs gracefull fail state
-            command = f"mwr -force  0x40000008 0x1"
-            output = xsct.do(command) # needs gracefull fail state
-            command = f"mwr -force  0x40000008 0x0"
-            output = xsct.do(command) # needs gracefull fail state
-
-            if pullup == False:
-                command = f"mwr -force  0x40000014 0x0" # second value to set!!
-            else:
-                command = f"mwr -force  0x40000014 0x32" # second value to set!!
-            
-            output = xsct.do(command) # needs gracefull fail state
-            command = f"mwr -force  0x40000008 0x1"
-            output = xsct.do(command) # needs gracefull fail state
-            command = f"mwr -force  0x40000008 0x0"
-            output = xsct.do(command) # needs gracefull fail state
-            print(command)
+            _commit_digital_matrix_mask(matrix_out, mask_lower, mask_upper)
 
 
 def prog_digital_side_matrix(matrix_out, matrix_in): 
@@ -204,69 +222,12 @@ def prog_digital_side_matrix(matrix_out, matrix_in):
                 for out_val in matrix_out:
                     prog_digital_side_matrix(out_val, matrix_in)
                 return
-            
-            # Resolve matrix_out name to number if needed
-            resolved_matrix_out = resolve_matrix_out(matrix_out)
-            
-            # Handle matrix_in as a list - OR all bits together
-            if isinstance(matrix_in, list):
-                matrix_in_shifted_low = 0   # Bits 0-31
-                matrix_in_shifted_high = 0  # Bits 32-63
-                resolved_pins = [resolve_matrix_in(pin) for pin in matrix_in]
-                for pin in resolved_pins:
-                    if pin <= 31:
-                        matrix_in_shifted_low = matrix_in_shifted_low | 1 << pin
-                    else:
-                        matrix_in_shifted_high = matrix_in_shifted_high | 1 << (pin % 32)
-                
-                # Set matrix output address
-                command = f"mwr -force  0x40000004 {hex(resolved_matrix_out)}"
-                print(command)
-                output = xsct.do(command) # needs gracefull fail state
-                
-                # Write low register (bits 0-31) if any pins in that range
-                if matrix_in_shifted_low > 0:
-                    command = f"mwr -force  0x40000010 {hex(matrix_in_shifted_low)}"
-                    print(command)
-                    output = xsct.do(command) # needs gracefull fail state
-                    command = f"mwr -force  0x40000008 0x1"
-                    output = xsct.do(command) # needs gracefull fail state
-                    command = f"mwr -force  0x40000008 0x0"
-                    output = xsct.do(command) # needs gracefull fail state
-                
-                # Write high register (bits 32-63) if any pins in that range
-                if matrix_in_shifted_high > 0:
-                    command = f"mwr -force  0x40000014 {hex(matrix_in_shifted_high)}"
-                    print(command)
-                    output = xsct.do(command) # needs gracefull fail state
-                    command = f"mwr -force  0x40000008 0x1"
-                    output = xsct.do(command) # needs gracefull fail state
-                    command = f"mwr -force  0x40000008 0x0"
-                    output = xsct.do(command) # needs gracefull fail state
-                
-                return  # Early return for list case
-            else:
-                # Single matrix_in value - resolve name to number if needed
-                resolved_matrix_in = resolve_matrix_in(matrix_in)
-                print(f"resolved matrix in = {resolved_matrix_in}")
-                if resolved_matrix_in > 31:
-                    matrix_in_addr = "0x40000014"
-                else:
-                    matrix_in_addr = "0x40000010"
-                matrix_in_shifted = 1 << (resolved_matrix_in % 32)
-            
-            # Read register value using XSCT (for single input case)
-            command = f"mwr -force  0x40000004 {hex(resolved_matrix_out)}"
-            print(command)
-            output = xsct.do(command) # needs gracefull fail state
-            command = f"mwr -force  {matrix_in_addr} {hex(matrix_in_shifted)}"
-            print(command)
 
-            output = xsct.do(command) # needs gracefull fail state
-            command = f"mwr -force  0x40000008 0x1"
-            output = xsct.do(command) # needs gracefull fail state
-            command = f"mwr -force  0x40000008 0x0"
-            output = xsct.do(command) # needs gracefull fail state
+            mask_lower, mask_upper = _digital_matrix_mask_from_inputs(matrix_in)
+            if not isinstance(matrix_in, list):
+                print(f"resolved matrix in = {resolve_matrix_in(matrix_in)}")
+
+            _commit_digital_matrix_mask(matrix_out, mask_lower, mask_upper)
 
 
 def prog_annaloge_side_matrix(matrix_out, matrix_in): 

@@ -517,11 +517,11 @@ begin
                     -- Slow speed: use prescaler to increment every 24th clock (24x slower)
                     prescaler <= prescaler + 1;
                     prescalerB <= prescalerB + 1;
-                    if prescaler = "10111" then  -- 23 in binary (0-23 = 24 counts)
+                    if prescaler = "10001" then  -- 17 in binary , was 23 (0-23 = 24 counts)
                         counter <= counter + 1;
                         prescaler <= (others => '0');
                     end if;
-                    if prescalerB = "10111" then  -- 23 in binary (0-23 = 24 counts)
+                    if prescalerB = "10001" then  -- 17 in binary, was 23 (0-23 = 24 counts)
                         counterB <= counterB + 1;
                         prescalerB <= (others => '0');
                     end if;
@@ -681,7 +681,6 @@ begin
     case wave_sel is
                 when "00" =>   -- Sine wave
                     mult_resultB := unsigned(sine_table_d) * atten_val_inv;
-                    wave_out <= wave_table_xmod;
                 when "01" =>   -- Ramp up
                     mult_resultB := unsigned(ramp_value) * atten_val_inv;
                 when "10" =>   -- Ramp down
@@ -692,6 +691,7 @@ begin
                     mult_resultB := unsigned(sine_table_d) * atten_val_inv; -- Default to sine
             end case;
     wave_table_xmod <= std_logic_vector(mult_resultB(23 downto 12));
+    wave_out <= wave_table_xmod;
   end if;
 end process;
     

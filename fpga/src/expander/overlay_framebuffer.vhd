@@ -64,6 +64,21 @@ architecture rtl of overlay_framebuffer is
   attribute ram_style : string;
   attribute ram_style of ram : signal is "block";
 
+  attribute MARK_DEBUG                 : string;
+  attribute MARK_DEBUG of h_sync_d : signal is "TRUE";
+  attribute MARK_DEBUG of h_sync_d : signal is "TRUE";
+  attribute MARK_DEBUG of x_pos : signal is "TRUE";
+  attribute MARK_DEBUG of y_pos : signal is "TRUE";
+  attribute MARK_DEBUG of in_window : signal is "TRUE";
+  attribute MARK_DEBUG of vid_addr : signal is "TRUE";
+  attribute MARK_DEBUG of overlay_key : signal is "TRUE";
+  attribute MARK_DEBUG of overlay_rgb : signal is "TRUE";
+  attribute MARK_DEBUG of pick_bus : signal is "TRUE";
+  attribute MARK_DEBUG of in_window : signal is "TRUE";
+  attribute MARK_DEBUG of cpu_rdata_i : signal is "TRUE";
+
+
+
   function f_pick_sprite (
     global_en : std_logic;
     h_act     : std_logic;

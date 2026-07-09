@@ -27,6 +27,12 @@ architecture rtl of ca_1d_stream is
   signal pattern  : std_logic_vector(2 downto 0);
   signal ca_out_r : std_logic := '0';
 
+   attribute MARK_DEBUG                 : string;
+  attribute MARK_DEBUG of step_edge : signal is "TRUE";
+  attribute MARK_DEBUG of step_en : signal is "TRUE";
+  attribute MARK_DEBUG of ca_out_r : signal is "TRUE";
+  attribute MARK_DEBUG of pattern : signal is "TRUE";
+
 begin
 
 

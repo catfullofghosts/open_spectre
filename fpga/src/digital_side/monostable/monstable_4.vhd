@@ -38,10 +38,10 @@ architecture Behavioral of monstable_4 is
   ) return std_logic is
   begin
     case width is
-      when "00"   => return pulse or d(0) or d(1) or d(2); -- by defult the thicker edge is 4 pix wide
-      when "01"   => return pulse or d(0) or d(1) or d(2) or d(3) or d(4) or d(5); -- 7 pix wide
-      when "10"   => return pulse or d(0) or d(1) or d(2) or d(3) or d(4) or d(5) or d(6) or d(7) or d(8); -- 10pix wide
-      when others => return pulse or d(0) or d(1) or d(2) or d(3) or d(4) or d(5) or d(6) or d(7) or d(8) or d(9) or d(10); -- 12pix wide
+      when "00"   => return pulse or d(10) or d(9) or d(8); -- by defult the thicker edge is 4 pix wide
+      when "01"   => return pulse or d(10) or d(9) or d(8) or d(7) or d(6) or d(5); -- 7 pix wide
+      when "10"   => return pulse or d(10) or d(9) or d(8) or d(7) or d(6) or d(5) or d(4) or d(3) or d(2); -- 10pix wide
+      when others => return pulse or d(10) or d(9) or d(8) or d(7) or d(6) or d(5) or d(4) or d(3) or d(2) or d(1) or d(0); -- 12pix wide
     end case;
   end function f_stretch;
 

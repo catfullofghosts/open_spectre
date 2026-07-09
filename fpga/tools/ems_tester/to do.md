@@ -2,13 +2,16 @@
 
 
 to do before next build:
-- look for 1bit ca issue
-- add dont touch to overlay signals
-- fix edge direction
-- try to fix osc derivation issue
+- look for 1bit ca issue -- added debug put reset to 0
+- add dont touch to overlay signals added debug
+- fix edge direction -- fixed edges, were backwards
+- try to fix osc derivation issue -- out assign was only in th sinwave part of the case statement
+- check if alpha blending still has the hard right edge
 
 NEXT build check:
 - check oscilator wavweforms working now with derivation added (do sim first)
+- check osc speed slow on vertical sync, is it fast enough now (changed from 23-17 clock counter per toggle)
+
 - check edge thickness comes from the correct diretion
 - check overlay debug and sprite debug (full signal debug using 'dont touch')
 - check slow counters still work after mid frame gating

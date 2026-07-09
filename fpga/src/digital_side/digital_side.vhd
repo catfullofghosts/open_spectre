@@ -217,7 +217,7 @@ cdc_pix_100 : process(clk)
     port
     map (
     clk    => clk, 
-    rst    => h_sync_i, --rst, -- x needs to be reset by hs otherwise some bits out run over and get out of sync on the next line
+    rst    => '0', --rst, -- x needs to be reset by hs otherwise some bits out run over and get out of sync on the next line
     counter_up => pix_clk_i,
     count  => x_count_low_hi
     );
@@ -289,7 +289,7 @@ cdc_pix_100 : process(clk)
       rst     => v_sync_i, -- was v_sync_i, but that would make every row identical given the same iput
       step_en => pix_clk_i,
       rule    => ca_rule,
-      inject  => inv_in(1),
+      inject  => inv_out(1),
       ca_out  => ca_out
     );
 
