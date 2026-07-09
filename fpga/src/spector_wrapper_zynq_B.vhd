@@ -426,7 +426,7 @@ begin
 
 
   --
-
+  -- Address muxer to split the bram incomng bram based on address 
   overlay_cpu_mux_inst : entity work.overlay_cpu_mux
     generic map (
       G_BYTE_BASE  => std_logic_vector(to_unsigned(16#400#, 13)),
@@ -569,6 +569,7 @@ begin
       frame_stats_pix_count => frame_stats_pix_count
     );
 
+    --- Buffer overlay and sprite generator
   overlay_framebuffer_inst : entity work.overlay_framebuffer
     generic map (
       G_DEPTH      => 2048,
@@ -583,7 +584,7 @@ begin
       cpu_rdata  => overlay_bram_rdata,
       pix_clk    => pix_clk,
       pix_rst    => reset_n,
-      h_sync     => h_sync,
+      h_sync     => h_sync_n,
       v_sync     => v_sync,
       global_enable => overlay_global_en,
       sprites      => overlay_sprites,

@@ -28,8 +28,8 @@ architecture Behavioral of monstable_4 is
 
   signal rise_pulse : std_logic;
   signal fall_pulse : std_logic;
-  signal rise_d     : std_logic_vector(6 downto 0);
-  signal fall_d     : std_logic_vector(6 downto 0);
+  signal rise_d     : std_logic_vector(10 downto 0);
+  signal fall_d     : std_logic_vector(10 downto 0);
 
   function f_stretch (
     pulse : std_logic;
@@ -64,8 +64,8 @@ begin
   stretch_delay : process (clk) -- shift reg both rising and falling edges to get thicker lines in the case statement above
   begin
     if rising_edge(clk) then
-      rise_d <= rise_pulse & rise_d(9 downto 1);
-      fall_d <= fall_pulse & fall_d(9 downto 1);
+      rise_d <= rise_pulse & rise_d(10 downto 1);
+      fall_d <= fall_pulse & fall_d(10 downto 1);
     end if;
   end process;
 

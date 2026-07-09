@@ -4,10 +4,10 @@ use ieee.numeric_std.all;
 
 use work.overlay_sprite_pkg.all;
 
--- Dual-port overlay atlas with multi-sprite compositor.
+-- Dual-port overlay and sprites
 --
 -- CPU port: writes pixel data anywhere in the shared BRAM (AXI @ byte 0x400+).
--- Video port: each enabled sprite slot has its own screen position and atlas base;
+-- Video port: each enabled sprite slot has its own screen position and base;
 --             at most one BRAM read per pixel — highest slot index wins on overlap.
 --
 -- Pixel word format:

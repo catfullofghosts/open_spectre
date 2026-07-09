@@ -1,21 +1,51 @@
+!!! REMEMBER IF SOMETHIGN DOESNT WORK CHECK THE REST AND H/Vsync are correct poliarity!!!!
+
+
+to do before next build:
+- look for 1bit ca issue
+- add dont touch to overlay signals
+- fix edge direction
+- try to fix osc derivation issue
+
+NEXT build check:
+- check oscilator wavweforms working now with derivation added (do sim first)
+- check edge thickness comes from the correct diretion
+- check overlay debug and sprite debug (full signal debug using 'dont touch')
+- check slow counters still work after mid frame gating
+- 1bit CA full debug (why freezing, look at intergration)
+- check resolution change
+
+
 2/7/2026:
 
-check oscilators sync select what should those be connected to?
+spriutes look like they are working but overlay isnt for some reason
+frame buffer addr seems to jump and is not smooth
+add full mark debug, if syncs are backwards then why do sprites work (sort of)?
+
+
+
+
+check oscilators sync select what should those be connected to? - they look fine but the gui has an extra value it that doesnt do anything
 does osc sinwave look right compare to actual video
 when sync is 2 = vertical sync highest freek isnt high enough
-also when vert sync sinwave looks blocky
+also when vert sync sinwave looks blocky- the sin res is too low, should i use sinwave from BGI synth?
 osc alph (and maybe all alpha) results in a hard line on the left edge before the alpha takes effect
+
+other waveforms not working now that derivation has been introduced
 
 edge detector width regs dont work on edge detect 1 and 2 only 3 and 4, also sometime a signal gets stuck going through the edge detector?? and we see the full signal not just the edge
 * are there really 4 edges out? why == first 2 are thin secodn 2 are thick (now has regs driving thickenss)
 
+!!! EDGE THICKNESS STARTS FROM THE WRONG EDGE!!! and gets thicker towards the rising edge!!!
+
 video effects and frame stats are broken
 
-debug 1bit CA cant see anything!!! you need to feed it with invert 1, maybe it should be fed by count 9 at satartup by SW
+debug 1bit CA cant see anything!!! you need to feed it with invert 1, maybe it should be fed by count 9 at satartup by SW, CA inut is actualy XY invert 9 for some reason?!
+also CA is stuck after the first signal goes to it it gets stuck and rule changes dotn work
 
-new overlay and pallite stuff is untested -- need to add debug!!!!
 
-dsm to analoge matrix doent work <- check in next build> -- was in reset !! works now but filter is too strong!
+
+dsm to analoge matrix doent work <- check in next build> -- was in reset !! works now but filter is too strong! -- works now, maybe filter is still too smooth but fix later when looking at actual unit responce
 
 delay works -- is it masked by vertical or horizontal interupt?
 
