@@ -17,8 +17,8 @@ package overlay_sprite_pkg is
     width  : t_coord; -- on-screen coverage width
     height : t_coord; -- on-screen coverage height
     base   : t_coord; -- word offset into shared overlay BRAM
-    tile_w : t_coord; -- BRAM pattern width (0 = use width, no repeat)
-    tile_h : t_coord; -- BRAM pattern height (0 = use height, no repeat)
+    tile_w : t_coord; -- BRAM pattern width (0 = use width, no repeat); power-of-2 for tiled mode
+    tile_h : t_coord; -- BRAM pattern height (0 = use height, no repeat); power-of-2 for tiled mode
   end record t_sprite_slot;
 
   type t_sprite_array is array (0 to C_NUM_SPRITES - 1) of t_sprite_slot;

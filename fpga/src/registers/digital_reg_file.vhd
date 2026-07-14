@@ -321,6 +321,20 @@ architecture RTL of digital_reg_file is
     tile_w => (others => '0'),
     tile_h => (others => '0')
   ));
+  signal overlay_sprites_r   : t_sprite_array := (others => (
+    enable => '0',
+    x      => (others => '0'),
+    y      => (others => '0'),
+    width  => (others => '0'),
+    height => (others => '0'),
+    base   => (others => '0'),
+    tile_w => (others => '0'),
+    tile_h => (others => '0')
+  ));
+  signal sprite_wr_en        : std_logic := '0';
+  signal sprite_wr_idx       : integer range 0 to C_NUM_SPRITES - 1 := 0;
+  signal sprite_wr_off       : std_logic_vector(3 downto 0) := (others => '0');
+  signal sprite_wr_data      : std_logic_vector(31 downto 0) := (others => '0');
   signal exception_addr : std_logic; -- toggles on address out of range error for reg file -- need better solution with reset + exception for sniffer
 
 begin
@@ -465,41 +479,70 @@ begin
       end if;
     end if;
   end process;
-  -- ---------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
+  -- Sprite register writes: pipeline decode (cycle N) then update (cycle N+1)
+  -- to avoid a long combinatorial path from the CPU bus into tile_h/base FFs.
+  ---------------------------------------------------------------------------
+  p_sprite_decode : process (regs_clk)
+  begin
+    if rising_edge(regs_clk) then
+      sprite_wr_en <= '0';
+      if write_en = '1' then
+        -- 0x100..0x17F: sprite_idx = addr[7:4], word offset = addr[3:0]
+        if addr_reg(11 downto 8) = x"1"
+           and unsigned(addr_reg(7 downto 4)) <= C_NUM_SPRITES - 1 then
+          sprite_wr_en   <= '1';
+          sprite_wr_idx  <= to_integer(unsigned(addr_reg(7 downto 4)));
+          sprite_wr_off  <= addr_reg(3 downto 0);
+          sprite_wr_data <= write_reg;
+        end if;
+      end if;
+    end if;
+  end process p_sprite_decode;
+
+  p_sprite_apply : process (regs_clk)
+  begin
+    if rising_edge(regs_clk) then
+      if sprite_wr_en = '1' then
+        case sprite_wr_off is
+          when x"0" =>
+            overlay_sprites_i(sprite_wr_idx).enable <= sprite_wr_data(0);
+            overlay_sprites_i(sprite_wr_idx).x      <= sprite_wr_data(11 downto 1);
+            overlay_sprites_i(sprite_wr_idx).y      <= sprite_wr_data(22 downto 12);
+          when x"4" =>
+            overlay_sprites_i(sprite_wr_idx).width  <= sprite_wr_data(10 downto 0);
+            overlay_sprites_i(sprite_wr_idx).height <= sprite_wr_data(21 downto 11);
+          when x"8" =>
+            overlay_sprites_i(sprite_wr_idx).base   <= sprite_wr_data(10 downto 0);
+            overlay_sprites_i(sprite_wr_idx).tile_w <= sprite_wr_data(21 downto 11);
+            overlay_sprites_i(sprite_wr_idx).tile_h <= '0' & sprite_wr_data(31 downto 22);
+          when others =>
+            null;
+        end case;
+      end if;
+    end if;
+  end process p_sprite_apply;
+
+  p_sprite_out : process (regs_clk)
+  begin
+    if rising_edge(regs_clk) then
+      overlay_sprites_r <= overlay_sprites_i;
+    end if;
+  end process p_sprite_out;
+
+  ---------------------------------------------------------------------------
   -- WRITE: Get the data from the incoming write port and pass it to the internal signal for each reg
   ---------------------------------------------------------------------------
   process (regs_clk)
-    variable v_sprite_idx : integer range 0 to C_NUM_SPRITES - 1;
-    variable v_sprite_off : unsigned(3 downto 0);
   begin
     if rising_edge(regs_clk) then
       if (write_en = '1') then
         -- Decode overlay global enable by low byte to avoid width-mismatch compares.
         if addr_reg(7 downto 0) = x"FC" then
           overlay_global_en_i <= write_reg(0);
-        elsif unsigned(addr_reg) >= unsigned(C_SPRITE_REG_LO)
-              and unsigned(addr_reg) < unsigned(C_SPRITE_REG_LO) + C_NUM_SPRITES * C_SPRITE_STRIDE then
-          v_sprite_idx := to_integer(
-            (unsigned(addr_reg) - unsigned(C_SPRITE_REG_LO)) / C_SPRITE_STRIDE
-          );
-          v_sprite_off := unsigned(addr_reg(3 downto 0));
-          if v_sprite_idx >= 0 and v_sprite_idx < C_NUM_SPRITES then
-            case v_sprite_off is
-              when x"0" =>
-                overlay_sprites_i(v_sprite_idx).enable <= write_reg(0);
-                overlay_sprites_i(v_sprite_idx).x      <= write_reg(11 downto 1);
-                overlay_sprites_i(v_sprite_idx).y      <= write_reg(22 downto 12);
-              when x"4" =>
-                overlay_sprites_i(v_sprite_idx).width  <= write_reg(10 downto 0);
-                overlay_sprites_i(v_sprite_idx).height <= write_reg(21 downto 11);
-              when x"8" =>
-                overlay_sprites_i(v_sprite_idx).base   <= write_reg(10 downto 0);
-                overlay_sprites_i(v_sprite_idx).tile_w <= write_reg(21 downto 11);
-                overlay_sprites_i(v_sprite_idx).tile_h <= '0' & write_reg(31 downto 22);
-              when others =>
-                null;
-            end case;
-          end if;
+        elsif addr_reg(11 downto 8) = x"1"
+              and unsigned(addr_reg(7 downto 4)) <= C_NUM_SPRITES - 1 then
+          null; -- sprite descriptor writes handled by p_sprite_decode/p_sprite_apply
         else
         case addr_reg(7 downto 0) is
           when x"04" =>
@@ -739,7 +782,7 @@ begin
   video_fx_sharpness <= video_fx_sharpness_i;
 
   overlay_global_en <= overlay_global_en_i;
-  overlay_sprites   <= overlay_sprites_i;
+  overlay_sprites   <= overlay_sprites_r;
 
   Rotery_addr_mux     <= Rotery_addr_mux_i;
   Rotery_enc_preset_w <= Rotery_enc_preset_w_i;

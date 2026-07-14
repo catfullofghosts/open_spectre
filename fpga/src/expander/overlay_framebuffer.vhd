@@ -17,11 +17,13 @@ use work.overlay_sprite_pkg.all;
 -- Atlas layout: pack each sprite contiguously starting at its base word address.
 --   sprite N pixel (lx, ly) -> BRAM[ base_N + (ly mod tile_h) * tile_w + (lx mod tile_w) ]
 --   tile_w/tile_h in reg+8 select the repeating pattern size; screen coverage uses width/height.
+--   Tiled mode expects power-of-2 tile_w/tile_h (software default); hardware uses bit-mask wrap.
 
 entity overlay_framebuffer is
   generic (
     G_DEPTH       : positive := 2048;
-    G_ADDR_WIDTH  : positive := 11
+    G_ADDR_WIDTH  : positive := 11;
+    G_VIDEO_LAT   : positive := 6 -- horizontal lookahead (matches video pipeline depth)
   );
   port (
     cpu_clk   : in  std_logic;
@@ -47,6 +49,8 @@ end entity overlay_framebuffer;
 architecture rtl of overlay_framebuffer is
 
   type t_ram is array (0 to G_DEPTH - 1) of std_logic_vector(31 downto 0);
+  type t_hit_vec is array (0 to C_NUM_SPRITES - 1) of std_logic;
+  type t_coord_vec is array (0 to C_NUM_SPRITES - 1) of unsigned(10 downto 0);
 
   signal ram         : t_ram;
   signal cpu_rdata_i : std_logic_vector(31 downto 0);
@@ -56,97 +60,79 @@ architecture rtl of overlay_framebuffer is
   signal x_pos       : unsigned(10 downto 0) := (others => '0');
   signal y_pos       : unsigned(10 downto 0) := (others => '0');
 
-  signal in_window   : std_logic;
-  signal vid_addr    : unsigned(G_ADDR_WIDTH - 1 downto 0);
-  signal win_r       : std_logic;
-  signal addr_r      : unsigned(G_ADDR_WIDTH - 1 downto 0);
-  signal pix_r       : std_logic_vector(31 downto 0);
+  signal sprites_r   : t_sprite_array;
+  signal global_en_r : std_logic;
+  signal h_act_r     : std_logic;
+  signal v_act_r     : std_logic;
+  signal x_pick      : unsigned(10 downto 0);
+  signal y_pick      : unsigned(10 downto 0);
+
+  signal hit_vec     : t_hit_vec;
+  signal lx_vec      : t_coord_vec;
+  signal ly_vec      : t_coord_vec;
+
+  signal s1_hit      : std_logic;
+  signal s1_sel      : unsigned(2 downto 0);
+  signal s1_lx       : unsigned(10 downto 0);
+  signal s1_ly       : unsigned(10 downto 0);
+  signal s1_base     : unsigned(10 downto 0);
+  signal s1_tw       : unsigned(10 downto 0);
+  signal s1_th       : unsigned(10 downto 0);
+  signal s1_w       : unsigned(10 downto 0);
+  signal s1_h        : unsigned(10 downto 0);
+
+  signal s2_hit      : std_logic;
+  signal s2_lx_t     : unsigned(10 downto 0);
+  signal s2_ly_t     : unsigned(10 downto 0);
+  signal s2_base     : unsigned(10 downto 0);
+  signal s2_tw       : unsigned(10 downto 0);
+
+  signal s3_hit      : std_logic;
+  signal s3_addr     : unsigned(G_ADDR_WIDTH - 1 downto 0);
+
+  signal s4_hit      : std_logic;
+  signal s4_addr     : unsigned(G_ADDR_WIDTH - 1 downto 0);
+  signal s5_hit      : std_logic;
+  signal s5_pix      : std_logic_vector(31 downto 0);
 
   attribute ram_style : string;
   attribute ram_style of ram : signal is "block";
 
-  attribute MARK_DEBUG                 : string;
-  attribute MARK_DEBUG of h_sync_d : signal is "TRUE";
-  attribute MARK_DEBUG of v_sync_d : signal is "TRUE";
-  attribute MARK_DEBUG of x_pos : signal is "TRUE";
-  attribute MARK_DEBUG of y_pos : signal is "TRUE";
-  attribute MARK_DEBUG of in_window : signal is "TRUE";
-  attribute MARK_DEBUG of vid_addr : signal is "TRUE";
-  attribute MARK_DEBUG of overlay_key : signal is "TRUE";
-  attribute MARK_DEBUG of overlay_rgb : signal is "TRUE";
-  attribute MARK_DEBUG of cpu_rdata_i : signal is "TRUE";
-
-
-
-  function f_pick_sprite (
-    global_en : std_logic;
-    h_act     : std_logic;
-    v_act     : std_logic;
-    x_screen  : unsigned(10 downto 0);
-    y_screen  : unsigned(10 downto 0);
-    slots     : t_sprite_array
-  ) return std_logic_vector is
-    variable v_hit       : std_logic;
-    variable v_addr      : unsigned(G_ADDR_WIDTH - 1 downto 0);
-    variable v_addr_calc : unsigned(G_ADDR_WIDTH + 10 downto 0);
-    variable lx          : unsigned(10 downto 0);
-    variable ly          : unsigned(10 downto 0);
-    variable w           : unsigned(10 downto 0);
-    variable h           : unsigned(10 downto 0);
-    variable tw          : unsigned(10 downto 0);
-    variable th          : unsigned(10 downto 0);
-    variable lx_tile     : unsigned(10 downto 0);
-    variable ly_tile     : unsigned(10 downto 0);
+  function f_is_pow2 (
+    v : unsigned(10 downto 0)
+  ) return boolean is
+    variable u : unsigned(10 downto 0);
   begin
-    v_hit  := '0';
-    v_addr := (others => '0');
-
-    if global_en = '1' and h_act = '1' and v_act = '1' then
-      for i in 0 to C_NUM_SPRITES - 1 loop
-        if slots(i).enable = '1' then
-          w := unsigned(slots(i).width);
-          h := unsigned(slots(i).height);
-          if w /= 0 and h /= 0
-             and x_screen >= unsigned(slots(i).x)
-             and y_screen >= unsigned(slots(i).y) then
-            lx := x_screen - unsigned(slots(i).x);
-            ly := y_screen - unsigned(slots(i).y);
-            if lx < w and ly < h then
-              tw := unsigned(slots(i).tile_w);
-              th := unsigned(slots(i).tile_h);
-              if tw = 0 then
-                tw := w;
-              end if;
-              if th = 0 then
-                th := h;
-              end if;
-
-              if tw /= 0 and th /= 0 then
-                lx_tile := lx mod tw;
-                ly_tile := ly mod th;
-                v_addr_calc := resize(unsigned(slots(i).base), v_addr_calc'length)
-                               + ly_tile * tw + lx_tile;
-              else
-                v_addr_calc := resize(unsigned(slots(i).base), v_addr_calc'length)
-                               + ly * w + lx;
-              end if;
-
-              if v_addr_calc < G_DEPTH then
-                v_hit  := '1';
-                v_addr := resize(v_addr_calc, G_ADDR_WIDTH);
-              end if;
-            end if;
-          end if;
-        end if;
-      end loop;
+    if v = 0 then
+      return false;
     end if;
+    u := v - 1;
+    return (v and u) = 0;
+  end function f_is_pow2;
 
-    return std_logic_vector(v_addr) & v_hit;
-  end function f_pick_sprite;
-
-  signal pick_bus : std_logic_vector(G_ADDR_WIDTH downto 0);
+  function f_wrap_coord (
+    coord : unsigned(10 downto 0);
+    size  : unsigned(10 downto 0)
+  ) return unsigned is
+  begin
+    if size = 0 then
+      return coord;
+    elsif f_is_pow2(size) then
+      return coord and resize(size - 1, 11);
+    else
+      -- Non power-of-two tiles fall back to linear atlas (no repeat) for timing.
+      return coord;
+    end if;
+  end function f_wrap_coord;
 
 begin
+
+  p_sprite_sync : process (pix_clk) is
+  begin
+    if rising_edge(pix_clk) then
+      sprites_r <= sprites;
+    end if;
+  end process p_sprite_sync;
 
   p_cpu : process (cpu_clk) is
     variable v_addr : integer range 0 to G_DEPTH - 1;
@@ -183,8 +169,6 @@ begin
         x_pos <= (others => '0');
         y_pos <= (others => '0');
       else
-        -- Reset Y at frame boundary on either v_sync edge so this still runs
-        -- if timing polarity changes between modes.
         if v_sync /= v_sync_d then
           y_pos <= (others => '0');
         elsif h_sync = '1' and h_sync_d = '0' then
@@ -202,47 +186,196 @@ begin
     end if;
   end process p_counters;
 
-  pick_bus <= f_pick_sprite(
-    global_enable,
-    '1' when h_sync = '0' else '0',
-    '1' when v_sync = '0' else '0',
-    x_pos,
-    y_pos,
-    sprites
-  );
+  -- Stage 0: register syncs and apply horizontal pipeline lookahead.
+  p_stage0 : process (pix_clk) is
+  begin
+    if rising_edge(pix_clk) then
+      global_en_r <= global_enable;
+      h_act_r     <= '1' when h_sync = '0' else '0';
+      v_act_r     <= '1' when v_sync = '0' else '0';
+      x_pick      <= x_pos + G_VIDEO_LAT;
+      y_pick      <= y_pos;
+    end if;
+  end process p_stage0;
 
-  vid_addr  <= unsigned(pick_bus(G_ADDR_WIDTH - 1 downto 0));
-  in_window <= pick_bus(G_ADDR_WIDTH);
+  -- Stage 1a: parallel per-sprite hit tests (no shared long priority chain).
+  g_hit : for i in 0 to C_NUM_SPRITES - 1 generate
+    signal w_u : unsigned(10 downto 0);
+    signal h_u : unsigned(10 downto 0);
+    signal x_u : unsigned(10 downto 0);
+    signal y_u : unsigned(10 downto 0);
+    signal lx_u : unsigned(10 downto 0);
+    signal ly_u : unsigned(10 downto 0);
+  begin
+    w_u <= unsigned(sprites_r(i).width);
+    h_u <= unsigned(sprites_r(i).height);
+    x_u <= unsigned(sprites_r(i).x);
+    y_u <= unsigned(sprites_r(i).y);
 
-  p_video : process (pix_clk) is
+    lx_u <= x_pick - x_u;
+    ly_u <= y_pick - y_u;
+
+    hit_vec(i) <= '1'
+      when global_en_r = '1'
+       and h_act_r = '1'
+       and v_act_r = '1'
+       and sprites_r(i).enable = '1'
+       and w_u /= 0
+       and h_u /= 0
+       and x_pick >= x_u
+       and y_pick >= y_u
+       and lx_u < w_u
+       and ly_u < h_u
+      else '0';
+
+    lx_vec(i) <= lx_u;
+    ly_vec(i) <= ly_u;
+  end generate g_hit;
+
+  -- Stage 1b: priority pick (highest sprite index wins) and latch sprite fields.
+  p_stage1 : process (pix_clk) is
+    variable v_sel : integer range -1 to C_NUM_SPRITES - 1;
+  begin
+    if rising_edge(pix_clk) then
+      v_sel  := -1;
+      s1_hit <= '0';
+
+      for i in C_NUM_SPRITES - 1 downto 0 loop
+        if hit_vec(i) = '1' then
+          v_sel  := i;
+          s1_hit <= '1';
+          exit;
+        end if;
+      end loop;
+
+      if v_sel >= 0 then
+        s1_sel  <= to_unsigned(v_sel, 3);
+        s1_lx   <= lx_vec(v_sel);
+        s1_ly   <= ly_vec(v_sel);
+        s1_base <= unsigned(sprites_r(v_sel).base);
+        s1_tw   <= unsigned(sprites_r(v_sel).tile_w);
+        s1_th   <= unsigned(sprites_r(v_sel).tile_h);
+        s1_w    <= unsigned(sprites_r(v_sel).width);
+        s1_h    <= unsigned(sprites_r(v_sel).height);
+      else
+        s1_sel  <= (others => '0');
+        s1_lx   <= (others => '0');
+        s1_ly   <= (others => '0');
+        s1_base <= (others => '0');
+        s1_tw   <= (others => '0');
+        s1_th   <= (others => '0');
+        s1_w    <= (others => '0');
+        s1_h    <= (others => '0');
+      end if;
+    end if;
+  end process p_stage1;
+
+  -- Stage 2: tile wrap only (no multiply).
+  p_stage2 : process (pix_clk) is
+    variable tw_v : unsigned(10 downto 0);
+    variable th_v : unsigned(10 downto 0);
+    variable hit_v : std_logic;
+  begin
+    if rising_edge(pix_clk) then
+      hit_v   := s1_hit;
+      s2_lx_t <= (others => '0');
+      s2_ly_t    <= (others => '0');
+      s2_base    <= (others => '0');
+      s2_tw      <= (others => '0');
+
+      if s1_hit = '1' then
+        tw_v := s1_tw;
+        th_v := s1_th;
+        if tw_v = 0 then
+          tw_v := s1_w;
+        end if;
+        if th_v = 0 then
+          th_v := s1_h;
+        end if;
+
+        s2_base <= s1_base;
+        s2_lx_t <= s1_lx;
+        s2_ly_t <= s1_ly;
+        s2_tw   <= tw_v;
+
+        if f_is_pow2(tw_v) and f_is_pow2(th_v) and tw_v /= 0 and th_v /= 0 then
+          s2_lx_t <= f_wrap_coord(s1_lx, tw_v);
+          s2_ly_t <= f_wrap_coord(s1_ly, th_v);
+        end if;
+      else
+        hit_v := '0';
+      end if;
+
+      s2_hit <= hit_v;
+    end if;
+  end process p_stage2;
+
+  -- Stage 3: multiply-add / linear address.
+  p_stage3 : process (pix_clk) is
+    variable prod_v : unsigned(21 downto 0);
+    variable addr_v : unsigned(G_ADDR_WIDTH + 10 downto 0);
+    variable hit_v  : std_logic;
+  begin
+    if rising_edge(pix_clk) then
+      hit_v   := s2_hit;
+      s3_addr <= (others => '0');
+
+      if s2_hit = '1' then
+        prod_v := s2_ly_t * s2_tw;
+        addr_v := resize(s2_base, addr_v'length)
+                  + resize(prod_v, addr_v'length)
+                  + resize(s2_lx_t, addr_v'length);
+
+        if addr_v < G_DEPTH then
+          s3_addr <= resize(addr_v, G_ADDR_WIDTH);
+        else
+          hit_v := '0';
+        end if;
+      end if;
+
+      s3_hit <= hit_v;
+    end if;
+  end process p_stage3;
+
+  -- Stage 4: register BRAM read address.
+  p_stage4 : process (pix_clk) is
+  begin
+    if rising_edge(pix_clk) then
+      s4_hit  <= s3_hit;
+      s4_addr <= s3_addr;
+    end if;
+  end process p_stage4;
+
+  -- Stage 5: block RAM read (one cycle after address register).
+  p_stage5 : process (pix_clk) is
     variable v_addr : integer range 0 to G_DEPTH - 1;
   begin
     if rising_edge(pix_clk) then
-      if pix_rst = '1' then
-        win_r       <= '0';
-        addr_r      <= (others => '0');
-        pix_r       <= (others => '0');
-        overlay_key <= '0';
-        overlay_rgb <= (others => '0');
+      s5_hit <= s4_hit;
+      v_addr := to_integer(s4_addr);
+      if v_addr >= 0 and v_addr < G_DEPTH then
+        s5_pix <= ram(v_addr);
       else
-        win_r  <= in_window;
-        addr_r <= vid_addr;
-        v_addr := to_integer(addr_r);
-        if v_addr >= 0 and v_addr < G_DEPTH then
-          pix_r <= ram(v_addr);
-        else
-          pix_r <= (others => '0');
-        end if;
-
-        if win_r = '1' and pix_r(31) = '1' then
-          overlay_key <= '1';
-          overlay_rgb <= pix_r(23 downto 0);
-        else
-          overlay_key <= '0';
-          overlay_rgb <= (others => '0');
-        end if;
+        s5_pix <= (others => '0');
       end if;
     end if;
-  end process p_video;
+  end process p_stage5;
+
+  -- Stage 6: overlay output.
+  p_stage6 : process (pix_clk) is
+  begin
+    if rising_edge(pix_clk) then
+      if pix_rst = '1' then
+        overlay_key <= '0';
+        overlay_rgb <= (others => '0');
+      elsif s5_hit = '1' and s5_pix(31) = '1' then
+        overlay_key <= '1';
+        overlay_rgb <= s5_pix(23 downto 0);
+      else
+        overlay_key <= '0';
+        overlay_rgb <= (others => '0');
+      end if;
+    end if;
+  end process p_stage6;
 
 end architecture rtl;
