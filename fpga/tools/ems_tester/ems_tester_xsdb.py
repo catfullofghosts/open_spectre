@@ -852,16 +852,16 @@ if __name__ == "__main__":
     ############ Overlay test — checkerboard sprite on screen
     ################################################################
     # Bypass colour encoder so overlay RGB shows directly (already set above via wr_reg('78', 2))
-    test_overlay_visible(
-        sprite_idx=0,
-        screen_w=720,
-        screen_h=576,
-        tile_w=16,
-        tile_h=16,
-        x=0,
-        y=0,
-        base=0,
-    )
+    # test_overlay_visible(
+    #     sprite_idx=0,
+    #     screen_w=720,
+    #     screen_h=576,
+    #     tile_w=16,
+    #     tile_h=16,
+    #     x=0,
+    #     y=0,
+    #     base=0,
+    # )
 
     ################################################################
     ############ 1D CA mode tests — xy_inv_out_2 (X counter bit 2)
@@ -869,11 +869,11 @@ if __name__ == "__main__":
     ################################################################
     # Uncomment one block below (comment overlay test above if using CA).
 
-    # test_ca_mode_plain(rule=30, dwell_sec=10)
-    # test_ca_mode_rule_xor_y(rule=30, dwell_sec=10)
-    # test_ca_mode_inject_xor_y0(rule=30, dwell_sec=10)
-    # test_ca_mode_line_seed_y0(rule=30, dwell_sec=10)
-    # test_ca_mode_inject_xor_x0(rule=30, dwell_sec=10)
+    test_ca_mode_plain(rule=30, dwell_sec=10)
+    test_ca_mode_rule_xor_y(rule=30, dwell_sec=10)
+    test_ca_mode_inject_xor_y0(rule=30, dwell_sec=10)
+    test_ca_mode_line_seed_y0(rule=30, dwell_sec=10)
+    test_ca_mode_inject_xor_x0(rule=30, dwell_sec=10)
 
     # Or step through all modes automatically:
     # test_ca_all_modes(rule=30, dwell_sec=10)

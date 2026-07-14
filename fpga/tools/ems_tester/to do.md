@@ -6,9 +6,9 @@ done - check oscilator wavweforms working now with derivation added (do sim firs
 - check osc speed slow on vertical sync, is it fast enough now (changed from 23-17 clock counter per toggle)-- highest speed not fastenough, slowest speed way too slow for verical
 
 issue - check edge thickness comes from the correct diretion -- direction of width fixed but now some lines missing vericly?!
-- check overlay debug and sprite debug (full signal debug using 'dont touch') 
+- check overlay debug and sprite debug (full signal debug using 'dont touch') -- overlay fixed ems tester.py makes a grid across the whole screen
 done----- - check slow counters still work after mid frame gating
-- 1bit CA full debug (why freezing, look at intergration)
+- 1bit CA full debug, working, check the new expanded rules to see if that helps make ti more interesting
 - check resolution change
 done------ check if alpha blending still has the hard right edge ---fixed
 
