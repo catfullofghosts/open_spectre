@@ -275,16 +275,259 @@ def rst_annaloge_side_matrix(matrix_out):
             output = xsct.do(command) # needs gracefull fail state
             print(command)
 
-def wr_reg(addr, val_in): 
-            
-            matrix_in_addr = "0x40000030"
-
-            matrix_in_shifted = 1 << (matrix_in)
-            # Read register value using XSCT
-            command = f"mwr -force  0x400000{addr} {hex(val_in)}"
+def wr_reg(addr, val_in):
+            """Write a 32-bit CPU register. addr is a hex offset string or int (e.g. '18', 0xFC)."""
+            if isinstance(addr, str):
+                offset = int(addr, 16)
+            else:
+                offset = int(addr)
+            command = f"mwr -force  0x{0x40000000 + offset:08X} {hex(val_in)}"
             print(command)
-            output = xsct.do(command) # needs gracefull fail state
+            xsct.do(command)  # needs gracefull fail state
 
+
+REG_BASE_ADDR = 0x40000000
+OVERLAY_BRAM_BYTE_BASE = 0x400
+# AXI BRAM ctrl maps 8KB @ 0x40000000; first 1KB is CPU regs, rest is overlay atlas.
+OVERLAY_BRAM_AXI_BYTES = 0x1C00
+OVERLAY_BRAM_WORDS = OVERLAY_BRAM_AXI_BYTES // 4  # 1792 words (VHDL depth is 2048)
+SPRITE_REG_BASE = 0x100
+SPRITE_REG_STRIDE = 0x10
+CA_RULE_REG = 0x18
+OVERLAY_GLOBAL_EN_REG = 0xFC
+CA_CTRL_INJECT_XOR_Y0 = 1 << 8
+CA_CTRL_RULE_XOR_Y = 1 << 9
+CA_CTRL_LINE_SEED_Y0 = 1 << 10
+CA_CTRL_INJECT_XOR_X0 = 1 << 11
+
+
+def configure_ca(rule=30, inject_xor_y0=False, rule_xor_y=True, line_seed_y0=False, inject_xor_x0=False):
+            """Program 1D CA @ 0x18: rule in [7:0], mode bits in [11:8].
+
+            rule_xor_y (default on): each scanline runs rule XOR line-number — vertical rule morph.
+            line_seed_y0: seed center cell from Y LSB on each h-sync reset.
+            inject_xor_y0/x0: phase-shift inject with line or pixel position.
+            """
+            value = int(rule) & 0xFF
+            if inject_xor_y0:
+                value |= CA_CTRL_INJECT_XOR_Y0
+            if rule_xor_y:
+                value |= CA_CTRL_RULE_XOR_Y
+            if line_seed_y0:
+                value |= CA_CTRL_LINE_SEED_Y0
+            if inject_xor_x0:
+                value |= CA_CTRL_INJECT_XOR_X0
+            wr_reg(CA_RULE_REG, value)
+
+
+def set_ca_rule(rule):
+            """Program the 1D CA Wolfram rule (0-255). Register @ 0x18 (not 0x100)."""
+            configure_ca(rule=rule, rule_xor_y=False)
+
+
+def set_overlay_global_enable(enabled=True):
+            wr_reg(OVERLAY_GLOBAL_EN_REG, 1 if enabled else 0)
+
+
+def _sprite_reg_addr(sprite_idx, word_offset):
+            return SPRITE_REG_BASE + sprite_idx * SPRITE_REG_STRIDE + word_offset
+
+
+def configure_sprite(sprite_idx, x, y, width, height, base, enable=True, tile_w=0, tile_h=0):
+            """Configure one overlay sprite descriptor (registers 0x100+).
+
+            width/height: on-screen coverage in pixels.
+            tile_w/tile_h: repeating BRAM pattern size (0 = legacy non-tiled, uses width/height).
+            """
+            if not 0 <= sprite_idx < 8:
+                raise ValueError(f"sprite_idx must be 0-7, got {sprite_idx}")
+            ctrl = (1 if enable else 0) | ((int(x) & 0x7FF) << 1) | ((int(y) & 0x7FF) << 12)
+            size = (int(width) & 0x7FF) | ((int(height) & 0x7FF) << 11)
+            atlas = (
+                (int(base) & 0x7FF)
+                | ((int(tile_w) & 0x7FF) << 11)
+                | ((int(tile_h) & 0x3FF) << 22)
+            )
+            wr_reg(_sprite_reg_addr(sprite_idx, 0), ctrl)
+            wr_reg(_sprite_reg_addr(sprite_idx, 4), size)
+            wr_reg(_sprite_reg_addr(sprite_idx, 8), atlas)
+
+
+def write_overlay_bram_word(word_addr, value):
+            """Write one 32-bit overlay pixel word. Bit31=opaque, [23:16]=B, [15:8]=G, [7:0]=R."""
+            word_addr = int(word_addr)
+            if word_addr < 0 or word_addr >= OVERLAY_BRAM_WORDS:
+                raise ValueError(
+                    f"overlay BRAM word {word_addr} out of range 0..{OVERLAY_BRAM_WORDS - 1}"
+                )
+            byte_addr = OVERLAY_BRAM_BYTE_BASE + word_addr * 4
+            wr_reg(byte_addr, int(value) & 0xFFFFFFFF)
+
+
+def fill_overlay_sprite(base, width, height, rgb=0x00FF00, opaque=True):
+            """Fill a contiguous BRAM atlas region with one RGB colour."""
+            base, width, height = int(base), int(width), int(height)
+            if base + width * height > OVERLAY_BRAM_WORDS:
+                raise ValueError(
+                    f"sprite needs {width * height} words at base {base}, "
+                    f"max {OVERLAY_BRAM_WORDS} words available"
+                )
+            pixel = (0x80000000 if opaque else 0x00000000) | (int(rgb) & 0x00FFFFFF)
+            for ly in range(height):
+                for lx in range(width):
+                    write_overlay_bram_word(base + ly * width + lx, pixel)
+
+
+def setup_test_overlay(sprite_idx=0, x=100, y=80, width=32, height=32, base=0, rgb=0x00FF00):
+            """Enable overlay, configure one solid sprite, and fill its atlas."""
+            fill_overlay_sprite(base, width, height, rgb=rgb, opaque=True)
+            configure_sprite(sprite_idx, x, y, width, height, base, enable=True)
+            set_overlay_global_enable(True)
+
+
+def fill_overlay_checkerboard(base, width, height):
+            """Fill atlas with an opaque red/cyan checkerboard."""
+            base, width, height = int(base), int(width), int(height)
+            if base + width * height > OVERLAY_BRAM_WORDS:
+                raise ValueError(
+                    f"checkerboard needs {width * height} words at base {base}, "
+                    f"max {OVERLAY_BRAM_WORDS} words available"
+                )
+            red  = 0x800000FF  # opaque, R=FF
+            cyan = 0x80FFFF00  # opaque, G=FF B=FF
+            for ly in range(height):
+                for lx in range(width):
+                    pixel = red if (lx + ly) % 2 == 0 else cyan
+                    write_overlay_bram_word(base + ly * width + lx, pixel)
+
+
+def test_overlay_visible(
+            sprite_idx=0,
+            screen_w=720,
+            screen_h=576,
+            tile_w=16,
+            tile_h=16,
+            x=0,
+            y=0,
+            base=0,
+    ):
+            """
+            Tile a small checkerboard pattern across the full screen.
+            Only tile_w * tile_h words are written to BRAM; hardware repeats the tile.
+            Requires FPGA build with overlay tile-repeat support.
+            """
+            print(
+                f"[overlay] Loading {tile_w}x{tile_h} tile, "
+                f"tiled across {screen_w}x{screen_h} screen..."
+            )
+            fill_overlay_checkerboard(base, tile_w, tile_h)
+
+            print(f"[overlay] Configuring sprite{sprite_idx} full-screen @ ({x},{y})...")
+            configure_sprite(
+                sprite_idx, x, y, screen_w, screen_h, base,
+                enable=True, tile_w=tile_w, tile_h=tile_h,
+            )
+
+            print("[overlay] Enabling global overlay...")
+            set_overlay_global_enable(True)
+
+            print(
+                f"[overlay] Done. Expect a {tile_w}x{tile_h} red/cyan checker "
+                f"repeated over the full {screen_w}x{screen_h} screen."
+            )
+
+
+def setup_ca_test_routing():
+            """Route X-counter bit 2 into invert 2 (inv_in_1 / CA inject) and CA out to luma."""
+            # xy_inv_out_2 = X counter bit 2; CA inject taps inv_out(1) <- matrix inv_in_1
+            prog_digital_side_matrix('inv_in_1', 'xy_inv_out_2')
+            prog_digital_side_matrix(49, 'ca_out')
+            prog_digital_side_matrix(50, 'ca_out')
+            prog_digital_side_matrix(51, 'ca_out')
+
+
+def _run_ca_mode_test(mode_name, rule=30, dwell_sec=8, **ca_kwargs):
+            print(f"[ca] {mode_name}: rule={rule}, ctrl={ca_kwargs}")
+            setup_ca_test_routing()
+            configure_ca(rule=rule, **ca_kwargs)
+            print(f"[ca] Hold {dwell_sec}s...")
+            time.sleep(dwell_sec)
+
+
+def test_ca_mode_plain(rule=30, dwell_sec=8):
+            """CA baseline: fixed rule, no line/X/Y modulation."""
+            _run_ca_mode_test(
+                "mode 1 — plain",
+                rule=rule,
+                dwell_sec=dwell_sec,
+                rule_xor_y=False,
+                inject_xor_y0=False,
+                line_seed_y0=False,
+                inject_xor_x0=False,
+            )
+
+
+def test_ca_mode_rule_xor_y(rule=30, dwell_sec=8):
+            """CA rule morphs per scanline (rule XOR Y)."""
+            _run_ca_mode_test(
+                "mode 2 — rule_xor_y",
+                rule=rule,
+                dwell_sec=dwell_sec,
+                rule_xor_y=True,
+                inject_xor_y0=False,
+                line_seed_y0=False,
+                inject_xor_x0=False,
+            )
+
+
+def test_ca_mode_inject_xor_y0(rule=30, dwell_sec=8):
+            """CA inject XOR with line number LSB."""
+            _run_ca_mode_test(
+                "mode 3 — inject_xor_y0",
+                rule=rule,
+                dwell_sec=dwell_sec,
+                rule_xor_y=False,
+                inject_xor_y0=True,
+                line_seed_y0=False,
+                inject_xor_x0=False,
+            )
+
+
+def test_ca_mode_line_seed_y0(rule=30, dwell_sec=8):
+            """CA center cell seeded from Y LSB on each h-sync."""
+            _run_ca_mode_test(
+                "mode 4 — line_seed_y0",
+                rule=rule,
+                dwell_sec=dwell_sec,
+                rule_xor_y=False,
+                inject_xor_y0=False,
+                line_seed_y0=True,
+                inject_xor_x0=False,
+            )
+
+
+def test_ca_mode_inject_xor_x0(rule=30, dwell_sec=8):
+            """CA inject XOR with X counter LSB."""
+            _run_ca_mode_test(
+                "mode 5 — inject_xor_x0",
+                rule=rule,
+                dwell_sec=dwell_sec,
+                rule_xor_y=False,
+                inject_xor_y0=False,
+                line_seed_y0=False,
+                inject_xor_x0=True,
+            )
+
+
+def test_ca_all_modes(rule=30, dwell_sec=8):
+            """Step through every CA mode in sequence."""
+            print(f"[ca] Running all modes (rule={rule}, {dwell_sec}s each)...")
+            test_ca_mode_plain(rule=rule, dwell_sec=dwell_sec)
+            test_ca_mode_rule_xor_y(rule=rule, dwell_sec=dwell_sec)
+            test_ca_mode_inject_xor_y0(rule=rule, dwell_sec=dwell_sec)
+            test_ca_mode_line_seed_y0(rule=rule, dwell_sec=dwell_sec)
+            test_ca_mode_inject_xor_x0(rule=rule, dwell_sec=dwell_sec)
+            print("[ca] All modes complete.")
 
 
 if __name__ == "__main__":
@@ -341,17 +584,17 @@ if __name__ == "__main__":
 
     rst_digital_side_matrix(pullup = True) 
    
-    rst_annaloge_side_matrix(16)
-    rst_annaloge_side_matrix(17)
+    # rst_annaloge_side_matrix(16)
+    # rst_annaloge_side_matrix(17)
 
-    prog_digital_side_matrix(53, 1)
-    prog_digital_side_matrix(52, 1)
-    prog_digital_side_matrix(51, 1)
+    # prog_digital_side_matrix(53, 1)
+    # prog_digital_side_matrix(52, 1)
+    # prog_digital_side_matrix(51, 1)
 
-    # # # chroma 2
-    prog_digital_side_matrix(56, 1)
-    prog_digital_side_matrix(55, 1)
-    prog_digital_side_matrix(54, 1)
+    # # # # chroma 2
+    # prog_digital_side_matrix(56, 1)
+    # prog_digital_side_matrix(55, 1)
+    # prog_digital_side_matrix(54, 1)
 
 
     ################################################################
@@ -363,17 +606,17 @@ if __name__ == "__main__":
     # test osc 1 
     # with vertical sync enabled only freqs of 1 or 0 work, may need to adjust the counter range for this sync
     
-    # Horixontal test
-    wr_reg('68',int("40f000f0", 16)) #-- look at adding a way to de sync the second oscilaor
-    prog_annaloge_side_matrix(16,1) # routes osc1 sin to luma out
+    # # Horixontal test
+    # wr_reg('68',int("40f000f0", 16)) #-- look at adding a way to de sync the second oscilaor
+    # prog_annaloge_side_matrix(16,1) # routes osc1 sin to luma out
     
-    # # vertical test
-    wr_reg('68',int("80000000", 16)) #-- look at adding a way to de sync the second oscilaor
-    prog_annaloge_side_matrix(16,1) # routes osc1 sin to luma out
+    # # # vertical test
+    # wr_reg('68',int("80000000", 16)) #-- look at adding a way to de sync the second oscilaor
+    # prog_annaloge_side_matrix(16,1) # routes osc1 sin to luma out
 
-    # unsynced test  running slow
-    wr_reg('68',int("100fffff", 16)) #-- look at adding a way to de sync the second oscilaor
-    prog_annaloge_side_matrix(16,1) # routes osc1 sin to luma out
+    # # unsynced test  running slow
+    # wr_reg('68',int("100fffff", 16)) #-- look at adding a way to de sync the second oscilaor
+    # prog_annaloge_side_matrix(16,1) # routes osc1 sin to luma out
 
     # #test osc changing freq slowly 
     # freq = "40400040"
@@ -605,7 +848,35 @@ if __name__ == "__main__":
     # prog_digital_side_matrix(55, "xy_inv_out_12")
     # prog_digital_side_matrix(54, "xy_inv_out_12")
 
+    ################################################################
+    ############ Overlay test — checkerboard sprite on screen
+    ################################################################
+    # Bypass colour encoder so overlay RGB shows directly (already set above via wr_reg('78', 2))
+    test_overlay_visible(
+        sprite_idx=0,
+        screen_w=720,
+        screen_h=576,
+        tile_w=16,
+        tile_h=16,
+        x=0,
+        y=0,
+        base=0,
+    )
 
+    ################################################################
+    ############ 1D CA mode tests — xy_inv_out_2 (X counter bit 2)
+    ############ routed to inv_in_1 (invert 2, CA inject path)
+    ################################################################
+    # Uncomment one block below (comment overlay test above if using CA).
+
+    # test_ca_mode_plain(rule=30, dwell_sec=10)
+    # test_ca_mode_rule_xor_y(rule=30, dwell_sec=10)
+    # test_ca_mode_inject_xor_y0(rule=30, dwell_sec=10)
+    # test_ca_mode_line_seed_y0(rule=30, dwell_sec=10)
+    # test_ca_mode_inject_xor_x0(rule=30, dwell_sec=10)
+
+    # Or step through all modes automatically:
+    # test_ca_all_modes(rule=30, dwell_sec=10)
 
     print("Ending program...")
     xsct.close()

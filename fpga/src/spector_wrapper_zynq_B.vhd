@@ -282,7 +282,7 @@ architecture rtl of spector_wrapper_zynq is
   signal pix_clk_div_sel    : std_logic;
   signal ext_vid_in_mux_sel : std_logic;
   signal edge_width_sel     : std_logic_vector(1 downto 0);
-  signal ca_rule            : std_logic_vector(7 downto 0);
+  signal ca_cfg            : std_logic_vector(15 downto 0);
   -- Luma key control
   signal luma_key_enable     : std_logic;
   signal luma_key_direction  : std_logic;
@@ -530,7 +530,7 @@ begin
       pix_clk_div_sel     => pix_clk_div_sel,
       ext_vid_in_mux_sel  => ext_vid_in_mux_sel,
       edge_width_sel      => edge_width_sel,
-      ca_rule             => ca_rule,
+      ca_cfg              => ca_cfg,
       luma_key_enable     => luma_key_enable,
       luma_key_direction  => luma_key_direction,
       luma_key_thresh_low => luma_key_thresh_low,
@@ -585,7 +585,7 @@ begin
       pix_clk    => pix_clk,
       pix_rst    => reset_n,
       h_sync     => h_sync_n,
-      v_sync     => v_sync,
+      v_sync     => v_sync_n,
       global_enable => overlay_global_en,
       sprites      => overlay_sprites,
       overlay_key => overlay_key,
@@ -681,7 +681,7 @@ begin
       ext_vid_in     => ext_vid_in,
       vid_span       => vid_span,
       edge_width     => edge_width_sel,
-      ca_rule        => ca_rule,
+      ca_cfg        => ca_cfg,
       osc1_sqr       => osc_1_sqr_o,
       osc2_sqr       => osc_2_sqr_o,
       random1        => noise_1_o,

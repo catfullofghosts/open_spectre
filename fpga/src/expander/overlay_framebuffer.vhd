@@ -15,7 +15,8 @@ use work.overlay_sprite_pkg.all;
 --   [23:16] blue, [15:8] green, [7:0] red
 --
 -- Atlas layout: pack each sprite contiguously starting at its base word address.
---   sprite N pixel (lx, ly) -> BRAM[ base_N + ly * width_N + lx ]
+--   sprite N pixel (lx, ly) -> BRAM[ base_N + (ly mod tile_h) * tile_w + (lx mod tile_w) ]
+--   tile_w/tile_h in reg+8 select the repeating pattern size; screen coverage uses width/height.
 
 entity overlay_framebuffer is
   generic (
@@ -66,15 +67,13 @@ architecture rtl of overlay_framebuffer is
 
   attribute MARK_DEBUG                 : string;
   attribute MARK_DEBUG of h_sync_d : signal is "TRUE";
-  attribute MARK_DEBUG of h_sync_d : signal is "TRUE";
+  attribute MARK_DEBUG of v_sync_d : signal is "TRUE";
   attribute MARK_DEBUG of x_pos : signal is "TRUE";
   attribute MARK_DEBUG of y_pos : signal is "TRUE";
   attribute MARK_DEBUG of in_window : signal is "TRUE";
   attribute MARK_DEBUG of vid_addr : signal is "TRUE";
   attribute MARK_DEBUG of overlay_key : signal is "TRUE";
   attribute MARK_DEBUG of overlay_rgb : signal is "TRUE";
-  attribute MARK_DEBUG of pick_bus : signal is "TRUE";
-  attribute MARK_DEBUG of in_window : signal is "TRUE";
   attribute MARK_DEBUG of cpu_rdata_i : signal is "TRUE";
 
 
@@ -94,6 +93,10 @@ architecture rtl of overlay_framebuffer is
     variable ly          : unsigned(10 downto 0);
     variable w           : unsigned(10 downto 0);
     variable h           : unsigned(10 downto 0);
+    variable tw          : unsigned(10 downto 0);
+    variable th          : unsigned(10 downto 0);
+    variable lx_tile     : unsigned(10 downto 0);
+    variable ly_tile     : unsigned(10 downto 0);
   begin
     v_hit  := '0';
     v_addr := (others => '0');
@@ -109,8 +112,25 @@ architecture rtl of overlay_framebuffer is
             lx := x_screen - unsigned(slots(i).x);
             ly := y_screen - unsigned(slots(i).y);
             if lx < w and ly < h then
-              v_addr_calc := resize(unsigned(slots(i).base), v_addr_calc'length)
-                             + ly * w + lx;
+              tw := unsigned(slots(i).tile_w);
+              th := unsigned(slots(i).tile_h);
+              if tw = 0 then
+                tw := w;
+              end if;
+              if th = 0 then
+                th := h;
+              end if;
+
+              if tw /= 0 and th /= 0 then
+                lx_tile := lx mod tw;
+                ly_tile := ly mod th;
+                v_addr_calc := resize(unsigned(slots(i).base), v_addr_calc'length)
+                               + ly_tile * tw + lx_tile;
+              else
+                v_addr_calc := resize(unsigned(slots(i).base), v_addr_calc'length)
+                               + ly * w + lx;
+              end if;
+
               if v_addr_calc < G_DEPTH then
                 v_hit  := '1';
                 v_addr := resize(v_addr_calc, G_ADDR_WIDTH);

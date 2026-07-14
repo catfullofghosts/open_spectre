@@ -1,22 +1,25 @@
 !!! REMEMBER IF SOMETHIGN DOESNT WORK CHECK THE REST AND H/Vsync are correct poliarity!!!!
 
 
+NEXT build check:
+done - check oscilator wavweforms working now with derivation added (do sim first) -- fixed
+- check osc speed slow on vertical sync, is it fast enough now (changed from 23-17 clock counter per toggle)-- highest speed not fastenough, slowest speed way too slow for verical
+
+issue - check edge thickness comes from the correct diretion -- direction of width fixed but now some lines missing vericly?!
+- check overlay debug and sprite debug (full signal debug using 'dont touch') 
+done----- - check slow counters still work after mid frame gating
+- 1bit CA full debug (why freezing, look at intergration)
+- check resolution change
+done------ check if alpha blending still has the hard right edge ---fixed
+
+
 to do before next build:
 - look for 1bit ca issue -- added debug put reset to 0
 - add dont touch to overlay signals added debug
-- fix edge direction -- fixed edges, were backwards
+- fix edge direction -- fixed edges, were backwards-- working but falling and rising are revered in the matrix? were they always like that
 - try to fix osc derivation issue -- out assign was only in th sinwave part of the case statement
 - check if alpha blending still has the hard right edge
 
-NEXT build check:
-- check oscilator wavweforms working now with derivation added (do sim first)
-- check osc speed slow on vertical sync, is it fast enough now (changed from 23-17 clock counter per toggle)
-
-- check edge thickness comes from the correct diretion
-- check overlay debug and sprite debug (full signal debug using 'dont touch')
-- check slow counters still work after mid frame gating
-- 1bit CA full debug (why freezing, look at intergration)
-- check resolution change
 
 
 2/7/2026:

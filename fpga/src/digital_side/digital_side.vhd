@@ -42,7 +42,7 @@ entity digital_side is
     ext_vid_in     : in std_logic_vector(7 downto 0);
     vid_span       : in std_logic_vector(7 downto 0);
     edge_width     : in std_logic_vector(1 downto 0); -- 00=2px, 01=4px, 10=6px, 11=8px
-    ca_rule        : in std_logic_vector(7 downto 0);  -- elementary CA rule 0-255
+    ca_cfg         : in std_logic_vector(15 downto 0); -- [7:0] rule, [11:8] ctrl
 
     -- inputs form analoge side
     osc1_sqr : in std_logic :='0';
@@ -283,12 +283,15 @@ cdc_pix_100 : process(clk)
     output     => edge_detector_out
     );
 
-  ca_1d : entity work.ca_1d_stream -- EXTRA 1 bit CA 
+  ca_1d : entity work.ca_1d_stream -- EXTRA 1 bit CA
     port map (
       clk     => clk,
-      rst     => v_sync_i, -- was v_sync_i, but that would make every row identical given the same iput
+      rst     => h_sync_i, -- line reset: each scanline evolves left-to-right from a clean state
       step_en => pix_clk_i,
-      rule    => ca_rule,
+      rule    => ca_cfg(7 downto 0),
+      ctrl    => ca_cfg(11 downto 8),
+      y_line  => y_count(7 downto 0),
+      x_pos   => x_count(7 downto 0),
       inject  => inv_out(1),
       ca_out  => ca_out
     );

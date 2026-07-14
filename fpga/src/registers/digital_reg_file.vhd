@@ -131,7 +131,7 @@ entity digital_reg_file is
     pix_clk_div_sel     : out std_logic; -- 0 = /2, 1 = /4 for X and Y digital counters
     ext_vid_in_mux_sel  : out std_logic; -- 0 = luma calc, 1 = y_out
     edge_width_sel      : out std_logic_vector(1 downto 0); -- edge stretch: 00=2px 01=4px 10=6px 11=8px
-    ca_rule             : out std_logic_vector(7 downto 0);  -- 1D CA Wolfram rule 0-255
+    ca_cfg              : out std_logic_vector(15 downto 0); -- [7:0] Wolfram rule, [11:8] line-mod ctrl
     -- Luma key control
     luma_key_enable     : out std_logic;
     luma_key_direction  : out std_logic; -- 0 = key < threshold, 1 = key > threshold
@@ -287,7 +287,7 @@ architecture RTL of digital_reg_file is
   signal pix_clk_div_sel_i    : std_logic;
   signal ext_vid_in_mux_sel_i : std_logic;
   signal edge_width_sel_i     : std_logic_vector(1 downto 0) := "00"; -- default 2px edge width
-  signal ca_rule_i            : std_logic_vector(7 downto 0) := x"1E"; -- default Rule 30
+  signal ca_cfg_i             : std_logic_vector(15 downto 0) := x"021E"; -- Rule 30 + rule_xor_y on by default
   -- Luma key control
   signal luma_key_enable_i     : std_logic;
   signal luma_key_direction_i  : std_logic;
@@ -317,7 +317,9 @@ architecture RTL of digital_reg_file is
     y      => (others => '0'),
     width  => (others => '0'),
     height => (others => '0'),
-    base   => (others => '0')
+    base   => (others => '0'),
+    tile_w => (others => '0'),
+    tile_h => (others => '0')
   ));
   signal exception_addr : std_logic; -- toggles on address out of range error for reg file -- need better solution with reset + exception for sniffer
 
@@ -382,7 +384,7 @@ begin
   regs(ra(x"58")) <= x"0" & cr_level_i & x"0" & y_level_i;
   regs(ra(x"5C")) <= x"00000" & cb_level_i;
   regs(ra(x"78")) <= x"000000" & "00" & edge_width_sel_i & ext_vid_in_mux_sel_i & pix_clk_div_sel_i & col_en_bypass_i & video_active;
-  regs(ra(x"100")) <= x"000000" & ca_rule_i;
+  regs(ra(x"18")) <= x"0000" & ca_cfg_i;
   -- Luma key control
   regs(ra(x"C8")) <= luma_key_enable_i & luma_key_direction_i & "00000000000000" & luma_key_thresh_high_i & luma_key_thresh_low_i;
   -- Alpha controls for analog side
@@ -415,7 +417,7 @@ begin
   begin
     regs(ra(std_logic_vector(c_base + 0))) <= "000000000" & overlay_sprites_i(i).y & overlay_sprites_i(i).x & overlay_sprites_i(i).enable;
     regs(ra(std_logic_vector(c_base + 4))) <= "000000000" & overlay_sprites_i(i).height & '0' & overlay_sprites_i(i).width;
-    regs(ra(std_logic_vector(c_base + 8))) <= "000000000000000000000" & overlay_sprites_i(i).base;
+    regs(ra(std_logic_vector(c_base + 8))) <= overlay_sprites_i(i).tile_h(9 downto 0) & overlay_sprites_i(i).tile_w & overlay_sprites_i(i).base;
   end generate g_sprite_read;
 
   -- Frame video stats (read-only @ 0x180, bytes increase with address)
@@ -492,6 +494,8 @@ begin
                 overlay_sprites_i(v_sprite_idx).height <= write_reg(21 downto 11);
               when x"8" =>
                 overlay_sprites_i(v_sprite_idx).base   <= write_reg(10 downto 0);
+                overlay_sprites_i(v_sprite_idx).tile_w <= write_reg(21 downto 11);
+                overlay_sprites_i(v_sprite_idx).tile_h <= '0' & write_reg(31 downto 22);
               when others =>
                 null;
             end case;
@@ -580,8 +584,8 @@ begin
             pix_clk_div_sel_i <= write_reg(2);
             ext_vid_in_mux_sel_i <= write_reg(3);
             edge_width_sel_i <= write_reg(5 downto 4);
-          when x"100" =>
-            ca_rule_i <= write_reg(7 downto 0);
+          when x"18" =>
+            ca_cfg_i <= write_reg(15 downto 0);
           when x"C8" =>
             luma_key_enable_i <= write_reg(31);
             luma_key_direction_i <= write_reg(30);
@@ -709,7 +713,7 @@ begin
   pix_clk_div_sel <= pix_clk_div_sel_i;
   ext_vid_in_mux_sel <= ext_vid_in_mux_sel_i;
   edge_width_sel <= edge_width_sel_i;
-  ca_rule        <= ca_rule_i;
+  ca_cfg         <= ca_cfg_i;
   
   luma_key_enable <= luma_key_enable_i;
   luma_key_direction <= luma_key_direction_i;
