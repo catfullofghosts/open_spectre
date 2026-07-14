@@ -603,6 +603,25 @@ class RegisterControlWidget(QWidget):
         offset = int(addr, 16) if isinstance(addr, str) else int(addr)
         return f"0x{(self.REG_BASE_ADDR + offset):08X}"
 
+    def _init_ca_register_defaults(self):
+        """Match FPGA default ca_cfg = 0x021E (rule 30 + rule_xor_y)."""
+        full_addr = self._resolve_full_addr("0x18")
+        self.register_values[full_addr] = 0x021E
+        ca_defaults = {
+            "ca_rule": 30,
+            "ca_inject_xor_y0": 0,
+            "ca_rule_xor_y": 1,
+            "ca_line_seed_y0": 0,
+            "ca_inject_xor_x0": 0,
+        }
+        for name, value in ca_defaults.items():
+            slider = self.registers[name]["widget"].findChild(QSlider)
+            spinbox = self.registers[name]["widget"].findChild(QSpinBox)
+            if slider is not None:
+                slider.setValue(value)
+            if spinbox is not None:
+                spinbox.setValue(value)
+
     def _add_section(self, scroll_layout, title, register_defs):
         section = QGroupBox(title)
         section_layout = QVBoxLayout(section)
@@ -691,7 +710,6 @@ class RegisterControlWidget(QWidget):
             ("0xDC", "noise_alpha", "Noise Alpha", 12, 0, 4095, 0),
         ]
         digital_defs = [
-            ("0x18", "ca_cfg", "1D CA Config (rule + ctrl)", 16, 0, 65535, 0x021E),
             ("0xFC", "overlay_global_en", "Overlay Enable", 1, 0, 1, 0),
             ("0x100", "sprite0_enable", "Sprite0 Enable", 1, 0, 1, 0),
             ("0x100", "sprite0_x", "Sprite0 X", 11, 1, 2047, 0),
@@ -700,11 +718,20 @@ class RegisterControlWidget(QWidget):
             ("0x104", "sprite0_height", "Sprite0 Height", 11, 11, 2047, 0),
             ("0x108", "sprite0_base", "Sprite0 BRAM Base", 11, 0, 2047, 0),
         ]
+        ca_defs = [
+            ("0x18", "ca_rule", "CA Wolfram Rule", 8, 0, 255, 0),
+            ("0x18", "ca_inject_xor_y0", "CA Inject XOR Y0", 1, 0, 1, 8),
+            ("0x18", "ca_rule_xor_y", "CA Rule XOR Y", 1, 0, 1, 9),
+            ("0x18", "ca_line_seed_y0", "CA Line Seed Y0", 1, 0, 1, 10),
+            ("0x18", "ca_inject_xor_x0", "CA Inject XOR X0", 1, 0, 1, 11),
+        ]
 
         self._add_section(scroll_layout, "Shape Gen 1", shape1_defs)
         self._add_section(scroll_layout, "Shape Gen 2", shape2_defs)
         self._add_section(scroll_layout, "OSC 1", osc1_defs)
         self._add_section(scroll_layout, "OSC 2", osc2_defs)
+        self._add_section(scroll_layout, "1D CA", ca_defs)
+        self._init_ca_register_defaults()
         self._add_section(scroll_layout, "Digital Matrix", digital_defs)
         self._add_section(scroll_layout, "Other Controls", other_defs)
         

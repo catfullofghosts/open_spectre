@@ -1,7 +1,27 @@
 !!! REMEMBER IF SOMETHIGN DOESNT WORK CHECK THE REST AND H/Vsync are correct poliarity!!!!
 
+-------------
+to do: numbers are priority
+1 easy- 1 bit ca needs to have enable devided by 8 minimum
+1 easy- also needs to have a propper reset to stop rolling
+3- re-introduce video FX
+3- re introduce frame stats
+2- add audio in basic
+1- look at the shape outs from the analog matrix, can i devide the outputs to the shape gen by like 16? so they are in a more appropriate range?
+2- add filter to audio to get T and B
+
 
 NEXT build check:
+check 1 bit CA
+
+investigate functions for sprites and how they work, they work in isolation but 
+the gui doent work so there si something im missing
+
+
+
+------------------
+
+old checks
 done - check oscilator wavweforms working now with derivation added (do sim first) -- fixed
 - check osc speed slow on vertical sync, is it fast enough now (changed from 23-17 clock counter per toggle)-- highest speed not fastenough, slowest speed way too slow for verical
 

@@ -22,6 +22,7 @@ import argparse
 import os
 import sys
 import logging
+import random
 import time
 from datetime import datetime
 from core import * #core file is local
@@ -399,6 +400,41 @@ def fill_overlay_checkerboard(base, width, height):
                 for lx in range(width):
                     pixel = red if (lx + ly) % 2 == 0 else cyan
                     write_overlay_bram_word(base + ly * width + lx, pixel)
+
+
+def fill_overlay_noise(base=0, width=32, height=32, seed=1, sparse=0.0):
+            """Fill a BRAM atlas region with pseudo-random opaque RGB noise.
+
+            base/width/height: word-addressed sprite atlas rectangle at buffer start.
+            seed: RNG seed for reproducible patterns.
+            sparse: 0.0 = every pixel opaque noise; higher values randomly leave pixels transparent.
+            """
+            base, width, height = int(base), int(width), int(height)
+            sparse = float(sparse)
+            if not 0.0 <= sparse < 1.0:
+                raise ValueError(f"sparse must be in [0.0, 1.0), got {sparse}")
+            if base + width * height > OVERLAY_BRAM_WORDS:
+                raise ValueError(
+                    f"noise fill needs {width * height} words at base {base}, "
+                    f"max {OVERLAY_BRAM_WORDS} words available"
+                )
+
+            rng = random.Random(seed)
+            print(
+                f"[overlay] Filling noise {width}x{height} at BRAM base {base} "
+                f"(seed={seed}, sparse={sparse})..."
+            )
+            for ly in range(height):
+                for lx in range(width):
+                    if sparse > 0.0 and rng.random() < sparse:
+                        pixel = 0x00000000
+                    else:
+                        r = rng.randint(0, 255)
+                        g = rng.randint(0, 255)
+                        b = rng.randint(0, 255)
+                        pixel = 0x80000000 | (b << 16) | (g << 8) | r
+                    write_overlay_bram_word(base + ly * width + lx, pixel)
+            print(f"[overlay] Wrote {width * height} noise words.")
 
 
 def test_overlay_visible(
@@ -852,16 +888,18 @@ if __name__ == "__main__":
     ############ Overlay test — checkerboard sprite on screen
     ################################################################
     # Bypass colour encoder so overlay RGB shows directly (already set above via wr_reg('78', 2))
-    # test_overlay_visible(
-    #     sprite_idx=0,
-    #     screen_w=720,
-    #     screen_h=576,
-    #     tile_w=16,
-    #     tile_h=16,
-    #     x=0,
-    #     y=0,
-    #     base=0,
-    # )
+    test_overlay_visible(
+        sprite_idx=0,
+        screen_w=720,
+        screen_h=576,
+        tile_w=16,
+        tile_h=16,
+        x=0,
+        y=0,
+        base=0,
+    )
+
+
 
     ################################################################
     ############ 1D CA mode tests — xy_inv_out_2 (X counter bit 2)
@@ -869,11 +907,11 @@ if __name__ == "__main__":
     ################################################################
     # Uncomment one block below (comment overlay test above if using CA).
 
-    test_ca_mode_plain(rule=30, dwell_sec=10)
-    test_ca_mode_rule_xor_y(rule=30, dwell_sec=10)
-    test_ca_mode_inject_xor_y0(rule=30, dwell_sec=10)
-    test_ca_mode_line_seed_y0(rule=30, dwell_sec=10)
-    test_ca_mode_inject_xor_x0(rule=30, dwell_sec=10)
+    # test_ca_mode_plain(rule=30, dwell_sec=10)
+    # test_ca_mode_rule_xor_y(rule=30, dwell_sec=10)
+    # test_ca_mode_inject_xor_y0(rule=30, dwell_sec=10)
+    # test_ca_mode_line_seed_y0(rule=30, dwell_sec=10)
+    # test_ca_mode_inject_xor_x0(rule=30, dwell_sec=10)
 
     # Or step through all modes automatically:
     # test_ca_all_modes(rule=30, dwell_sec=10)
