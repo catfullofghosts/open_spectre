@@ -77,7 +77,7 @@ begin
       ext_vid_in     => ext_vid_in,
       vid_span       => vid_span,
       edge_width     => "01",
-      ca_cfg        => x"021E"
+      ca_cfg        => x"C21E"
     );
 
   clk_process : process

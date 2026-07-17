@@ -39,6 +39,7 @@ entity overlay_framebuffer is
     v_sync    : in  std_logic;
 
     global_enable : in  std_logic;
+    block_div     : in  std_logic_vector(2 downto 0); -- 0=/1 1=/2 2=/4 3=/8 4=/16
     sprites       : in  t_sprite_array;
 
     overlay_key : out std_logic;
@@ -61,6 +62,7 @@ architecture rtl of overlay_framebuffer is
   signal y_pos       : unsigned(10 downto 0) := (others => '0');
 
   signal sprites_r   : t_sprite_array;
+  signal block_div_r : std_logic_vector(2 downto 0);
   signal global_en_r : std_logic;
   signal h_act_r     : std_logic;
   signal v_act_r     : std_logic;
@@ -125,12 +127,29 @@ architecture rtl of overlay_framebuffer is
     end if;
   end function f_wrap_coord;
 
+  function f_shr_div (
+    value   : unsigned(10 downto 0);
+    div_sel : std_logic_vector(2 downto 0)
+  ) return unsigned is
+    variable shift_amt : natural;
+  begin
+    case div_sel is
+      when "001" => shift_amt := 1;
+      when "010" => shift_amt := 2;
+      when "011" => shift_amt := 3;
+      when "100" => shift_amt := 4;
+      when others => shift_amt := 0;
+    end case;
+    return shift_right(value, shift_amt);
+  end function f_shr_div;
+
 begin
 
   p_sprite_sync : process (pix_clk) is
   begin
     if rising_edge(pix_clk) then
-      sprites_r <= sprites;
+      sprites_r   <= sprites;
+      block_div_r <= block_div;
     end if;
   end process p_sprite_sync;
 
@@ -294,13 +313,13 @@ begin
         end if;
 
         s2_base <= s1_base;
-        s2_lx_t <= s1_lx;
-        s2_ly_t <= s1_ly;
+        s2_lx_t <= f_shr_div(s1_lx, block_div_r);
+        s2_ly_t <= f_shr_div(s1_ly, block_div_r);
         s2_tw   <= tw_v;
 
         if f_is_pow2(tw_v) and f_is_pow2(th_v) and tw_v /= 0 and th_v /= 0 then
-          s2_lx_t <= f_wrap_coord(s1_lx, tw_v);
-          s2_ly_t <= f_wrap_coord(s1_ly, th_v);
+          s2_lx_t <= f_shr_div(f_wrap_coord(s1_lx, tw_v), block_div_r);
+          s2_ly_t <= f_shr_div(f_wrap_coord(s1_ly, th_v), block_div_r);
         end if;
       else
         hit_v := '0';

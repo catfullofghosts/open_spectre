@@ -114,6 +114,7 @@ architecture Behavioral of digital_side is
   signal ff_out_a          : std_logic;
   signal ff_out_b          : std_logic;
   signal ca_out            : std_logic;
+  signal ca_frame_active   : std_logic;
 
   signal comp_output : std_logic_vector (6 downto 0);
 
@@ -283,17 +284,22 @@ cdc_pix_100 : process(clk)
     output     => edge_detector_out
     );
 
+  ca_frame_active <= '1' when h_sync_i = '0' and v_sync_i = '0' else '0';
+
   ca_1d : entity work.ca_1d_stream -- EXTRA 1 bit CA
     port map (
-      clk     => clk,
-      rst     => h_sync_i, -- line reset: each scanline evolves left-to-right from a clean state
-      step_en => pix_clk_i,
-      rule    => ca_cfg(7 downto 0),
-      ctrl    => ca_cfg(11 downto 8),
-      y_line  => y_count(7 downto 0),
-      x_pos   => x_count(7 downto 0),
-      inject  => inv_out(1),
-      ca_out  => ca_out
+      clk          => clk,
+      rst          => h_sync_i,
+      step_en      => pix_clk_i,
+      frame_active => ca_frame_active,
+      rule         => ca_cfg(7 downto 0),
+      ctrl         => ca_cfg(11 downto 8),
+      x_div        => ca_cfg(15 downto 14),
+      y_div        => ca_cfg(13 downto 12),
+      y_line       => y_count(7 downto 0),
+      x_pos        => x_count(7 downto 0),
+      inject       => inv_out(1),
+      ca_out       => ca_out
     );
 
   delay_in_vec <= '0' & delay_in;

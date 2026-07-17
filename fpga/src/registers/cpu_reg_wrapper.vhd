@@ -144,6 +144,7 @@ entity cpu_reg_wrapper is
     video_fx_chromatic : out std_logic_vector(31 downto 0);
     video_fx_sharpness : out std_logic_vector(31 downto 0);
     overlay_global_en  : out std_logic;
+    overlay_block_div  : out std_logic_vector(2 downto 0);
     overlay_sprites    : out t_sprite_array;
 
     frame_stats_luma_min : in  std_logic_vector(7 downto 0);
@@ -248,6 +249,7 @@ architecture rtl of cpu_reg_wrapper is
   signal  i_video_fx_chromatic : std_logic_vector(31 downto 0);
   signal  i_video_fx_sharpness : std_logic_vector(31 downto 0);
   signal  i_overlay_global_en  : std_logic;
+  signal  i_overlay_block_div  : std_logic_vector(2 downto 0);
   signal  i_overlay_sprites     : t_sprite_array;
 
   
@@ -355,6 +357,7 @@ begin
       video_fx_chromatic => i_video_fx_chromatic,
       video_fx_sharpness => i_video_fx_sharpness,
       overlay_global_en  => i_overlay_global_en,
+      overlay_block_div  => i_overlay_block_div,
       overlay_sprites    => i_overlay_sprites,
       frame_stats_luma_min => frame_stats_luma_min,
       frame_stats_luma_max => frame_stats_luma_max,
@@ -445,6 +448,7 @@ begin
       video_fx_chromatic  <= i_video_fx_chromatic;
       video_fx_sharpness  <= i_video_fx_sharpness;
       overlay_global_en   <= i_overlay_global_en;
+      overlay_block_div   <= i_overlay_block_div;
       overlay_sprites     <= i_overlay_sprites;
       end if;
     end process;

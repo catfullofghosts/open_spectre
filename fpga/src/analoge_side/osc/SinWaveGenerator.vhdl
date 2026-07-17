@@ -44,6 +44,7 @@ architecture Behavioral of SinWaveGenerator is
     signal square_i : STD_LOGIC := '0';
     signal sync_edge : STD_LOGIC := '0';
     signal sync_in : STD_LOGIC := '0';
+    signal speed_eff : STD_LOGIC := '0';
     signal dist_freq : STD_LOGIC_VECTOR(15 downto 0) := (others => '1');
     signal pwm_threshold : integer range 0 to 360 := 180; -- PWM threshold for duty cycle control
     
@@ -478,6 +479,7 @@ begin
         
 
     process(clk, reset, sync_in)
+        variable phase_inc : integer range 0 to 127;
     begin
         if reset = '1' then
             counter <= (others => '0');
@@ -495,7 +497,11 @@ begin
                 sync_in <= sync_plus;
             elsif sync_sel = "10" then 
                 sync_in <= sync_minus;
+            else
+                sync_in <= '0';
             end if;
+
+            speed_eff <= '0' when sync_sel = "10" else speed;
         
             if sync_in = '1' and sync_edge = '0' then
                 sync_edge <= '1';
@@ -509,7 +515,7 @@ begin
                 sync_edge <= sync_in;
                 
                 -- Prescaler logic: when speed is on, only increment counters every 24th clock
-                if speed = '0' then
+                if speed_eff = '0' then
                     -- Normal speed: increment every clock
                     counter <= counter + 1;
                     counterB <= counterB + 1;
@@ -535,31 +541,39 @@ begin
                 end if; 
                 if counter = scaled_freq then
                     counter <= (others => '0');
-                    if speed = '1' then
+                    if speed_eff = '1' then
                         prescaler <= (others => '0');
                     end if;
                     if phase_accumulator >= 360 then
                         phase_accumulator <= 0;
                     else
-                        if sync_sel = "10" then 
-                        phase_accumulator <= phase_accumulator + 8;
+                        if sync_sel = "10" then
+                            phase_inc := 64 - to_integer(unsigned(freq_reg(5 downto 0)));
+                            if phase_inc < 1 then
+                                phase_inc := 1;
+                            end if;
+                            phase_accumulator <= phase_accumulator + phase_inc;
                         else
-                        phase_accumulator <= phase_accumulator + 1;
+                            phase_accumulator <= phase_accumulator + 1;
                         end if;
                     end if;
                 end if;
                 if counterB = dist_freq then
                     counterB <= (others => '0');
-                    if speed = '1' then
+                    if speed_eff = '1' then
                         prescalerB <= (others => '0');
                     end if;
                     if phase_accumulatorB >= 360 then
                         phase_accumulatorB <= 0;
                     else
-                        if sync_sel = "10" then 
-                        phase_accumulatorB <= phase_accumulatorB + 8;
+                        if sync_sel = "10" then
+                            phase_inc := 64 - to_integer(unsigned(freq_reg(5 downto 0)));
+                            if phase_inc < 1 then
+                                phase_inc := 1;
+                            end if;
+                            phase_accumulatorB <= phase_accumulatorB + phase_inc;
                         else
-                        phase_accumulatorB <= phase_accumulatorB + 1;
+                            phase_accumulatorB <= phase_accumulatorB + 1;
                         end if;
                     end if;
                 end if;

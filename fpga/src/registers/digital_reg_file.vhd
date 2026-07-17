@@ -157,6 +157,7 @@ entity digital_reg_file is
     video_fx_sharpness : out std_logic_vector(31 downto 0);
     -- Overlay sprites (shared BRAM atlas, up to C_NUM_SPRITES slots)
     overlay_global_en : out std_logic;
+    overlay_block_div : out std_logic_vector(2 downto 0); -- 0=/1 1=/2 2=/4 3=/8 4=/16
     overlay_sprites   : out t_sprite_array;
 
     -- Final video frame stats (read-only, filtered over 4 frames)
@@ -287,7 +288,7 @@ architecture RTL of digital_reg_file is
   signal pix_clk_div_sel_i    : std_logic;
   signal ext_vid_in_mux_sel_i : std_logic;
   signal edge_width_sel_i     : std_logic_vector(1 downto 0) := "00"; -- default 2px edge width
-  signal ca_cfg_i             : std_logic_vector(15 downto 0) := x"021E"; -- Rule 30 + rule_xor_y on by default
+  signal ca_cfg_i             : std_logic_vector(15 downto 0) := x"C21E"; -- Rule 30, rule_xor_y, /8 X&Y
   -- Luma key control
   signal luma_key_enable_i     : std_logic;
   signal luma_key_direction_i  : std_logic;
@@ -311,6 +312,7 @@ architecture RTL of digital_reg_file is
   signal video_fx_chromatic_i : std_logic_vector(31 downto 0) := (others => '0');
   signal video_fx_sharpness_i : std_logic_vector(31 downto 0) := (others => '0');
   signal overlay_global_en_i : std_logic := '0';
+  signal overlay_block_div_i : std_logic_vector(2 downto 0) := "000";
   signal overlay_sprites_i   : t_sprite_array := (others => (
     enable => '0',
     x      => (others => '0'),
@@ -423,7 +425,7 @@ begin
   -- Sharpness/blur: [0]=en, [1]=mode (0=blur 1=sharp), [15:8]=strength
   regs(ra(x"F8")) <= video_fx_sharpness_i;
   -- Overlay master enable
-  regs(ra(x"FC")) <= "0000000000000000000000000000000" & overlay_global_en_i;
+  regs(ra(x"FC")) <= "0000000000000000000000000000" & overlay_block_div_i & overlay_global_en_i;
 
   g_sprite_read : for i in 0 to C_NUM_SPRITES - 1 generate
     constant c_base : unsigned(12 downto 0) :=
@@ -540,6 +542,7 @@ begin
         -- Decode overlay global enable by low byte to avoid width-mismatch compares.
         if addr_reg(7 downto 0) = x"FC" then
           overlay_global_en_i <= write_reg(0);
+          overlay_block_div_i <= write_reg(3 downto 1);
         elsif addr_reg(11 downto 8) = x"1"
               and unsigned(addr_reg(7 downto 4)) <= C_NUM_SPRITES - 1 then
           null; -- sprite descriptor writes handled by p_sprite_decode/p_sprite_apply
@@ -782,6 +785,7 @@ begin
   video_fx_sharpness <= video_fx_sharpness_i;
 
   overlay_global_en <= overlay_global_en_i;
+  overlay_block_div <= overlay_block_div_i;
   overlay_sprites   <= overlay_sprites_r;
 
   Rotery_addr_mux     <= Rotery_addr_mux_i;

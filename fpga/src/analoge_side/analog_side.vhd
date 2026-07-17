@@ -28,6 +28,26 @@ library work;
 use work.array_pck.all;
 
 entity analog_side is
+  generic (
+    -- Right-shift divisors on analog-matrix channels into shape generators.
+    -- Shift N divides by 2^N (e.g. 4 => /16). 0 = no scaling.
+    G_SHAPE1_POS_H_SHIFT   : natural := 4;
+    G_SHAPE1_POS_V_SHIFT   : natural := 4;
+    G_SHAPE1_ZOOM_H_SHIFT  : natural := 0;
+    G_SHAPE1_ZOOM_V_SHIFT  : natural := 0;
+    G_SHAPE1_CIRCLE_SHIFT  : natural := 0;
+    G_SHAPE1_GEAR_SHIFT    : natural := 0;
+    G_SHAPE1_LANTERN_SHIFT : natural := 0;
+    G_SHAPE1_FIZZ_SHIFT    : natural := 0;
+    G_SHAPE2_POS_H_SHIFT   : natural := 4;
+    G_SHAPE2_POS_V_SHIFT   : natural := 4;
+    G_SHAPE2_ZOOM_H_SHIFT  : natural := 0;
+    G_SHAPE2_ZOOM_V_SHIFT  : natural := 0;
+    G_SHAPE2_CIRCLE_SHIFT  : natural := 0;
+    G_SHAPE2_GEAR_SHIFT    : natural := 0;
+    G_SHAPE2_LANTERN_SHIFT : natural := 0;
+    G_SHAPE2_FIZZ_SHIFT    : natural := 0
+  );
   port
   (
 
@@ -201,6 +221,31 @@ architecture Behavioral of analog_side is
   signal not_gain_in  : std_logic_vector(15 downto 0);
 
   constant c_zero_12 : std_logic_vector(11 downto 0) := (others => '0');
+
+  type shape_shift_array is array (natural range <>) of natural;
+
+  function f_matrix_shift (
+    v     : std_logic_vector(11 downto 0);
+    shift : natural
+  ) return std_logic_vector is
+  begin
+    if shift = 0 then
+      return v;
+    elsif shift >= 12 then
+      return (others => '0');
+    else
+      return std_logic_vector(shift_right(unsigned(v), shift));
+    end if;
+  end function f_matrix_shift;
+
+  constant C_SHAPE_MATRIX_SHIFTS : shape_shift_array(0 to 15) := (
+    G_SHAPE1_POS_H_SHIFT, G_SHAPE1_POS_V_SHIFT, G_SHAPE1_ZOOM_H_SHIFT, G_SHAPE1_ZOOM_V_SHIFT,
+    G_SHAPE1_CIRCLE_SHIFT, G_SHAPE1_GEAR_SHIFT, G_SHAPE1_LANTERN_SHIFT, G_SHAPE1_FIZZ_SHIFT,
+    G_SHAPE2_POS_H_SHIFT, G_SHAPE2_POS_V_SHIFT, G_SHAPE2_ZOOM_H_SHIFT, G_SHAPE2_ZOOM_V_SHIFT,
+    G_SHAPE2_CIRCLE_SHIFT, G_SHAPE2_GEAR_SHIFT, G_SHAPE2_LANTERN_SHIFT, G_SHAPE2_FIZZ_SHIFT
+  );
+
+  signal shape_matrix_out : array_12(15 downto 0);
   
   attribute MARK_DEBUG : string;
   attribute MARK_DEBUG of pos_h_1 : signal is "TRUE";
@@ -212,6 +257,10 @@ architecture Behavioral of analog_side is
 
 
 begin
+
+  gen_shape_matrix_shift : for i in 0 to 15 generate
+    shape_matrix_out(i) <= f_matrix_shift(outputs(i), C_SHAPE_MATRIX_SHIFTS(i));
+  end generate gen_shape_matrix_shift;
 
   --split incoming YUV data from the digital side to the 11 bit mixer
   y_digital <= YUV_in(23 downto 16) & "0000";
@@ -319,56 +368,56 @@ begin
   pos_h_1_mix : entity work.AdderSub_12bit_Clamp 
   port map(
   clk => clk,
-  A => outputs(0),
+  A => shape_matrix_out(0),
   B => pos_h_1,
   SUM => mixed_pos_h_1
   );
   pos_v_1_mix : entity work.AdderSub_12bit_Clamp 
   port map(
   clk => clk,
-  A => outputs(1),
+  A => shape_matrix_out(1),
   B => pos_v_1,
   SUM => mixed_pos_v_1
   );
   zoom_h_1_mix : entity work.AdderSub_12bit_Clamp 
   port map(
   clk => clk,
-  A => outputs(2),
+  A => shape_matrix_out(2),
   B => zoom_h_1,
   SUM => mixed_zoom_h_1
   );
   zoom_v_1_mix : entity work.AdderSub_12bit_Clamp 
   port map(
   clk => clk,
-  A => outputs(3),
+  A => shape_matrix_out(3),
   B => zoom_v_1,
   SUM => mixed_zoom_v_1
   );
   circle_1_mix : entity work.AdderSub_12bit_Clamp 
   port map(
   clk => clk,
-  A => outputs(4),
+  A => shape_matrix_out(4),
   B => circle_1,
   SUM => mixed_circle_1
   );
   gear_1_mix : entity work.AdderSub_12bit_Clamp 
   port map(
   clk => clk,
-  A => outputs(5),
+  A => shape_matrix_out(5),
   B => gear_1,
   SUM => mixed_gear_1
   );
   lantern_1_mix : entity work.AdderSub_12bit_Clamp 
   port map(
   clk => clk,
-  A => outputs(6),
+  A => shape_matrix_out(6),
   B => lantern_1,
   SUM => mixed_lantern_1
   );
   fizz_1_mix : entity work.AdderSub_12bit_Clamp 
   port map(
   clk => clk,
-  A => outputs(7),
+  A => shape_matrix_out(7),
   B => fizz_1,
   SUM => mixed_fizz_1
   );
@@ -377,56 +426,56 @@ begin
    pos_h_2_mix : entity work.AdderSub_12bit_Clamp 
   port map(
   clk => clk,
-  A => outputs(8),
+  A => shape_matrix_out(8),
   B => pos_h_2,
   SUM => mixed_pos_h_2
   );
   pos_v_2_mix : entity work.AdderSub_12bit_Clamp 
   port map(
   clk => clk,
-  A => outputs(9),
+  A => shape_matrix_out(9),
   B => pos_v_2,
   SUM => mixed_pos_v_2
   );
   zoom_h_2_mix : entity work.AdderSub_12bit_Clamp 
   port map(
   clk => clk,
-  A => outputs(10),
+  A => shape_matrix_out(10),
   B => zoom_h_2,
   SUM => mixed_zoom_h_2
   );
   zoom_v_2_mix : entity work.AdderSub_12bit_Clamp 
   port map(
   clk => clk,
-  A => outputs(11),
+  A => shape_matrix_out(11),
   B => pos_v_2,
   SUM => mixed_zoom_v_2
   );
   circle_2_mix : entity work.AdderSub_12bit_Clamp 
   port map(
   clk => clk,
-  A => outputs(12),
+  A => shape_matrix_out(12),
   B => circle_2,
   SUM => mixed_circle_2
   );
   gear_2_mix : entity work.AdderSub_12bit_Clamp 
   port map(
   clk => clk,
-  A => outputs(13),
+  A => shape_matrix_out(13),
   B => gear_2,
   SUM => mixed_gear_2
   );
   lantern_2_mix : entity work.AdderSub_12bit_Clamp 
   port map(
   clk => clk,
-  A => outputs(14),
+  A => shape_matrix_out(14),
   B => lantern_2,
   SUM => mixed_lantern_2
   );
   fizz_2_mix : entity work.AdderSub_12bit_Clamp 
   port map(
   clk => clk,
-  A => outputs(15),
+  A => shape_matrix_out(15),
   B => fizz_2,
   SUM => mixed_fizz_2
   );

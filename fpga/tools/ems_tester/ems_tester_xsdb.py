@@ -300,15 +300,32 @@ CA_CTRL_INJECT_XOR_Y0 = 1 << 8
 CA_CTRL_RULE_XOR_Y = 1 << 9
 CA_CTRL_LINE_SEED_Y0 = 1 << 10
 CA_CTRL_INJECT_XOR_X0 = 1 << 11
+CA_DIV_ENCODE = {1: 0, 2: 1, 4: 2, 8: 3}
+OVERLAY_BLOCK_DIV_ENCODE = {1: 0, 2: 1, 4: 2, 8: 3, 16: 4}
+_overlay_fc_state = {"enabled": False, "block_div": 1}
 
 
-def configure_ca(rule=30, inject_xor_y0=False, rule_xor_y=True, line_seed_y0=False, inject_xor_x0=False):
-            """Program 1D CA @ 0x18: rule in [7:0], mode bits in [11:8].
+def _write_overlay_fc_reg():
+            enc = OVERLAY_BLOCK_DIV_ENCODE.get(_overlay_fc_state["block_div"], 0)
+            value = (1 if _overlay_fc_state["enabled"] else 0) | (enc << 1)
+            wr_reg(OVERLAY_GLOBAL_EN_REG, value)
 
-            rule_xor_y (default on): each scanline runs rule XOR line-number — vertical rule morph.
-            line_seed_y0: seed center cell from Y LSB on each h-sync reset.
-            inject_xor_y0/x0: phase-shift inject with line or pixel position.
+
+def configure_ca(
+            rule=30,
+            inject_xor_y0=False,
+            rule_xor_y=True,
+            line_seed_y0=False,
+            inject_xor_x0=False,
+            x_div=8,
+            y_div=8,
+    ):
+            """Program 1D CA @ 0x18: rule [7:0], ctrl [11:8], x_div [15:14], y_div [13:12].
+
+            x_div/y_div: 1, 2, 4, or 8 — blocky CA update stride (default 8).
             """
+            if x_div not in CA_DIV_ENCODE or y_div not in CA_DIV_ENCODE:
+                raise ValueError("x_div and y_div must be one of 1, 2, 4, 8")
             value = int(rule) & 0xFF
             if inject_xor_y0:
                 value |= CA_CTRL_INJECT_XOR_Y0
@@ -318,6 +335,8 @@ def configure_ca(rule=30, inject_xor_y0=False, rule_xor_y=True, line_seed_y0=Fal
                 value |= CA_CTRL_LINE_SEED_Y0
             if inject_xor_x0:
                 value |= CA_CTRL_INJECT_XOR_X0
+            value |= CA_DIV_ENCODE[x_div] << 14
+            value |= CA_DIV_ENCODE[y_div] << 12
             wr_reg(CA_RULE_REG, value)
 
 
@@ -327,7 +346,16 @@ def set_ca_rule(rule):
 
 
 def set_overlay_global_enable(enabled=True):
-            wr_reg(OVERLAY_GLOBAL_EN_REG, 1 if enabled else 0)
+            _overlay_fc_state["enabled"] = bool(enabled)
+            _write_overlay_fc_reg()
+
+
+def set_overlay_block_div(div=1):
+            """Set overlay BRAM address blockiness: 1, 2, 4, 8, or 16."""
+            if div not in OVERLAY_BLOCK_DIV_ENCODE:
+                raise ValueError("block_div must be one of 1, 2, 4, 8, 16")
+            _overlay_fc_state["block_div"] = int(div)
+            _write_overlay_fc_reg()
 
 
 def _sprite_reg_addr(sprite_idx, word_offset):
@@ -470,6 +498,36 @@ def test_overlay_visible(
             print(
                 f"[overlay] Done. Expect a {tile_w}x{tile_h} red/cyan checker "
                 f"repeated over the full {screen_w}x{screen_h} screen."
+            )
+
+
+def test_overlay_multi_sprites(block_div=8):
+            """Example with four visible sprites using separate BRAM atlas regions."""
+            print("[overlay] Loading multi-sprite demo atlases...")
+            fill_overlay_noise(base=0, width=32, height=32, seed=11)
+            fill_overlay_checkerboard(base=1024, width=16, height=16)
+            fill_overlay_sprite(base=1280, width=16, height=16, rgb=0x00FF00, opaque=True)
+            fill_overlay_noise(base=1536, width=16, height=16, seed=99, sparse=0.15)
+
+            sprites = [
+                # idx, x, y, w, h, base, tile_w, tile_h
+                (0, 20, 20, 220, 160, 0, 32, 32),
+                (1, 280, 80, 260, 180, 1024, 16, 16),
+                (2, 520, 300, 180, 140, 1280, 16, 16),
+                (3, 80, 380, 200, 160, 1536, 16, 16),
+            ]
+            for idx, x, y, w, h, base, tw, th in sprites:
+                print(f"[overlay] Sprite {idx} @ ({x},{y}) size {w}x{h}, base={base}")
+                configure_sprite(
+                    idx, x, y, w, h, base,
+                    enable=True, tile_w=tw, tile_h=th,
+                )
+
+            set_overlay_block_div(block_div)
+            set_overlay_global_enable(True)
+            print(
+                f"[overlay] Multi-sprite demo active "
+                f"(noise + checker + green + sparse noise, block_div={block_div})."
             )
 
 
@@ -888,18 +946,21 @@ if __name__ == "__main__":
     ############ Overlay test — checkerboard sprite on screen
     ################################################################
     # Bypass colour encoder so overlay RGB shows directly (already set above via wr_reg('78', 2))
-    test_overlay_visible(
-        sprite_idx=0,
-        screen_w=720,
-        screen_h=576,
-        tile_w=16,
-        tile_h=16,
-        x=0,
-        y=0,
-        base=0,
-    )
+    # test_overlay_visible(
+    #     sprite_idx=0,
+    #     screen_w=720,
+    #     screen_h=576,
+    #     tile_w=16,
+    #     tile_h=16,
+    #     x=0,
+    #     y=0,
+    #     base=0,
+    # )
 
-
+    ################################################################
+    ############ Overlay multi-sprite demo (4 visible sprites)
+    ################################################################
+    test_overlay_multi_sprites(block_div=8)
 
     ################################################################
     ############ 1D CA mode tests — xy_inv_out_2 (X counter bit 2)

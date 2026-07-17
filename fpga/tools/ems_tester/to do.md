@@ -13,6 +13,21 @@ to do: numbers are priority
 
 NEXT build check:
 check 1 bit CA
+-- notes 
+x out 0-3 cause rolling higher vaues dotn have rolling
+ca rule xor Y is ver effective
+ca line seed y0 doent do anything
+ca xor inject y0 doesent do anything these should be driven by other inputs like x
+ydiv cropss the bottom and x dix causes rolling, probs get rid of these if we can stop rolling then we dotn need them
+
+check vertical OSC freq
+better still not as fast as id like, also the resolution of the wavesa becomes super blocky!!!!
+
+check shapes output to analog matrix devider:
+went one step too far,
+also the wave shifts only in 1 direction, need to fix for things like pos, needs to be addtion/subtraction
+
+chekc frame stat regs working now
 
 investigate functions for sprites and how they work, they work in isolation but 
 the gui doent work so there si something im missing

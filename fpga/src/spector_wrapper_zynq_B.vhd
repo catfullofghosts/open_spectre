@@ -308,6 +308,7 @@ architecture rtl of spector_wrapper_zynq is
   signal video_fx_chromatic : std_logic_vector(31 downto 0);
   signal video_fx_sharpness : std_logic_vector(31 downto 0);
   signal overlay_global_en  : std_logic;
+  signal overlay_block_div  : std_logic_vector(2 downto 0);
   signal overlay_sprites      : t_sprite_array;
   signal overlay_key        : std_logic;
   signal overlay_rgb        : std_logic_vector(23 downto 0);
@@ -551,6 +552,7 @@ begin
       video_fx_chromatic  => video_fx_chromatic,
       video_fx_sharpness  => video_fx_sharpness,
       overlay_global_en   => overlay_global_en,
+      overlay_block_div   => overlay_block_div,
       overlay_sprites     => overlay_sprites,
       frame_stats_luma_min => frame_stats_luma_min,
       frame_stats_luma_max => frame_stats_luma_max,
@@ -587,7 +589,8 @@ begin
       h_sync     => h_sync_n,
       v_sync     => v_sync_n,
       global_enable => overlay_global_en,
-      sprites      => overlay_sprites,
+      block_div     => overlay_block_div,
+      sprites       => overlay_sprites,
       overlay_key => overlay_key,
       overlay_rgb => overlay_rgb
     );
@@ -1000,34 +1003,34 @@ begin
 --      video_out    => video_fx_out
 --    );
 
-video_out <= video_pre_fx;
+video_out <= video_fx_out;
 
---  frame_video_stats_inst : entity work.frame_video_stats
---    generic map (
---      G_FILTER_FRAMES => 4
---    )
---    port map (
---      clk       => pix_clk,
---      rst       => reset,
---      h_sync    => h_sync,
---      v_sync    => v_sync,
---      video_in  => video_fx_out,
---      video_out => video_out,
---      stats_luma_min => frame_stats_luma_min,
---      stats_luma_max => frame_stats_luma_max,
---      stats_luma_avg => frame_stats_luma_avg,
---      stats_r_min    => frame_stats_r_min,
---      stats_r_max    => frame_stats_r_max,
---      stats_r_avg    => frame_stats_r_avg,
---      stats_g_min    => frame_stats_g_min,
---      stats_g_max    => frame_stats_g_max,
---      stats_g_avg    => frame_stats_g_avg,
---      stats_b_min    => frame_stats_b_min,
---      stats_b_max    => frame_stats_b_max,
---      stats_b_avg    => frame_stats_b_avg,
---      stats_frame_id => frame_stats_frame_id,
---      stats_frame_hash      => frame_stats_hash,
---      stats_frame_pix_count => frame_stats_pix_count
---    );
+  frame_video_stats_inst : entity work.frame_video_stats
+    generic map (
+      G_FILTER_FRAMES => 4
+    )
+    port map (
+      clk       => pix_clk,
+      rst       => reset,
+      h_sync    => h_sync_n,
+      v_sync    => v_sync_n,
+      video_in  => video_pre_fx,
+      video_out => video_fx_out,
+      stats_luma_min => frame_stats_luma_min,
+      stats_luma_max => frame_stats_luma_max,
+      stats_luma_avg => frame_stats_luma_avg,
+      stats_r_min    => frame_stats_r_min,
+      stats_r_max    => frame_stats_r_max,
+      stats_r_avg    => frame_stats_r_avg,
+      stats_g_min    => frame_stats_g_min,
+      stats_g_max    => frame_stats_g_max,
+      stats_g_avg    => frame_stats_g_avg,
+      stats_b_min    => frame_stats_b_min,
+      stats_b_max    => frame_stats_b_max,
+      stats_b_avg    => frame_stats_b_avg,
+      stats_frame_id => frame_stats_frame_id,
+      stats_frame_hash      => frame_stats_hash,
+      stats_frame_pix_count => frame_stats_pix_count
+    );
 
 end architecture;

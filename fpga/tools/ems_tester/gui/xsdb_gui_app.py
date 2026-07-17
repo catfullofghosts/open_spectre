@@ -604,15 +604,17 @@ class RegisterControlWidget(QWidget):
         return f"0x{(self.REG_BASE_ADDR + offset):08X}"
 
     def _init_ca_register_defaults(self):
-        """Match FPGA default ca_cfg = 0x021E (rule 30 + rule_xor_y)."""
+        """Match FPGA default ca_cfg = 0xC21E (rule 30, rule_xor_y, /8 X&Y)."""
         full_addr = self._resolve_full_addr("0x18")
-        self.register_values[full_addr] = 0x021E
+        self.register_values[full_addr] = 0xC21E
         ca_defaults = {
             "ca_rule": 30,
             "ca_inject_xor_y0": 0,
             "ca_rule_xor_y": 1,
             "ca_line_seed_y0": 0,
             "ca_inject_xor_x0": 0,
+            "ca_x_div": 3,
+            "ca_y_div": 3,
         }
         for name, value in ca_defaults.items():
             slider = self.registers[name]["widget"].findChild(QSlider)
@@ -711,6 +713,7 @@ class RegisterControlWidget(QWidget):
         ]
         digital_defs = [
             ("0xFC", "overlay_global_en", "Overlay Enable", 1, 0, 1, 0),
+            ("0xFC", "overlay_block_div", "Overlay Block Div (0=/1..4=/16)", 3, 0, 4, 1),
             ("0x100", "sprite0_enable", "Sprite0 Enable", 1, 0, 1, 0),
             ("0x100", "sprite0_x", "Sprite0 X", 11, 1, 2047, 0),
             ("0x100", "sprite0_y", "Sprite0 Y", 11, 12, 2047, 0),
@@ -724,6 +727,8 @@ class RegisterControlWidget(QWidget):
             ("0x18", "ca_rule_xor_y", "CA Rule XOR Y", 1, 0, 1, 9),
             ("0x18", "ca_line_seed_y0", "CA Line Seed Y0", 1, 0, 1, 10),
             ("0x18", "ca_inject_xor_x0", "CA Inject XOR X0", 1, 0, 1, 11),
+            ("0x18", "ca_x_div", "CA X Div (0=/1 1=/2 2=/4 3=/8)", 2, 0, 3, 14),
+            ("0x18", "ca_y_div", "CA Y Div (0=/1 1=/2 2=/4 3=/8)", 2, 0, 3, 12),
         ]
 
         self._add_section(scroll_layout, "Shape Gen 1", shape1_defs)
