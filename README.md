@@ -16,7 +16,7 @@ Open to donations and contributors with FPGA experience. 😀
 #### 🎉Aim 🎉
 The aim of this project is to preserve this rare and unique video synth by recreating it in an FPGA, but also to use it as a building block to make a Spectre that is both true to the original and also a modern tool for creativity.
 For more info on this process, take a look at: 
-[Cloning Hardware Ethos](documentation/Cloning%20a%20process%20not%20a%20device.md)
+[Cloning Hardware Ethos](Documentation/Cloning%20a%20process%20not%20a%20device.md)
 
 ### 🍣Want to Contribute?🍣
 Amazing! If you have FPGA and or Verilog/VHDL skills, we would love to have you involved. But first, there are a few things you should know. 
