@@ -295,11 +295,10 @@ OVERLAY_BRAM_WORDS = OVERLAY_BRAM_AXI_BYTES // 4  # 1792 words (VHDL depth is 20
 SPRITE_REG_BASE = 0x100
 SPRITE_REG_STRIDE = 0x10
 CA_RULE_REG = 0x18
+AUDIO_CROSSOVER_REG = 0x0C
 OVERLAY_GLOBAL_EN_REG = 0xFC
-CA_CTRL_INJECT_XOR_Y0 = 1 << 8
 CA_CTRL_RULE_XOR_Y = 1 << 9
-CA_CTRL_LINE_SEED_Y0 = 1 << 10
-CA_CTRL_INJECT_XOR_X0 = 1 << 11
+CA_CTRL_RULE_XOR_X = 1 << 10
 CA_DIV_ENCODE = {1: 0, 2: 1, 4: 2, 8: 3}
 OVERLAY_BLOCK_DIV_ENCODE = {1: 0, 2: 1, 4: 2, 8: 3, 16: 4}
 _overlay_fc_state = {"enabled": False, "block_div": 1}
@@ -313,28 +312,20 @@ def _write_overlay_fc_reg():
 
 def configure_ca(
             rule=30,
-            inject_xor_y0=False,
             rule_xor_y=True,
-            line_seed_y0=False,
-            inject_xor_x0=False,
+            rule_xor_x=False,
             x_div=8,
             y_div=8,
     ):
-            """Program 1D CA @ 0x18: rule [7:0], ctrl [11:8], x_div [15:14], y_div [13:12].
-
-            x_div/y_div: 1, 2, 4, or 8 — blocky CA update stride (default 8).
-            """
+            """Program 1D CA @ 0x18: rule [7:0], rule_xor_y [9], rule_xor_x [10],
+            y_div [13:12], x_div [15:14]. x_div/y_div: 1, 2, 4, or 8."""
             if x_div not in CA_DIV_ENCODE or y_div not in CA_DIV_ENCODE:
                 raise ValueError("x_div and y_div must be one of 1, 2, 4, 8")
             value = int(rule) & 0xFF
-            if inject_xor_y0:
-                value |= CA_CTRL_INJECT_XOR_Y0
             if rule_xor_y:
                 value |= CA_CTRL_RULE_XOR_Y
-            if line_seed_y0:
-                value |= CA_CTRL_LINE_SEED_Y0
-            if inject_xor_x0:
-                value |= CA_CTRL_INJECT_XOR_X0
+            if rule_xor_x:
+                value |= CA_CTRL_RULE_XOR_X
             value |= CA_DIV_ENCODE[x_div] << 14
             value |= CA_DIV_ENCODE[y_div] << 12
             wr_reg(CA_RULE_REG, value)
@@ -343,6 +334,11 @@ def configure_ca(
 def set_ca_rule(rule):
             """Program the 1D CA Wolfram rule (0-255). Register @ 0x18 (not 0x100)."""
             configure_ca(rule=rule, rule_xor_y=False)
+
+
+def set_audio_crossover(value):
+            """Set audio T/B crossover point (0=bass-heavy split .. 255=treble-heavy). @ 0x0C."""
+            wr_reg(AUDIO_CROSSOVER_REG, int(value) & 0xFF)
 
 
 def set_overlay_global_enable(enabled=True):
@@ -532,8 +528,8 @@ def test_overlay_multi_sprites(block_div=8):
 
 
 def setup_ca_test_routing():
-            """Route X-counter bit 2 into invert 2 (inv_in_1 / CA inject) and CA out to luma."""
-            # xy_inv_out_2 = X counter bit 2; CA inject taps inv_out(1) <- matrix inv_in_1
+            """Route inverters 0+1; CA inject = inv_out(0) XOR inv_out(1). CA out to luma."""
+            prog_digital_side_matrix('inv_in_0', 'xy_inv_out_0')
             prog_digital_side_matrix('inv_in_1', 'xy_inv_out_2')
             prog_digital_side_matrix(49, 'ca_out')
             prog_digital_side_matrix(50, 'ca_out')
@@ -549,78 +545,56 @@ def _run_ca_mode_test(mode_name, rule=30, dwell_sec=8, **ca_kwargs):
 
 
 def test_ca_mode_plain(rule=30, dwell_sec=8):
-            """CA baseline: fixed rule, no line/X/Y modulation."""
+            """CA baseline: fixed rule, no line/X modulation."""
             _run_ca_mode_test(
-                "mode 1 — plain",
+                "plain",
                 rule=rule,
                 dwell_sec=dwell_sec,
                 rule_xor_y=False,
-                inject_xor_y0=False,
-                line_seed_y0=False,
-                inject_xor_x0=False,
+                rule_xor_x=False,
             )
 
 
 def test_ca_mode_rule_xor_y(rule=30, dwell_sec=8):
             """CA rule morphs per scanline (rule XOR Y)."""
             _run_ca_mode_test(
-                "mode 2 — rule_xor_y",
+                "rule_xor_y",
                 rule=rule,
                 dwell_sec=dwell_sec,
                 rule_xor_y=True,
-                inject_xor_y0=False,
-                line_seed_y0=False,
-                inject_xor_x0=False,
+                rule_xor_x=False,
             )
 
 
-def test_ca_mode_inject_xor_y0(rule=30, dwell_sec=8):
-            """CA inject XOR with line number LSB."""
+def test_ca_mode_rule_xor_x(rule=30, dwell_sec=8):
+            """CA rule morphs per pixel column (rule XOR X)."""
             _run_ca_mode_test(
-                "mode 3 — inject_xor_y0",
+                "rule_xor_x",
                 rule=rule,
                 dwell_sec=dwell_sec,
                 rule_xor_y=False,
-                inject_xor_y0=True,
-                line_seed_y0=False,
-                inject_xor_x0=False,
+                rule_xor_x=True,
             )
 
 
-def test_ca_mode_line_seed_y0(rule=30, dwell_sec=8):
-            """CA center cell seeded from Y LSB on each h-sync."""
+def test_ca_mode_rule_xor_xy(rule=30, dwell_sec=8):
+            """CA rule morphs with both X and Y counters."""
             _run_ca_mode_test(
-                "mode 4 — line_seed_y0",
+                "rule_xor_xy",
                 rule=rule,
                 dwell_sec=dwell_sec,
-                rule_xor_y=False,
-                inject_xor_y0=False,
-                line_seed_y0=True,
-                inject_xor_x0=False,
-            )
-
-
-def test_ca_mode_inject_xor_x0(rule=30, dwell_sec=8):
-            """CA inject XOR with X counter LSB."""
-            _run_ca_mode_test(
-                "mode 5 — inject_xor_x0",
-                rule=rule,
-                dwell_sec=dwell_sec,
-                rule_xor_y=False,
-                inject_xor_y0=False,
-                line_seed_y0=False,
-                inject_xor_x0=True,
+                rule_xor_y=True,
+                rule_xor_x=True,
             )
 
 
 def test_ca_all_modes(rule=30, dwell_sec=8):
-            """Step through every CA mode in sequence."""
+            """Step through CA rule-XOR modes."""
             print(f"[ca] Running all modes (rule={rule}, {dwell_sec}s each)...")
             test_ca_mode_plain(rule=rule, dwell_sec=dwell_sec)
             test_ca_mode_rule_xor_y(rule=rule, dwell_sec=dwell_sec)
-            test_ca_mode_inject_xor_y0(rule=rule, dwell_sec=dwell_sec)
-            test_ca_mode_line_seed_y0(rule=rule, dwell_sec=dwell_sec)
-            test_ca_mode_inject_xor_x0(rule=rule, dwell_sec=dwell_sec)
+            test_ca_mode_rule_xor_x(rule=rule, dwell_sec=dwell_sec)
+            test_ca_mode_rule_xor_xy(rule=rule, dwell_sec=dwell_sec)
             print("[ca] All modes complete.")
 
 
@@ -963,16 +937,14 @@ if __name__ == "__main__":
     test_overlay_multi_sprites(block_div=8)
 
     ################################################################
-    ############ 1D CA mode tests — xy_inv_out_2 (X counter bit 2)
-    ############ routed to inv_in_1 (invert 2, CA inject path)
+    ############ 1D CA tests — inv_in_0 + inv_in_1 -> CA inject (XOR)
     ################################################################
     # Uncomment one block below (comment overlay test above if using CA).
 
     # test_ca_mode_plain(rule=30, dwell_sec=10)
     # test_ca_mode_rule_xor_y(rule=30, dwell_sec=10)
-    # test_ca_mode_inject_xor_y0(rule=30, dwell_sec=10)
-    # test_ca_mode_line_seed_y0(rule=30, dwell_sec=10)
-    # test_ca_mode_inject_xor_x0(rule=30, dwell_sec=10)
+    # test_ca_mode_rule_xor_x(rule=30, dwell_sec=10)
+    # test_ca_mode_rule_xor_xy(rule=30, dwell_sec=10)
 
     # Or step through all modes automatically:
     # test_ca_all_modes(rule=30, dwell_sec=10)

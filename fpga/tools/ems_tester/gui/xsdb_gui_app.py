@@ -609,10 +609,8 @@ class RegisterControlWidget(QWidget):
         self.register_values[full_addr] = 0xC21E
         ca_defaults = {
             "ca_rule": 30,
-            "ca_inject_xor_y0": 0,
             "ca_rule_xor_y": 1,
-            "ca_line_seed_y0": 0,
-            "ca_inject_xor_x0": 0,
+            "ca_rule_xor_x": 0,
             "ca_x_div": 3,
             "ca_y_div": 3,
         }
@@ -712,6 +710,7 @@ class RegisterControlWidget(QWidget):
             ("0xDC", "noise_alpha", "Noise Alpha", 12, 0, 4095, 0),
         ]
         digital_defs = [
+            ("0x0C", "audio_crossover", "Audio T/B Crossover", 8, 0, 255, 0),
             ("0xFC", "overlay_global_en", "Overlay Enable", 1, 0, 1, 0),
             ("0xFC", "overlay_block_div", "Overlay Block Div (0=/1..4=/16)", 3, 0, 4, 1),
             ("0x100", "sprite0_enable", "Sprite0 Enable", 1, 0, 1, 0),
@@ -723,10 +722,8 @@ class RegisterControlWidget(QWidget):
         ]
         ca_defs = [
             ("0x18", "ca_rule", "CA Wolfram Rule", 8, 0, 255, 0),
-            ("0x18", "ca_inject_xor_y0", "CA Inject XOR Y0", 1, 0, 1, 8),
             ("0x18", "ca_rule_xor_y", "CA Rule XOR Y", 1, 0, 1, 9),
-            ("0x18", "ca_line_seed_y0", "CA Line Seed Y0", 1, 0, 1, 10),
-            ("0x18", "ca_inject_xor_x0", "CA Inject XOR X0", 1, 0, 1, 11),
+            ("0x18", "ca_rule_xor_x", "CA Rule XOR X", 1, 0, 1, 10),
             ("0x18", "ca_x_div", "CA X Div (0=/1 1=/2 2=/4 3=/8)", 2, 0, 3, 14),
             ("0x18", "ca_y_div", "CA Y Div (0=/1 1=/2 2=/4 3=/8)", 2, 0, 3, 12),
         ]

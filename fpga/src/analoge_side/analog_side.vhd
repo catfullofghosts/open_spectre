@@ -30,17 +30,17 @@ use work.array_pck.all;
 entity analog_side is
   generic (
     -- Right-shift divisors on analog-matrix channels into shape generators.
-    -- Shift N divides by 2^N (e.g. 4 => /16). 0 = no scaling.
-    G_SHAPE1_POS_H_SHIFT   : natural := 4;
-    G_SHAPE1_POS_V_SHIFT   : natural := 4;
+    -- Shift N divides by 2^N (e.g. 4 => /8). 0 = no scaling.
+    G_SHAPE1_POS_H_SHIFT   : natural := 3;
+    G_SHAPE1_POS_V_SHIFT   : natural := 3;
     G_SHAPE1_ZOOM_H_SHIFT  : natural := 0;
     G_SHAPE1_ZOOM_V_SHIFT  : natural := 0;
     G_SHAPE1_CIRCLE_SHIFT  : natural := 0;
     G_SHAPE1_GEAR_SHIFT    : natural := 0;
     G_SHAPE1_LANTERN_SHIFT : natural := 0;
     G_SHAPE1_FIZZ_SHIFT    : natural := 0;
-    G_SHAPE2_POS_H_SHIFT   : natural := 4;
-    G_SHAPE2_POS_V_SHIFT   : natural := 4;
+    G_SHAPE2_POS_H_SHIFT   : natural := 3;
+    G_SHAPE2_POS_V_SHIFT   : natural := 3;
     G_SHAPE2_ZOOM_H_SHIFT  : natural := 0;
     G_SHAPE2_ZOOM_V_SHIFT  : natural := 0;
     G_SHAPE2_CIRCLE_SHIFT  : natural := 0;

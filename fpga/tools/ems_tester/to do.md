@@ -1,14 +1,24 @@
 !!! REMEMBER IF SOMETHIGN DOESNT WORK CHECK THE REST AND H/Vsync are correct poliarity!!!!
 
+NEXT chcekc:
+--check stats work!!!
+-- check 1 bit CA is interesting enough now then sign off
+--check shape gen x/y routing from the analoge matrix is devided by the correct ammount 
+-- AUDIO MODULE
+    does the audio module compile
+    does the test bench look correct
+    does it synthisize into the design
+
 -------------
 to do: numbers are priority
-1 easy- 1 bit ca needs to have enable devided by 8 minimum
-1 easy- also needs to have a propper reset to stop rolling
+1 easy- 1 bit ca needs to have enable devided by 8 minimum -- scrapped
+1 easy- also needs to have a propper reset to stop rolling -- x 1-3 still has issue
 3- re-introduce video FX
-3- re introduce frame stats
+3- re introduce frame stats -- done
 2- add audio in basic
-1- look at the shape outs from the analog matrix, can i devide the outputs to the shape gen by like 16? so they are in a more appropriate range?
+1- look at the shape outs from the analog matrix, can i devide the outputs to the shape gen by like 16? so they are in a more appropriate range? -- 
 2- add filter to audio to get T and B
+3- route the span from the analog matrix to the actual span controls
 
 
 NEXT build check:

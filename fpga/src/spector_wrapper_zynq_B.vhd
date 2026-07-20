@@ -41,7 +41,14 @@ entity spector_wrapper_zynq is
     regs_addr    : in std_logic_vector(12 downto 0);
     regs_wr_data : in std_logic_vector(31 downto 0);
     regs_rd_data : out std_logic_vector(31 downto 0);
-    video_out    : out std_logic_vector(23 downto 0)
+    video_out    : out std_logic_vector(23 downto 0);
+
+    -- Pmod I2S2 on PmodA (JA): pins 1-4 clocks/data out, pin 10 A/D SDOUT in
+    pmod_i2s_mclk  : out std_logic;
+    pmod_i2s_lrck  : out std_logic;
+    pmod_i2s_bclk  : out std_logic;
+    pmod_i2s_sdout : out std_logic;
+    pmod_i2s_sdin  : in  std_logic
   );
 end entity spector_wrapper_zynq;
 
@@ -283,6 +290,11 @@ architecture rtl of spector_wrapper_zynq is
   signal ext_vid_in_mux_sel : std_logic;
   signal edge_width_sel     : std_logic_vector(1 downto 0);
   signal ca_cfg            : std_logic_vector(15 downto 0);
+  signal audio_crossover   : std_logic_vector(7 downto 0);
+
+  signal audio_sig_raw     : std_logic_vector(9 downto 0);
+  signal audio_t_raw       : std_logic_vector(9 downto 0);
+  signal audio_b_raw       : std_logic_vector(9 downto 0);
   -- Luma key control
   signal luma_key_enable     : std_logic;
   signal luma_key_direction  : std_logic;
@@ -532,6 +544,7 @@ begin
       ext_vid_in_mux_sel  => ext_vid_in_mux_sel,
       edge_width_sel      => edge_width_sel,
       ca_cfg              => ca_cfg,
+      audio_crossover     => audio_crossover,
       luma_key_enable     => luma_key_enable,
       luma_key_direction  => luma_key_direction,
       luma_key_thresh_low => luma_key_thresh_low,
@@ -702,6 +715,39 @@ begin
       x_count_o  => x_in,
       y_count_o  => y_in
     );
+
+  -------------------------------------------
+  -- I2S audio input (Pmod I2S2, left channel)
+  -------------------------------------------
+  audio_input_inst : entity work.audio_input
+    generic map (
+      G_OUT_BITS  => 10,
+      G_ENV_SHIFT => 8
+    )
+    port map (
+      clk       => regs_clk,
+      rst       => reset,
+      crossover => audio_crossover,
+      i2s_mclk  => pmod_i2s_mclk,
+      i2s_lrck  => pmod_i2s_lrck,
+      i2s_bclk  => pmod_i2s_bclk,
+      i2s_sdin  => pmod_i2s_sdin,
+      i2s_sdout => pmod_i2s_sdout,
+      audio_sig => audio_sig_raw,
+      audio_t   => audio_t_raw,
+      audio_b   => audio_b_raw
+    );
+
+  p_audio_sync : process (pix_clk) is
+  begin
+    if rising_edge(pix_clk) then
+      audio_in_sig <= audio_sig_raw;
+      audio_in_t   <= audio_t_raw;
+      audio_in_b   <= audio_b_raw;
+      audio_T      <= audio_t_raw(9);
+      audio_B      <= audio_b_raw(9);
+    end if;
+  end process p_audio_sync;
 
   -------------------------------------------
   -- Analog Side

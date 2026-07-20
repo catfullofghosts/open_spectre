@@ -131,7 +131,8 @@ entity digital_reg_file is
     pix_clk_div_sel     : out std_logic; -- 0 = /2, 1 = /4 for X and Y digital counters
     ext_vid_in_mux_sel  : out std_logic; -- 0 = luma calc, 1 = y_out
     edge_width_sel      : out std_logic_vector(1 downto 0); -- edge stretch: 00=2px 01=4px 10=6px 11=8px
-    ca_cfg              : out std_logic_vector(15 downto 0); -- [7:0] Wolfram rule, [11:8] line-mod ctrl
+    ca_cfg              : out std_logic_vector(15 downto 0); -- [7:0] rule, [9] rule^Y, [10] rule^X, [13:12] y_div, [15:14] x_div
+    audio_crossover     : out std_logic_vector(7 downto 0); -- T/B split control @ 0x0C
     -- Luma key control
     luma_key_enable     : out std_logic;
     luma_key_direction  : out std_logic; -- 0 = key < threshold, 1 = key > threshold
@@ -289,6 +290,7 @@ architecture RTL of digital_reg_file is
   signal ext_vid_in_mux_sel_i : std_logic;
   signal edge_width_sel_i     : std_logic_vector(1 downto 0) := "00"; -- default 2px edge width
   signal ca_cfg_i             : std_logic_vector(15 downto 0) := x"C21E"; -- Rule 30, rule_xor_y, /8 X&Y
+  signal audio_crossover_i    : std_logic_vector(7 downto 0) := x"80"; -- mid crossover default
   -- Luma key control
   signal luma_key_enable_i     : std_logic;
   signal luma_key_direction_i  : std_logic;
@@ -362,6 +364,7 @@ begin
   -- digital side
   regs(ra(x"04")) <= x"000000" & "00" & matrix_out_addr_int; -- this is the matrix output
   regs(ra(x"08")) <= x"000000" & "0000000" & matrix_load_int; -- load flag
+  regs(ra(x"0C")) <= x"000000" & audio_crossover_i;
   regs(ra(x"10")) <= mask_lower;
   regs(ra(x"14")) <= mask_upper;
   -- regs(ra(x"18")) <= xxxxxxxxxxxx; saved for future matrix expantion
@@ -630,6 +633,8 @@ begin
             pix_clk_div_sel_i <= write_reg(2);
             ext_vid_in_mux_sel_i <= write_reg(3);
             edge_width_sel_i <= write_reg(5 downto 4);
+          when x"0C" =>
+            audio_crossover_i <= write_reg(7 downto 0);
           when x"18" =>
             ca_cfg_i <= write_reg(15 downto 0);
           when x"C8" =>
@@ -760,6 +765,7 @@ begin
   ext_vid_in_mux_sel <= ext_vid_in_mux_sel_i;
   edge_width_sel <= edge_width_sel_i;
   ca_cfg         <= ca_cfg_i;
+  audio_crossover <= audio_crossover_i;
   
   luma_key_enable <= luma_key_enable_i;
   luma_key_direction <= luma_key_direction_i;

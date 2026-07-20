@@ -42,7 +42,7 @@ entity digital_side is
     ext_vid_in     : in std_logic_vector(7 downto 0);
     vid_span       : in std_logic_vector(7 downto 0);
     edge_width     : in std_logic_vector(1 downto 0); -- 00=2px, 01=4px, 10=6px, 11=8px
-    ca_cfg         : in std_logic_vector(15 downto 0); -- [7:0] rule, [11:8] ctrl
+    ca_cfg         : in std_logic_vector(15 downto 0); -- [7:0] rule, [9] rule^Y, [10] rule^X
 
     -- inputs form analoge side
     osc1_sqr : in std_logic :='0';
@@ -94,6 +94,7 @@ architecture Behavioral of digital_side is
   signal not_overlay_gate2 : std_logic_vector(3 downto 0);
   --Matrix In from module out
   signal inv_out        : std_logic_vector(3 downto 0);
+  signal ca_inject      : std_logic;
   signal x_count        : std_logic_vector(8 downto 0);
   signal y_count        : std_logic_vector(8 downto 0);
   signal x_count_low_hi : std_logic_vector(8 downto 0);
@@ -286,6 +287,8 @@ cdc_pix_100 : process(clk)
 
   ca_frame_active <= '1' when h_sync_i = '0' and v_sync_i = '0' else '0';
 
+  ca_inject <= inv_out(0) xor inv_out(1);
+
   ca_1d : entity work.ca_1d_stream -- EXTRA 1 bit CA
     port map (
       clk          => clk,
@@ -293,12 +296,13 @@ cdc_pix_100 : process(clk)
       step_en      => pix_clk_i,
       frame_active => ca_frame_active,
       rule         => ca_cfg(7 downto 0),
-      ctrl         => ca_cfg(11 downto 8),
+      rule_xor_y   => ca_cfg(9),
+      rule_xor_x   => ca_cfg(10),
       x_div        => ca_cfg(15 downto 14),
       y_div        => ca_cfg(13 downto 12),
       y_line       => y_count(7 downto 0),
       x_pos        => x_count(7 downto 0),
-      inject       => inv_out(1),
+      inject       => ca_inject,
       ca_out       => ca_out
     );
 
