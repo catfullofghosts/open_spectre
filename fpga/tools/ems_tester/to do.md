@@ -4,6 +4,8 @@ NEXT chcekc:
 --check stats work!!!
 -- check 1 bit CA is interesting enough now then sign off
 --check shape gen x/y routing from the analoge matrix is devided by the correct ammount 
+-- check oscilators, is the freq range ok for all speeds and syncs
+- oscilator, does the vertical synced osc have high enough resolution?
 -- AUDIO MODULE
     does the audio module compile
     does the test bench look correct

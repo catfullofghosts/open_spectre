@@ -456,6 +456,11 @@ begin
       end if;
     end process;
 
-  audio_crossover <= i_audio_crossover;
+  p_audio_crossover_out : process (clk)
+  begin
+    if rising_edge(clk) then
+      audio_crossover <= i_audio_crossover;
+    end if;
+  end process p_audio_crossover_out;
 
 end rtl;

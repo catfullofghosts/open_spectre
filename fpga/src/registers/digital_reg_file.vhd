@@ -291,6 +291,7 @@ architecture RTL of digital_reg_file is
   signal edge_width_sel_i     : std_logic_vector(1 downto 0) := "00"; -- default 2px edge width
   signal ca_cfg_i             : std_logic_vector(15 downto 0) := x"C21E"; -- Rule 30, rule_xor_y, /8 X&Y
   signal audio_crossover_i    : std_logic_vector(7 downto 0) := x"80"; -- mid crossover default
+  signal audio_crossover_r    : std_logic_vector(7 downto 0) := x"80";
   -- Luma key control
   signal luma_key_enable_i     : std_logic;
   signal luma_key_direction_i  : std_logic;
@@ -535,6 +536,13 @@ begin
     end if;
   end process p_sprite_out;
 
+  p_audio_crossover_out : process (regs_clk)
+  begin
+    if rising_edge(regs_clk) then
+      audio_crossover_r <= audio_crossover_i;
+    end if;
+  end process p_audio_crossover_out;
+
   ---------------------------------------------------------------------------
   -- WRITE: Get the data from the incoming write port and pass it to the internal signal for each reg
   ---------------------------------------------------------------------------
@@ -765,7 +773,7 @@ begin
   ext_vid_in_mux_sel <= ext_vid_in_mux_sel_i;
   edge_width_sel <= edge_width_sel_i;
   ca_cfg         <= ca_cfg_i;
-  audio_crossover <= audio_crossover_i;
+  audio_crossover <= audio_crossover_r;
   
   luma_key_enable <= luma_key_enable_i;
   luma_key_direction <= luma_key_direction_i;
