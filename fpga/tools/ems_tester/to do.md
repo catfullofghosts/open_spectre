@@ -1,10 +1,24 @@
 !!! REMEMBER IF SOMETHIGN DOESNT WORK CHECK THE REST AND H/Vsync are correct poliarity!!!!
 
 NEXT chcekc:
+
+- !! SOMEthing is wrong with the x counters!!!
+- 1BIT CA STILL NOT RESPONDING TO ENABLES FROM the devided pixel clock
+- shapes are sterestech in x direction slightly
+- is sin wave un even?? when used on zoom there is a bump at the bottom where it drops to the min
+- fuzz scale not driven from analog matrix for some reason
+- fuzz scale too small, should be related to circle size?
+
+- at some pointhe analoge matrix needs to go signed, but thats a bit job, so save it till other problems are iorned out
+- need to actualy test all shapes, lots are still borken
+
+
+
 --check stats work!!!
 -- check 1 bit CA is interesting enough now then sign off
---check shape gen x/y routing from the analoge matrix is devided by the correct ammount 
--- check oscilators, is the freq range ok for all speeds and syncs
+--check shape gen x/y routing from the analoge matrix is devided by the correct ammount ,, seems good now!! not too big for X and Y pos
+-- check oscilators, is the freq range ok for all speeds and syncs,
+much better for requencies in x any y directions, Y is still blocky!!! thop
 - oscilator, does the vertical synced osc have high enough resolution?
 -- AUDIO MODULE
     does the audio module compile
