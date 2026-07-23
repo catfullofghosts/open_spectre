@@ -88,6 +88,8 @@ architecture rtl of spector_wrapper_zynq is
   signal invert_matrix   : std_logic_vector(63 downto 0);
   -- Video Input Control
   signal vid_span : std_logic_vector(7 downto 0);
+  signal vid_span_annalog : std_logic_vector(7 downto 0);
+  signal vid_span_mix : std_logic_vector(7 downto 0);
   -- Analoge Matrix Control
   signal out_addr       : std_logic_vector(7 downto 0);
   signal ch_addr        : std_logic_vector(7 downto 0);
@@ -680,6 +682,15 @@ begin
     end if;
   end process;
 
+   vid_span_mix_i : entity work.AdderSub_8bit_Clamp
+    port map
+    (
+      clk => pix_clk,
+      A   => vid_span,
+      B   => vid_span_annalog,
+      SUM => vid_span_mix
+    );
+
   digital_side_inst : entity work.digital_side
     port map
     (
@@ -695,7 +706,7 @@ begin
       matrix_mask_in => matrix_mask_in,
       invert_matrix  => invert_matrix,
       ext_vid_in     => ext_vid_in,
-      vid_span       => vid_span,
+      vid_span       => vid_span_mix,
       edge_width     => edge_width_sel,
       ca_cfg        => ca_cfg,
       osc1_sqr       => osc_1_sqr_o,
@@ -857,7 +868,7 @@ begin
       dsm_hi_alpha     => dsm_hi_alpha_reg,
       dsm_lo_i         => dsm_lo_i,
       dsm_lo_alpha     => dsm_lo_alpha_reg,
-      vid_span         => open,--vid_span, disabled for the moment while i work out what to do with it
+      vid_span         => vid_span_annalog, 
       osc_1_sqr_o      => osc_1_sqr_o,
       osc_2_sqr_o      => osc_2_sqr_o,
       noise_1_o        => noise_1_o,

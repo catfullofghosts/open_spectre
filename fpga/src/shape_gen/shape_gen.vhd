@@ -193,7 +193,7 @@ begin
       q     => noise
     );
 
-  fizz    <= "0000000000" & noise(5 downto 0);
+  fizz    <= "000000" & noise(5 downto 0) & noise(2 downto 1) & noise(5) & noise(0); -- was "0000000000" & noise(5 downto 0), but the fizz was too small
   gear_x5 <= "000000000" & x_in(4) & "000000";
 
   -- lantern inputs scaled and mixed
@@ -204,7 +204,7 @@ begin
   slew_med : entity work.moving_average
     generic map(
       G_NBIT      => 16,
-      G_MAX_DELTA => 2 -- fine turne with actual x5
+      G_MAX_DELTA => 1 -- fine turne with actual x5, was a 2 but that might kill the shape too much
     )
     port map
     (
@@ -273,7 +273,7 @@ begin
       end if;
 
       --fizz
-      if (unsigned(circle_i) + unsigned(fizz) + unsigned(fizz_i)) > unsigned(distance) then
+      if (unsigned(circle_i) + unsigned(fizz) + unsigned(fizz_i)) > unsigned(distance) then -- here fizz_i increases the circle size not the fizz size!
         frizz <= '1';
       else
         frizz <= '0';

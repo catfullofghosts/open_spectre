@@ -61,7 +61,7 @@ begin
 
   x_div_ok  <= f_div_ok(x_pos, x_div);
   y_div_ok  <= f_div_ok(y_line, y_div);
-  step_en_g <= step_en when frame_active = '1' and x_div_ok = '1' else '0';
+  step_en_g <= step_en when (frame_active = '1' and x_div_ok = '1'  and y_div_ok = '1') else '0';
 
   process (clk)
   begin

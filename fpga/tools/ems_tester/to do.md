@@ -2,12 +2,13 @@
 
 NEXT chcekc:
 
-- !! SOMEthing is wrong with the x counters!!!
+- !! SOMEthing is wrong with the x counters!!! - fix in next build
 - 1BIT CA STILL NOT RESPONDING TO ENABLES FROM the devided pixel clock
-- shapes are sterestech in x direction slightly
+- shapes are sterestech in x direction slightly- is this because of the frame not being a square?, does x need to get devided as tho the frame was square?
 - is sin wave un even?? when used on zoom there is a bump at the bottom where it drops to the min
 - fuzz scale not driven from analog matrix for some reason
-- fuzz scale too small, should be related to circle size?
+- fuzz scale too small, should be related to circle size? -- scale upped *8
+- check cog, i changed the rolling aver age from 2 to 1 to get a smoother cog, is it still too sharp
 
 - at some pointhe analoge matrix needs to go signed, but thats a bit job, so save it till other problems are iorned out
 - need to actualy test all shapes, lots are still borken
