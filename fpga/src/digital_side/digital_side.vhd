@@ -219,7 +219,7 @@ cdc_pix_100 : process(clk)
     port
     map (
     clk    => clk, 
-    rst    => '0', --rst, -- x needs to be reset by hs otherwise some bits out run over and get out of sync on the next line
+    rst    => h_sync_i, --rst, -- x needs to be reset by hs otherwise some bits out run over and get out of sync on the next line
     counter_up => pix_clk_i,
     count  => x_count_low_hi
     );
