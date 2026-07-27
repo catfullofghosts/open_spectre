@@ -455,7 +455,7 @@ begin
     (
       clk => clk,
       A   => shape_matrix_out(11),
-      B   => pos_v_2,
+      B   => zoom_v_2,
       SUM => mixed_zoom_v_2
     );
   circle_2_mix : entity work.AdderSub_12bit_Clamp

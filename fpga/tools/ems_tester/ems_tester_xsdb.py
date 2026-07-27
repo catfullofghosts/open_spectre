@@ -231,50 +231,52 @@ def prog_digital_side_matrix(matrix_out, matrix_in):
             _commit_digital_matrix_mask(matrix_out, mask_lower, mask_upper)
 
 
-def prog_annaloge_side_matrix(matrix_out, matrix_in): 
-            
-            matrix_in_addr = "0x40000030"
+def _pulse_analog_matrix_load():
+            command = f"mwr -force  0x40000034 0x1"
+            xsct.do(command) # needs gracefull fail state
+            command = f"mwr -force  0x40000034 0x0"
+            xsct.do(command) # needs gracefull fail state
 
-            resolved_matrix_out = matrix_out
-            matrix_in_shifted = (1 << matrix_in)  # am i worng about this? is the value inverted somewhere in the fpga
-            # matrix_in_shifted = ~(1 << matrix_in) & 0xFFFFFFFF # remember all fs = muted
-            # Read register value using XSCT
+
+def _analog_matrix_mask_from_inputs(matrix_in):
+            """Build 16-bit unmute mask from one or more matrix inputs (OR of 1<<row)."""
+            pins = matrix_in if isinstance(matrix_in, list) else [matrix_in]
+            mask = 0
+            for pin in [resolve_matrix_in(p) for p in pins]:
+                mask |= 1 << pin
+            return mask & 0xFFFF
+
+
+def _commit_analog_matrix_mask(matrix_out, mask):
+            """Write a complete 16-bit mask for one output and pulse load once."""
+            resolved_matrix_out = resolve_matrix_out(matrix_out)
+
             command = f"mwr -force  0x40000028 {hex(resolved_matrix_out)}"
             print(command)
-            output = xsct.do(command) # needs gracefull fail state
-            command = f"mwr -force  {matrix_in_addr} {hex(matrix_in_shifted)}"
-            print(command)
+            xsct.do(command) # needs gracefull fail state
 
-            output = xsct.do(command) # needs gracefull fail state
-            command = f"mwr -force  0x40000034 0x1"
+            command = f"mwr -force  0x40000030 {hex(mask)}"
             print(command)
-            output = xsct.do(command) # needs gracefull fail state
-            command = f"mwr -force  0x40000034 0x0"
-            output = xsct.do(command) # needs gracefull fail state
-            print(command)
+            xsct.do(command) # needs gracefull fail state
 
-def rst_annaloge_side_matrix(matrix_out): 
-            
-            matrix_in_addr = "0x40000030"
+            _pulse_analog_matrix_load()
 
-            # Resolve matrix_out name to number if needed
-            resolved_matrix_out = matrix_out
-            
-            matrix_in_shifted = 0
-            # Read register value using XSCT
-            command = f"mwr -force  0x40000028 {hex(resolved_matrix_out)}"
-            print(command)
-            output = xsct.do(command) # needs gracefull fail state
-            command = f"mwr -force  {matrix_in_addr} {hex(matrix_in_shifted)}"
-            print(command)
 
-            output = xsct.do(command) # needs gracefull fail state
-            command = f"mwr -force  0x40000034 0x1"
-            print(command)
-            output = xsct.do(command) # needs gracefull fail state
-            command = f"mwr -force  0x40000034 0x0"
-            output = xsct.do(command) # needs gracefull fail state
-            print(command)
+def prog_annaloge_side_matrix(matrix_out, matrix_in):
+            if isinstance(matrix_out, list):
+                for out_val in matrix_out:
+                    prog_annaloge_side_matrix(out_val, matrix_in)
+                return
+
+            mask = _analog_matrix_mask_from_inputs(matrix_in)
+            if not isinstance(matrix_in, list):
+                print(f"resolved matrix in = {resolve_matrix_in(matrix_in)}")
+
+            _commit_analog_matrix_mask(matrix_out, mask)
+
+
+def rst_annaloge_side_matrix(matrix_out):
+            _commit_analog_matrix_mask(matrix_out, 0)
 
 def wr_reg(addr, val_in):
             """Write a 32-bit CPU register. addr is a hex offset string or int (e.g. '18', 0xFC)."""

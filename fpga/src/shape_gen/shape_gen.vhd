@@ -272,8 +272,8 @@ begin
         gear <= '0';
       end if;
 
-      --fizz
-      if (unsigned(circle_i) + unsigned(fizz) + unsigned(fizz_i)) > unsigned(distance) then -- here fizz_i increases the circle size not the fizz size!
+      -- fizz: fizz_i scales noise amplitude (matrix / register), not circle radius
+      if (unsigned(circle_i) + shift_right(unsigned(fizz) * unsigned(fizz_i), 12)) > unsigned(distance) then
         frizz <= '1';
       else
         frizz <= '0';

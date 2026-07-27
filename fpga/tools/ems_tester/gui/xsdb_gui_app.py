@@ -56,16 +56,16 @@ ANALOG_OUT_NAMES = {
     4: "circle_1",
     5: "gear_1",
     6: "lantern_1",
-    7: "unused_7",
-    8: "fizz_1_pos_h_2",
-    9: "pos_h_2",
-    10: "pos_v_2",
-    11: "zoom_h_2",
-    12: "zoom_v_2",
-    13: "circle_2",
-    14: "gear_2",
-    15: "lantern_2",
-    16: "fizz_2_y_anna",
+    7: "fizz_1",
+    8: "pos_h_2",
+    9: "pos_v_2",
+    10: "zoom_h_2",
+    11: "zoom_v_2",
+    12: "circle_2",
+    13: "gear_2",
+    14: "lantern_2",
+    15: "fizz_2",
+    16: "y_anna",
     17: "u_anna",
     18: "v_anna",
     19: "vid_span"
@@ -539,19 +539,31 @@ class MatrixGridWidget(QWidget):
                         parent.log_text.append(f"Disconnected: {col_name} (all inputs removed)")
                         del self.output_connections[col]
             else:  # analog
+                if col not in self.output_connections:
+                    self.output_connections[col] = set()
+
                 if is_checked:
-                    # Program analog matrix
-                    prog_annaloge_side_matrix(col, row)
-                    parent.log_text.append(f"Connected: {row_name} -> {col_name}")
+                    self.output_connections[col].add(row)
+                    active_inputs = list(self.output_connections[col])
+                    prog_annaloge_side_matrix(col, active_inputs)
+
+                    if len(active_inputs) > 1:
+                        input_names = [self.get_row_name(r) for r in active_inputs]
+                        parent.log_text.append(f"Connected: {', '.join(input_names)} -> {col_name} (OR'd)")
+                    else:
+                        parent.log_text.append(f"Connected: {row_name} -> {col_name}")
                 else:
-                    # Reset analog matrix output
-                    rst_annaloge_side_matrix(col)
-                    parent.log_text.append(f"Disconnected: {col_name}")
-                    # Remove from tracking if exists
-                    if col in self.output_connections:
-                        self.output_connections[col].discard(row)
-                        if len(self.output_connections[col]) == 0:
-                            del self.output_connections[col]
+                    self.output_connections[col].discard(row)
+                    active_inputs = list(self.output_connections[col])
+
+                    if len(active_inputs) > 0:
+                        prog_annaloge_side_matrix(col, active_inputs)
+                        input_names = [self.get_row_name(r) for r in active_inputs]
+                        parent.log_text.append(f"Disconnected {row_name}, remaining: {', '.join(input_names)} -> {col_name}")
+                    else:
+                        rst_annaloge_side_matrix(col)
+                        parent.log_text.append(f"Disconnected: {col_name} (all inputs removed)")
+                        del self.output_connections[col]
                 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to program matrix: {str(e)}")
