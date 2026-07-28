@@ -230,21 +230,23 @@ begin
           stats_frame_hash      <= std_logic_vector(hash_acc);
           stats_frame_pix_count <= std_logic_vector(pix_count);
 
-          if pix_count /= 0 and post_state = POST_IDLE and cap_pending = '0' then
-            cap_pending  <= '1';
-            cap_pix      <= pix_count;
-            cap_sums(0)  <= sum_luma;
-            cap_sums(1)  <= sum_r;
-            cap_sums(2)  <= sum_g;
-            cap_sums(3)  <= sum_b;
-            cap_min_luma <= min_luma;
-            cap_max_luma <= max_luma;
-            cap_min_r    <= min_r;
-            cap_max_r    <= max_r;
-            cap_min_g    <= min_g;
-            cap_max_g    <= max_g;
-            cap_min_b    <= min_b;
-            cap_max_b    <= max_b;
+          if pix_count /= 0 then
+            if cap_pending = '0' then
+              cap_pending  <= '1';
+              cap_pix      <= pix_count;
+              cap_sums(0)  <= sum_luma;
+              cap_sums(1)  <= sum_r;
+              cap_sums(2)  <= sum_g;
+              cap_sums(3)  <= sum_b;
+              cap_min_luma <= min_luma;
+              cap_max_luma <= max_luma;
+              cap_min_r    <= min_r;
+              cap_max_r    <= max_r;
+              cap_min_g    <= min_g;
+              cap_max_g    <= max_g;
+              cap_min_b    <= min_b;
+              cap_max_b    <= max_b;
+            end if;
           end if;
 
           min_r     <= (others => '1');
@@ -273,6 +275,18 @@ begin
   p_post : process (clk) is
     variable v_hist_count : natural range 0 to G_FILTER_FRAMES;
     variable v_shifted    : unsigned(31 downto 0);
+    variable v_h_lmin     : t_byte_hist;
+    variable v_h_lmax     : t_byte_hist;
+    variable v_h_lavg     : t_byte_hist;
+    variable v_h_rmin     : t_byte_hist;
+    variable v_h_rmax     : t_byte_hist;
+    variable v_h_ravg     : t_byte_hist;
+    variable v_h_gmin     : t_byte_hist;
+    variable v_h_gmax     : t_byte_hist;
+    variable v_h_gavg     : t_byte_hist;
+    variable v_h_bmin     : t_byte_hist;
+    variable v_h_bmax     : t_byte_hist;
+    variable v_h_bavg     : t_byte_hist;
   begin
     if rising_edge(clk) then
       cap_ack <= '0';
@@ -348,33 +362,46 @@ begin
             end if;
 
           when POST_PUBLISH =>
-            for i in G_FILTER_FRAMES - 1 downto 1 loop
-              h_lmin(i) <= h_lmin(i - 1);
-              h_lmax(i) <= h_lmax(i - 1);
-              h_lavg(i) <= h_lavg(i - 1);
-              h_rmin(i) <= h_rmin(i - 1);
-              h_rmax(i) <= h_rmax(i - 1);
-              h_ravg(i) <= h_ravg(i - 1);
-              h_gmin(i) <= h_gmin(i - 1);
-              h_gmax(i) <= h_gmax(i - 1);
-              h_gavg(i) <= h_gavg(i - 1);
-              h_bmin(i) <= h_bmin(i - 1);
-              h_bmax(i) <= h_bmax(i - 1);
-              h_bavg(i) <= h_bavg(i - 1);
+            for i in 1 to G_FILTER_FRAMES - 1 loop
+              v_h_lmin(i) := h_lmin(i - 1);
+              v_h_lmax(i) := h_lmax(i - 1);
+              v_h_lavg(i) := h_lavg(i - 1);
+              v_h_rmin(i) := h_rmin(i - 1);
+              v_h_rmax(i) := h_rmax(i - 1);
+              v_h_ravg(i) := h_ravg(i - 1);
+              v_h_gmin(i) := h_gmin(i - 1);
+              v_h_gmax(i) := h_gmax(i - 1);
+              v_h_gavg(i) := h_gavg(i - 1);
+              v_h_bmin(i) := h_bmin(i - 1);
+              v_h_bmax(i) := h_bmax(i - 1);
+              v_h_bavg(i) := h_bavg(i - 1);
             end loop;
 
-            h_lmin(0) <= cap_min_luma;
-            h_lmax(0) <= cap_max_luma;
-            h_lavg(0) <= avg_luma;
-            h_rmin(0) <= cap_min_r;
-            h_rmax(0) <= cap_max_r;
-            h_ravg(0) <= avg_r;
-            h_gmin(0) <= cap_min_g;
-            h_gmax(0) <= cap_max_g;
-            h_gavg(0) <= avg_g;
-            h_bmin(0) <= cap_min_b;
-            h_bmax(0) <= cap_max_b;
-            h_bavg(0) <= avg_b;
+            v_h_lmin(0) := cap_min_luma;
+            v_h_lmax(0) := cap_max_luma;
+            v_h_lavg(0) := avg_luma;
+            v_h_rmin(0) := cap_min_r;
+            v_h_rmax(0) := cap_max_r;
+            v_h_ravg(0) := avg_r;
+            v_h_gmin(0) := cap_min_g;
+            v_h_gmax(0) := cap_max_g;
+            v_h_gavg(0) := avg_g;
+            v_h_bmin(0) := cap_min_b;
+            v_h_bmax(0) := cap_max_b;
+            v_h_bavg(0) := avg_b;
+
+            h_lmin <= v_h_lmin;
+            h_lmax <= v_h_lmax;
+            h_lavg <= v_h_lavg;
+            h_rmin <= v_h_rmin;
+            h_rmax <= v_h_rmax;
+            h_ravg <= v_h_ravg;
+            h_gmin <= v_h_gmin;
+            h_gmax <= v_h_gmax;
+            h_gavg <= v_h_gavg;
+            h_bmin <= v_h_bmin;
+            h_bmax <= v_h_bmax;
+            h_bavg <= v_h_bavg;
 
             if hist_count < G_FILTER_FRAMES then
               v_hist_count := hist_count + 1;
@@ -383,18 +410,18 @@ begin
               v_hist_count := G_FILTER_FRAMES;
             end if;
 
-            stats_luma_min <= std_logic_vector(f_box_avg(h_lmin, v_hist_count));
-            stats_luma_max <= std_logic_vector(f_box_avg(h_lmax, v_hist_count));
-            stats_luma_avg <= std_logic_vector(f_box_avg(h_lavg, v_hist_count));
-            stats_r_min    <= std_logic_vector(f_box_avg(h_rmin, v_hist_count));
-            stats_r_max    <= std_logic_vector(f_box_avg(h_rmax, v_hist_count));
-            stats_r_avg    <= std_logic_vector(f_box_avg(h_ravg, v_hist_count));
-            stats_g_min    <= std_logic_vector(f_box_avg(h_gmin, v_hist_count));
-            stats_g_max    <= std_logic_vector(f_box_avg(h_gmax, v_hist_count));
-            stats_g_avg    <= std_logic_vector(f_box_avg(h_gavg, v_hist_count));
-            stats_b_min    <= std_logic_vector(f_box_avg(h_bmin, v_hist_count));
-            stats_b_max    <= std_logic_vector(f_box_avg(h_bmax, v_hist_count));
-            stats_b_avg    <= std_logic_vector(f_box_avg(h_bavg, v_hist_count));
+            stats_luma_min <= std_logic_vector(cap_min_luma);
+            stats_luma_max <= std_logic_vector(cap_max_luma);
+            stats_r_min    <= std_logic_vector(cap_min_r);
+            stats_r_max    <= std_logic_vector(cap_max_r);
+            stats_g_min    <= std_logic_vector(cap_min_g);
+            stats_g_max    <= std_logic_vector(cap_max_g);
+            stats_b_min    <= std_logic_vector(cap_min_b);
+            stats_b_max    <= std_logic_vector(cap_max_b);
+            stats_luma_avg <= std_logic_vector(f_box_avg(v_h_lavg, v_hist_count));
+            stats_r_avg    <= std_logic_vector(f_box_avg(v_h_ravg, v_hist_count));
+            stats_g_avg    <= std_logic_vector(f_box_avg(v_h_gavg, v_hist_count));
+            stats_b_avg    <= std_logic_vector(f_box_avg(v_h_bavg, v_hist_count));
 
             frame_id_i     <= frame_id_i + 1;
             stats_frame_id <= std_logic_vector(frame_id_i + 1);

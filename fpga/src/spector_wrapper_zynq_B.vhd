@@ -737,7 +737,7 @@ begin
     )
     port map (
       clk       => regs_clk,
-      rst       => reset,
+      rst       => reset_n,
       crossover => audio_crossover,
       i2s_mclk  => pmod_i2s_mclk,
       i2s_lrck  => pmod_i2s_lrck,
@@ -1068,7 +1068,7 @@ video_out <= video_fx_out;
     )
     port map (
       clk       => pix_clk,
-      rst       => reset,
+      rst       => reset_n,
       h_sync    => h_sync_n,
       v_sync    => v_sync_n,
       video_in  => video_pre_fx,
