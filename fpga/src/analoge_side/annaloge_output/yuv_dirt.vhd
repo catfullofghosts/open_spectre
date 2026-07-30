@@ -39,14 +39,14 @@ architecture rtl of yuv_dirt is
 
   function f_dirt_bits (
     noise_vec : std_logic_vector(4 downto 0);
-    map       : dirt_map_t;
+    perm_lut  : dirt_map_t;
     depth     : natural
   ) return std_logic_vector is
     variable r : std_logic_vector(2 downto 0) := (others => '0');
   begin
     for i in 0 to 2 loop
       if i < depth then
-        r(i) := f_pick(noise_vec, map(i));
+        r(i) := f_pick(noise_vec, perm_lut(i));
       end if;
     end loop;
     return r;
