@@ -297,6 +297,7 @@ architecture rtl of spector_wrapper_zynq is
   signal audio_sig_raw     : std_logic_vector(9 downto 0);
   signal audio_t_raw       : std_logic_vector(9 downto 0);
   signal audio_b_raw       : std_logic_vector(9 downto 0);
+  signal audio_mag_pre     : std_logic_vector(11 downto 0);
   -- Luma key control
   signal luma_key_enable     : std_logic;
   signal luma_key_direction  : std_logic;
@@ -310,6 +311,7 @@ architecture rtl of spector_wrapper_zynq is
   signal dsm_hi_alpha_reg   : std_logic_vector(11 downto 0);
   signal dsm_lo_alpha_reg   : std_logic_vector(11 downto 0);
   signal noise_alpha_reg    : std_logic_vector(11 downto 0);
+  signal dirt_ctrl_reg      : std_logic_vector(4 downto 0);
   -- Shape select controls (from registers)
   signal shape1_a_sel_reg   : std_logic_vector(3 downto 0);
   signal shape1_b_sel_reg   : std_logic_vector(3 downto 0);
@@ -556,6 +558,7 @@ begin
       dsm_hi_alpha        => dsm_hi_alpha_reg,
       dsm_lo_alpha        => dsm_lo_alpha_reg,
       noise_alpha         => noise_alpha_reg,
+      dirt_ctrl           => dirt_ctrl_reg,
       shape1_a_sel        => shape1_a_sel_reg,
       shape1_b_sel        => shape1_b_sel_reg,
       shape2_a_sel        => shape2_a_sel_reg,
@@ -583,7 +586,8 @@ begin
       frame_stats_b_avg    => frame_stats_b_avg,
       frame_stats_frame_id => frame_stats_frame_id,
       frame_stats_hash      => frame_stats_hash,
-      frame_stats_pix_count => frame_stats_pix_count
+      frame_stats_pix_count => frame_stats_pix_count,
+      audio_mag_pre         => audio_mag_pre
     );
 
     --- Buffer overlay and sprite generator
@@ -746,7 +750,8 @@ begin
       i2s_sdout => pmod_i2s_sdout,
       audio_sig => audio_sig_raw,
       audio_t   => audio_t_raw,
-      audio_b   => audio_b_raw
+      audio_b   => audio_b_raw,
+      audio_mag_pre => audio_mag_pre
     );
 
   p_audio_sync : process (pix_clk) is
@@ -842,6 +847,7 @@ begin
       slew_in          => slew_in_reg,
       cycle_recycle    => cycle_recycle_reg,
       noise_alpha      => noise_alpha_reg,
+      dirt_ctrl        => dirt_ctrl_reg,
       slowdown_sel     => slowdown_sel_reg,
       YUV_in           => YUV_in,
       y_alpha          => y_alpha_reg,

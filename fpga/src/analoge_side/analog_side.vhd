@@ -87,6 +87,8 @@ entity analog_side is
     y_alpha : in std_logic_vector(11 downto 0); -- 0 is unattenuated, 
     u_alpha : in std_logic_vector(11 downto 0); -- 0 is unattenuated, 
     v_alpha : in std_logic_vector(11 downto 0); -- 0 is unattenuated, 
+    -- YUV low-bit dirt: [1:0]=depth 0..3, [2]=Y en, [3]=U en, [4]=V en
+    dirt_ctrl : in std_logic_vector(4 downto 0) := (others => '0');
 
     audio_in_t   : in std_logic_vector(9 downto 0);
     audio_in_b   : in std_logic_vector(9 downto 0);
@@ -183,6 +185,9 @@ architecture Behavioral of analog_side is
   signal y_signal2 : std_logic_vector(11 downto 0) := (others => '0');
   signal u_signal2 : std_logic_vector(11 downto 0) := (others => '0');
   signal v_signal2 : std_logic_vector(11 downto 0) := (others => '0');
+  signal y_result_raw  : std_logic_vector(11 downto 0) := (others => '0');
+  signal u_result_raw  : std_logic_vector(11 downto 0) := (others => '0');
+  signal v_result_raw  : std_logic_vector(11 downto 0) := (others => '0');
   signal y_result  : std_logic_vector(11 downto 0) := (others => '0');
   signal u_result  : std_logic_vector(11 downto 0) := (others => '0');
   signal v_result  : std_logic_vector(11 downto 0) := (others => '0');
@@ -609,15 +614,28 @@ begin
       y_signal1 => y_signal1,
       y_signal2 => y_signal2,
       y_alpha   => y_alpha,
-      y_result  => y_result,
+      y_result  => y_result_raw,
       u_signal1 => u_signal1,
       u_signal2 => u_signal2,
       u_alpha   => u_alpha,
-      u_result  => u_result,
+      u_result  => u_result_raw,
       v_signal1 => v_signal1,
       v_signal2 => v_signal2,
       v_alpha   => v_alpha,
-      v_result  => v_result
+      v_result  => v_result_raw
+    );
+
+  yuv_dirt_inst : entity work.yuv_dirt
+    port map (
+      clk       => clk,
+      noise     => noise_1(4 downto 0),
+      dirt_ctrl => dirt_ctrl,
+      y_in      => y_result_raw,
+      u_in      => u_result_raw,
+      v_in      => v_result_raw,
+      y_out     => y_result,
+      u_out     => u_result,
+      v_out     => v_result
     );
 
   y_out <= y_result(11 downto 4);

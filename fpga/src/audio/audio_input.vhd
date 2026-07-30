@@ -35,7 +35,9 @@ entity audio_input is
 
     audio_sig  : out std_logic_vector(G_OUT_BITS - 1 downto 0);
     audio_t    : out std_logic_vector(G_OUT_BITS - 1 downto 0);
-    audio_b    : out std_logic_vector(G_OUT_BITS - 1 downto 0)
+    audio_b    : out std_logic_vector(G_OUT_BITS - 1 downto 0);
+    -- Instantaneous |sample| magnitude (12-bit), before envelope follower
+    audio_mag_pre : out std_logic_vector(G_ENV_BITS - 1 downto 0)
   );
 end entity audio_input;
 
@@ -98,6 +100,7 @@ architecture rtl of audio_input is
   signal audio_sig_int : std_logic_vector(G_OUT_BITS - 1 downto 0);
   signal audio_t_int   : std_logic_vector(G_OUT_BITS - 1 downto 0);
   signal audio_b_int   : std_logic_vector(G_OUT_BITS - 1 downto 0);
+  signal audio_mag_pre_r : std_logic_vector(G_ENV_BITS - 1 downto 0) := (others => '0');
 
   function f_env_step (
     state   : u_env;
@@ -296,6 +299,7 @@ begin
         lp_state       <= (others => '0');
         crossover_prev <= crossover_r;
         env_clear_d    <= '0';
+        audio_mag_pre_r <= (others => '0');
       else
         v_xover := crossover_r /= crossover_prev;
 
@@ -324,6 +328,7 @@ begin
           mag_sig_env <= f_to_env_mag(signed(shift_reg));
           mag_t_env   <= f_signed_to_env_mag(v_treb);
           mag_b_env   <= f_signed_to_env_mag(v_lp);
+          audio_mag_pre_r <= std_logic_vector(mag_sig_env);
         end if;
       end if;
     end if;
@@ -390,5 +395,7 @@ begin
       end if;
     end if;
   end process p_audio_out;
+
+  audio_mag_pre <= audio_mag_pre_r;
 
 end architecture rtl;

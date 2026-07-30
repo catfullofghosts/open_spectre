@@ -289,6 +289,31 @@ def wr_reg(addr, val_in):
             xsct.do(command)  # needs gracefull fail state
 
 
+def rd_reg(addr):
+            """Read a 32-bit CPU register. addr is a hex offset string or int (e.g. '19C', 0x19C)."""
+            if isinstance(addr, str):
+                offset = int(addr, 16)
+            else:
+                offset = int(addr)
+            command = f"mrd -force 0x{0x40000000 + offset:08X}"
+            print(command)
+            result = xsct.do(command)
+            if result is None:
+                return None
+            for token in str(result).replace(":", " ").split():
+                if token.startswith("0x") or token.startswith("0X"):
+                    return int(token, 16)
+            return None
+
+
+def read_audio_mag_pre():
+            """Read pre-envelope audio magnitude (12-bit in bits [11:0]). @ 0x19C."""
+            value = rd_reg(AUDIO_MAG_PRE_REG)
+            if value is None:
+                return None
+            return value & 0xFFF
+
+
 REG_BASE_ADDR = 0x40000000
 OVERLAY_BRAM_BYTE_BASE = 0x400
 # AXI BRAM ctrl maps 8KB @ 0x40000000; first 1KB is CPU regs, rest is overlay atlas.
@@ -298,6 +323,8 @@ SPRITE_REG_BASE = 0x100
 SPRITE_REG_STRIDE = 0x10
 CA_RULE_REG = 0x18
 AUDIO_CROSSOVER_REG = 0x0C
+DIRT_CTRL_REG = 0x198
+AUDIO_MAG_PRE_REG = 0x19C
 OVERLAY_GLOBAL_EN_REG = 0xFC
 CA_CTRL_RULE_XOR_Y = 1 << 9
 CA_CTRL_RULE_XOR_X = 1 << 10
@@ -341,6 +368,12 @@ def set_ca_rule(rule):
 def set_audio_crossover(value):
             """Set audio T/B crossover point (0=bass-heavy split .. 255=treble-heavy). @ 0x0C."""
             wr_reg(AUDIO_CROSSOVER_REG, int(value) & 0xFF)
+
+
+def set_dirt(depth=0, y_en=False, u_en=False, v_en=False):
+            """Set YUV dirt: depth 0-3 LSB bits, per-channel enables. @ 0x198."""
+            value = (int(depth) & 0x3) | ((1 if y_en else 0) << 2) | ((1 if u_en else 0) << 3) | ((1 if v_en else 0) << 4)
+            wr_reg(DIRT_CTRL_REG, value)
 
 
 def set_overlay_global_enable(enabled=True):

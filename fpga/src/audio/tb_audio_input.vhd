@@ -128,7 +128,8 @@ begin
       i2s_sdout => i2s_sdout,
       audio_sig => audio_sig,
       audio_t   => audio_t,
-      audio_b   => audio_b
+      audio_b   => audio_b,
+      audio_mag_pre => open
     );
 
   clk <= not clk after C_CLK_PERIOD / 2;

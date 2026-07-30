@@ -144,6 +144,8 @@ entity digital_reg_file is
     dsm_hi_alpha   : out std_logic_vector(11 downto 0);
     dsm_lo_alpha   : out std_logic_vector(11 downto 0);
     noise_alpha    : out std_logic_vector(11 downto 0);
+    -- YUV low-bit dirt on analog output
+    dirt_ctrl      : out std_logic_vector(4 downto 0);
     -- Shape select controls
     shape1_a_sel   : out std_logic_vector(3 downto 0);
     shape1_b_sel   : out std_logic_vector(3 downto 0);
@@ -177,6 +179,9 @@ entity digital_reg_file is
     frame_stats_frame_id : in std_logic_vector(7 downto 0);
     frame_stats_hash      : in std_logic_vector(31 downto 0);
     frame_stats_pix_count : in std_logic_vector(31 downto 0);
+
+    -- Audio input (read-only)
+    audio_mag_pre         : in std_logic_vector(11 downto 0);
 
     -- debug
     debug            : out std_logic_vector(127 downto 0);
@@ -303,6 +308,7 @@ architecture RTL of digital_reg_file is
   signal dsm_hi_alpha_i   : std_logic_vector(11 downto 0);
   signal dsm_lo_alpha_i   : std_logic_vector(11 downto 0);
   signal noise_alpha_i    : std_logic_vector(11 downto 0);
+  signal dirt_ctrl_i      : std_logic_vector(4 downto 0) := (others => '0');
   -- Shape select controls
   signal shape1_a_sel_i   : std_logic_vector(3 downto 0);
   signal shape1_b_sel_i   : std_logic_vector(3 downto 0);
@@ -447,6 +453,8 @@ begin
   regs(ra(x"18C")) <= x"000000" & frame_stats_b_avg;
   regs(ra(x"190")) <= frame_stats_hash;
   regs(ra(x"194")) <= frame_stats_pix_count;
+  regs(ra(x"198")) <= x"0000000" & "000" & dirt_ctrl_i;
+  regs(ra(x"19C")) <= x"00000" & audio_mag_pre;
 
   -- hardware interface
 --  regs(ra(x"7C")) <= 0x"0000000" & Rotery_addr_mux_i;
@@ -660,6 +668,8 @@ begin
             dsm_lo_alpha_i <= write_reg(11 downto 0);
           when x"DC" =>
             noise_alpha_i <= write_reg(11 downto 0);
+          when x"198" =>
+            dirt_ctrl_i <= write_reg(4 downto 0);
           when x"E0" =>
             shape1_a_sel_i <= write_reg(3 downto 0);
             shape1_b_sel_i <= write_reg(7 downto 4);
@@ -785,6 +795,7 @@ begin
   dsm_hi_alpha <= dsm_hi_alpha_i;
   dsm_lo_alpha <= dsm_lo_alpha_i;
   noise_alpha <= noise_alpha_i;
+  dirt_ctrl   <= dirt_ctrl_i;
 
   shape1_a_sel <= shape1_a_sel_i;
   shape1_b_sel <= shape1_b_sel_i;

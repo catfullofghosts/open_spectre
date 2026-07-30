@@ -133,6 +133,7 @@ entity cpu_reg_wrapper is
     dsm_hi_alpha   : out std_logic_vector(11 downto 0);
     dsm_lo_alpha   : out std_logic_vector(11 downto 0);
     noise_alpha    : out std_logic_vector(11 downto 0);
+    dirt_ctrl      : out std_logic_vector(4 downto 0);
     -- Shape select controls
     shape1_a_sel   : out std_logic_vector(3 downto 0);
     shape1_b_sel   : out std_logic_vector(3 downto 0);
@@ -162,7 +163,9 @@ entity cpu_reg_wrapper is
     frame_stats_b_avg    : in  std_logic_vector(7 downto 0);
     frame_stats_frame_id : in  std_logic_vector(7 downto 0);
     frame_stats_hash      : in  std_logic_vector(31 downto 0);
-    frame_stats_pix_count : in  std_logic_vector(31 downto 0)
+    frame_stats_pix_count : in  std_logic_vector(31 downto 0);
+
+    audio_mag_pre         : in  std_logic_vector(11 downto 0)
 
   );
 end cpu_reg_wrapper;
@@ -239,6 +242,7 @@ architecture rtl of cpu_reg_wrapper is
   signal  i_dsm_hi_alpha   : std_logic_vector(11 downto 0);
   signal  i_dsm_lo_alpha   : std_logic_vector(11 downto 0);
   signal  i_noise_alpha    : std_logic_vector(11 downto 0);
+  signal  i_dirt_ctrl        : std_logic_vector(4 downto 0);
   -- Shape select controls
   signal  i_shape1_a_sel   : std_logic_vector(3 downto 0);
   signal  i_shape1_b_sel   : std_logic_vector(3 downto 0);
@@ -349,6 +353,7 @@ begin
       dsm_hi_alpha        => i_dsm_hi_alpha,
       dsm_lo_alpha        => i_dsm_lo_alpha,
       noise_alpha         => i_noise_alpha,
+      dirt_ctrl           => i_dirt_ctrl,
       shape1_a_sel        => i_shape1_a_sel,
       shape1_b_sel        => i_shape1_b_sel,
       shape2_a_sel        => i_shape2_a_sel,
@@ -376,7 +381,8 @@ begin
       frame_stats_b_avg    => frame_stats_b_avg,
       frame_stats_frame_id => frame_stats_frame_id,
       frame_stats_hash      => frame_stats_hash,
-      frame_stats_pix_count => frame_stats_pix_count
+      frame_stats_pix_count => frame_stats_pix_count,
+      audio_mag_pre         => audio_mag_pre
 --      debug               => i_debug,
 --      exception_addr_o    => i_exception_addr_o
     );
@@ -440,6 +446,7 @@ begin
       dsm_hi_alpha        <= i_dsm_hi_alpha;
       dsm_lo_alpha        <= i_dsm_lo_alpha;
       noise_alpha         <= i_noise_alpha;
+      dirt_ctrl           <= i_dirt_ctrl;
       shape1_a_sel        <= i_shape1_a_sel;
       shape1_b_sel        <= i_shape1_b_sel;
       shape2_a_sel        <= i_shape2_a_sel;

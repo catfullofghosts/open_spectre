@@ -7,7 +7,18 @@ gear points not sharp enough, slider increases circle size but not gear teeth, w
 zoom h wraps around oddly??? same for zoom V
 copare triangles with the original , something is off
 sinwave has issues of clipping or wraparound
+check frame stats averages
+check audio in by debuging 
 
+
+latest check:
+-----check stats, averages dont work!!!, but hash works, pielscount works frame count works
+--------check audio in,inputs routable, but not doing anything, needs proper probe,
+input envilope seems to have some value but it is small, filtered ins have no value?
+check new noise reg
+
+
+------------------------------------------old
 NEXT chcekc:
 
 - YES!!!!  cna you mix on the analog materix now???
