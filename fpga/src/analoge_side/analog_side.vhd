@@ -625,10 +625,12 @@ begin
       v_result  => v_result_raw
     );
 
+  -- random_voltage packs the 4-bit DAC into noise_1(9:6) and zeros (5:0).
+  -- Dirt must take the live MSBs — noise_1(4:0) is always ~0 so XOR did nothing.
   yuv_dirt_inst : entity work.yuv_dirt
     port map (
       clk       => clk,
-      noise     => noise_1(4 downto 0),
+      noise     => noise_1(9 downto 5),
       dirt_ctrl => dirt_ctrl,
       y_in      => y_result_raw,
       u_in      => u_result_raw,

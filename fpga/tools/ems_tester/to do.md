@@ -15,7 +15,11 @@ latest check:
 -----check stats, averages dont work!!!, but hash works, pielscount works frame count works
 --------check audio in,inputs routable, but not doing anything, needs proper probe,
 input envilope seems to have some value but it is small, filtered ins have no value?
-check new noise reg
+
+0x19C (AXI: 0x4000019C) — audio_mag_pre = i can see audio in (0x10D is the max i have ever seen, but i can t see it getting to the amnalog matrix)
+!!! trace the signal all the way in and out of the analog matrix and see if the signal is just too small or what?
+
+check new noise reg--- cant see no DIRT!!!! (the bottom 4 bits in the noise reg are blanked to 0!!! fuuuk! hahahah)
 
 
 ------------------------------------------old

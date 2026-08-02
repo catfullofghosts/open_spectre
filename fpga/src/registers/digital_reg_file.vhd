@@ -453,7 +453,7 @@ begin
   regs(ra(x"18C")) <= x"000000" & frame_stats_b_avg;
   regs(ra(x"190")) <= frame_stats_hash;
   regs(ra(x"194")) <= frame_stats_pix_count;
-  regs(ra(x"198")) <= x"0000000" & "000" & dirt_ctrl_i;
+  regs(ra(x"198")) <= x"000000" & "000" & dirt_ctrl_i;
   regs(ra(x"19C")) <= x"00000" & audio_mag_pre;
 
   -- hardware interface

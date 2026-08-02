@@ -6,6 +6,9 @@ use ieee.numeric_std.all;
 -- 12-to-8-bit export (y_result(11:4)).  Depth N XORs export LSBs y_result(4)
 -- through y_result(4+N-1).  Bits 3:0 stay untouched.  Permuted noise picks:
 -- Y=0,1,4  U=4,2,0,1  V=1,4,2,3 (first N entries used).
+--
+-- Callers must feed live noise bits (analog_side uses noise_1(9 downto 5);
+-- random_voltage zeros noise_1(5:0) so the low nibble is useless here).
 
 entity yuv_dirt is
   port (

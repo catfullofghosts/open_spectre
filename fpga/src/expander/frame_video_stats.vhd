@@ -14,6 +14,9 @@ use ieee.numeric_std.all;
 --   @ 0x190: frame_hash — unfiltered 32-bit hash of active pixels (scan order)
 --   @ 0x194: frame_pix_count — active pixel count for the hashed frame
 --
+-- Averages: bit-serial restoring divide (sum / pix_count) over G_DIV_CYCLES steps,
+-- feeding dividend bits MSB-first into an (N+1)-bit remainder.
+--
 -- Hash (replicate in software for golden values):
 --   h = 5381
 --   for each active pixel p (24-bit BGR as on the video bus):
@@ -115,7 +118,9 @@ architecture rtl of frame_video_stats is
   signal div_chan     : natural range 0 to 3;
   signal div_step     : natural range 0 to G_DIV_CYCLES;
   signal div_den      : unsigned(31 downto 0);
-  signal div_rem      : unsigned(31 downto 0);
+  -- Bit-serial restoring divider: rem is N+1 bits so (rem<<1|bit) never loses the MSB.
+  signal div_rem      : unsigned(32 downto 0);
+  signal div_num      : unsigned(31 downto 0);  -- remaining dividend bits (MSB shifted in each step)
   signal div_quot     : unsigned(31 downto 0);
 
   signal avg_luma     : unsigned(7 downto 0);
@@ -274,7 +279,7 @@ begin
 
   p_post : process (clk) is
     variable v_hist_count : natural range 0 to G_FILTER_FRAMES;
-    variable v_shifted    : unsigned(31 downto 0);
+    variable v_rem        : unsigned(32 downto 0);
     variable v_h_lmin     : t_byte_hist;
     variable v_h_lmax     : t_byte_hist;
     variable v_h_lavg     : t_byte_hist;
@@ -297,6 +302,7 @@ begin
         div_step   <= 0;
         div_den    <= (others => '0');
         div_rem    <= (others => '0');
+        div_num    <= (others => '0');
         div_quot   <= (others => '0');
         hist_count <= 0;
         frame_id_i <= (others => '0');
@@ -326,19 +332,23 @@ begin
               div_chan    <= 0;
               div_step    <= 0;
               div_den     <= cap_pix;
-              div_rem     <= cap_sums(0);
+              -- Correct restoring divide: rem=0, feed dividend bits MSB-first over 32 steps
+              div_rem     <= (others => '0');
+              div_num     <= cap_sums(0);
               div_quot    <= (others => '0');
               post_state  <= POST_DIV;
             end if;
 
           when POST_DIV =>
             if div_step < G_DIV_CYCLES then
-              v_shifted := shift_left(div_rem, 1);
-              if v_shifted >= div_den then
-                div_rem  <= v_shifted - div_den;
+              -- rem = (rem << 1) | next_dividend_bit; then trial-subtract divisor
+              v_rem := div_rem(31 downto 0) & div_num(31);
+              div_num <= shift_left(div_num, 1);
+              if v_rem >= resize(div_den, 33) then
+                div_rem  <= v_rem - resize(div_den, 33);
                 div_quot <= shift_left(div_quot, 1) or to_unsigned(1, 32);
               else
-                div_rem  <= v_shifted;
+                div_rem  <= v_rem;
                 div_quot <= shift_left(div_quot, 1);
               end if;
               div_step <= div_step + 1;
@@ -355,7 +365,8 @@ begin
               else
                 div_chan   <= div_chan + 1;
                 div_step   <= 0;
-                div_rem    <= cap_sums(div_chan + 1);
+                div_rem    <= (others => '0');
+                div_num    <= cap_sums(div_chan + 1);
                 div_quot   <= (others => '0');
                 post_state <= POST_DIV;
               end if;

@@ -186,6 +186,16 @@ architecture rtl of cpu_reg_wrapper is
   signal  i_ch_addr        : std_logic_vector(7 downto 0);
   signal  i_gain_in        : std_logic_vector(15 downto 0);
   signal  i_anna_matrix_wr : std_logic;
+
+  -- CDC for matrix write strobes: 2FF sync + rising-edge → 1-cycle pix pulse
+  -- (level pulses from regs_clk must not be sampled as multi-bit levels in pix domain)
+  signal matrix_load_meta   : std_logic := '0';
+  signal matrix_load_sync   : std_logic := '0';
+  signal matrix_load_sync_d : std_logic := '0';
+  signal anna_wr_meta       : std_logic := '0';
+  signal anna_wr_sync       : std_logic := '0';
+  signal anna_wr_sync_d     : std_logic := '0';
+
      -- Shape gen
   signal  i_pos_h_1   : std_logic_vector(11 downto 0);
   signal  i_pos_v_1   : std_logic_vector(11 downto 0);
@@ -390,15 +400,13 @@ begin
     process (pix_clk) -- shift registers into the pixel clock domain
     begin
       if rising_edge(pix_clk) then
-      matrix_out_addr   <= i_matrix_out_addr;
+      matrix_out_addr     <= i_matrix_out_addr;
       matrix_mask_out     <= i_matrix_mask_out;
-      matrix_load         <= i_matrix_load;
       invert_matrix       <= i_invert_matrix;
       vid_span            <= i_vid_span;
       out_addr            <= i_out_addr;
       ch_addr             <= i_ch_addr;
       gain_in             <= i_gain_in;
-      anna_matrix_wr      <= i_anna_matrix_wr;
       pos_h_1             <= i_pos_h_1;
       pos_v_1             <= i_pos_v_1;
       zoom_h_1            <= i_zoom_h_1;
@@ -462,6 +470,24 @@ begin
       overlay_sprites     <= i_overlay_sprites;
       end if;
     end process;
+
+  -- matrix_load / anna_matrix_wr: SW pulses 1→0 on regs_clk. Re-sample with 2 FFs
+  -- and emit a single pix_clk cycle on the rising edge so mask writes are never missed
+  -- at slow pix rates and never held for thousands of cycles at fast rates.
+  p_matrix_strobe_cdc : process (pix_clk)
+  begin
+    if rising_edge(pix_clk) then
+      matrix_load_meta   <= i_matrix_load;
+      matrix_load_sync   <= matrix_load_meta;
+      matrix_load_sync_d <= matrix_load_sync;
+      matrix_load        <= matrix_load_sync and not matrix_load_sync_d;
+
+      anna_wr_meta       <= i_anna_matrix_wr;
+      anna_wr_sync       <= anna_wr_meta;
+      anna_wr_sync_d     <= anna_wr_sync;
+      anna_matrix_wr     <= anna_wr_sync and not anna_wr_sync_d;
+    end if;
+  end process p_matrix_strobe_cdc;
 
   p_audio_crossover_out : process (clk)
   begin
