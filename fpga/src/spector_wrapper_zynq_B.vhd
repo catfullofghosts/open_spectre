@@ -232,9 +232,9 @@ architecture rtl of spector_wrapper_zynq is
   signal u_alpha : std_logic_vector(11 downto 0); -- 0 is unattenuated, 
   signal v_alpha : std_logic_vector(11 downto 0); -- 0 is unattenuated, 
 
-  signal audio_in_t   : std_logic_vector(9 downto 0);
-  signal audio_in_b   : std_logic_vector(9 downto 0);
-  signal audio_in_sig : std_logic_vector(9 downto 0);
+  signal audio_in_t   : std_logic_vector(11 downto 0);
+  signal audio_in_b   : std_logic_vector(11 downto 0);
+  signal audio_in_sig : std_logic_vector(11 downto 0);
 
   --osc control
   --  signal sync_sel_osc1 : std_logic_vector(1 downto 0);
@@ -307,10 +307,17 @@ architecture rtl of spector_wrapper_zynq is
   signal ca_cfg            : std_logic_vector(15 downto 0);
   signal audio_crossover   : std_logic_vector(7 downto 0);
 
-  signal audio_sig_raw     : std_logic_vector(9 downto 0);
-  signal audio_t_raw       : std_logic_vector(9 downto 0);
-  signal audio_b_raw       : std_logic_vector(9 downto 0);
+  signal audio_sig_raw     : std_logic_vector(11 downto 0);
+  signal audio_t_raw       : std_logic_vector(11 downto 0);
+  signal audio_b_raw       : std_logic_vector(11 downto 0);
   signal audio_mag_pre     : std_logic_vector(11 downto 0);
+  -- 2FF CDC regs_clk → pix_clk for audio envelopes
+  signal audio_sig_meta    : std_logic_vector(11 downto 0) := (others => '0');
+  signal audio_sig_sync    : std_logic_vector(11 downto 0) := (others => '0');
+  signal audio_t_meta      : std_logic_vector(11 downto 0) := (others => '0');
+  signal audio_t_sync      : std_logic_vector(11 downto 0) := (others => '0');
+  signal audio_b_meta      : std_logic_vector(11 downto 0) := (others => '0');
+  signal audio_b_sync      : std_logic_vector(11 downto 0) := (others => '0');
   -- Luma key control
   signal luma_key_enable     : std_logic;
   signal luma_key_direction  : std_logic;
@@ -757,8 +764,10 @@ begin
   -------------------------------------------
   audio_input_inst : entity work.audio_input
     generic map (
-      G_OUT_BITS  => 10,
-      G_ENV_SHIFT => 8
+      G_OUT_BITS  => 12,  -- full envelope width into 12-bit analog mixer
+      G_ENV_SHIFT => 8,
+      G_MAG_SHIFT => 8,   -- ~16x vs legacy top-12 (shift 12); saturates
+      G_BAND_GAIN => 4
     )
     port map (
       clk       => regs_clk,
@@ -775,14 +784,23 @@ begin
       audio_mag_pre => audio_mag_pre
     );
 
+  -- 2FF sync into pix domain (envelopes change slowly; bit-skew OK)
   p_audio_sync : process (pix_clk) is
   begin
     if rising_edge(pix_clk) then
-      audio_in_sig <= audio_sig_raw;
-      audio_in_t   <= audio_t_raw;
-      audio_in_b   <= audio_b_raw;
-      audio_T      <= audio_t_raw(9);
-      audio_B      <= audio_b_raw(9);
+      audio_sig_meta <= audio_sig_raw;
+      audio_sig_sync <= audio_sig_meta;
+      audio_t_meta   <= audio_t_raw;
+      audio_t_sync   <= audio_t_meta;
+      audio_b_meta   <= audio_b_raw;
+      audio_b_sync   <= audio_b_meta;
+
+      audio_in_sig <= audio_sig_sync;
+      audio_in_t   <= audio_t_sync;
+      audio_in_b   <= audio_b_sync;
+      -- Digital matrix T/B: mid-high bit so moderate levels still trip
+      audio_T      <= audio_t_sync(9);
+      audio_B      <= audio_b_sync(9);
     end if;
   end process p_audio_sync;
 
@@ -1103,7 +1121,8 @@ begin
 --      video_out    => video_fx_out
 --    );
 
-video_out <= video_fx_out;
+video_out <= video_pre_fx;
+-- video_out <= video_fx_out;
 
 --  frame_video_stats_inst : entity work.frame_video_stats
 --    generic map (

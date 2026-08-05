@@ -88,9 +88,9 @@ entity analog_side is
     u_alpha : in std_logic_vector(11 downto 0); -- 0 is unattenuated, 
     v_alpha : in std_logic_vector(11 downto 0); -- 0 is unattenuated, 
 
-    audio_in_t   : in std_logic_vector(9 downto 0);
-    audio_in_b   : in std_logic_vector(9 downto 0);
-    audio_in_sig : in std_logic_vector(9 downto 0);
+    audio_in_t   : in std_logic_vector(11 downto 0);
+    audio_in_b   : in std_logic_vector(11 downto 0);
+    audio_in_sig : in std_logic_vector(11 downto 0);
 
     --osc control
     sync_sel_osc1  : in std_logic_vector(1 downto 0);
@@ -333,9 +333,9 @@ begin
       result  => noise_2_att);
   mixer_inputs(5) <= noise_2_att;
 
-  mixer_inputs(6) <= audio_in_t & "00";
-  mixer_inputs(7) <= audio_in_b & "00";
-  mixer_inputs(8) <= audio_in_sig & "00";
+  mixer_inputs(6) <= audio_in_t;
+  mixer_inputs(7) <= audio_in_b;
+  mixer_inputs(8) <= audio_in_sig;
 
   -- dsm_hi: matrix out 34, unfiltered. dsm_lo: matrix out 35, LPF in spector_wrapper.
   dsm_hi_i_padded <= dsm_hi_i & "00";

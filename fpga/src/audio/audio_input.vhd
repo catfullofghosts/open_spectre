@@ -19,7 +19,11 @@ entity audio_input is
     G_BITS_PER_CH : positive := 64;
     G_ENV_SHIFT   : natural  := 8;  -- overall envelope smoothing
     G_BAND_ENV_SHIFT : natural := 5;  -- T/B envelope (faster response to crossover)
-    G_ENV_BITS    : positive := 12   -- envelope state width (analog matrix uses 12-bit)
+    G_ENV_BITS    : positive := 12;  -- envelope state width (analog matrix uses 12-bit)
+    -- |sample| right-shift into G_ENV_BITS; smaller = louder (legacy top-12 was 12)
+    G_MAG_SHIFT   : natural  := 8;
+    -- Extra left-gain on T/B band mags vs full-scale LP width (saturates)
+    G_BAND_GAIN   : natural  := 4
   );
   port (
     clk        : in  std_logic;
@@ -48,8 +52,8 @@ architecture rtl of audio_input is
   constant C_LP_SHIFT_MIN   : natural := 2;
   constant C_LP_SHIFT_MAX   : natural := 14;
   constant C_LP_BITS        : natural := 18;
-  constant C_MAG_TO_ENV_SHIFT : natural := G_I2S_BITS - G_ENV_BITS;
   constant C_ENV_TO_OUT_SHIFT : natural := G_ENV_BITS - G_OUT_BITS;
+  constant C_ENV_MAX        : unsigned(G_ENV_BITS - 1 downto 0) := (others => '1');
 
   subtype u_env is unsigned(G_ENV_BITS - 1 downto 0);
 
@@ -122,6 +126,7 @@ architecture rtl of audio_input is
   ) return u_env is
     variable v : signed(G_I2S_BITS - 1 downto 0);
     variable u : unsigned(G_I2S_BITS - 1 downto 0);
+    variable shifted : unsigned(G_I2S_BITS - 1 downto 0);
   begin
     if value < 0 then
       v := -value;
@@ -129,22 +134,44 @@ architecture rtl of audio_input is
       v := value;
     end if;
     u := unsigned(v);
-    return resize(shift_right(u, C_MAG_TO_ENV_SHIFT), G_ENV_BITS);
+    if G_MAG_SHIFT >= G_I2S_BITS then
+      return (others => '0');
+    end if;
+    -- Saturate if any bit above the kept window is set
+    if G_I2S_BITS > G_MAG_SHIFT + G_ENV_BITS then
+      if shift_right(u, G_MAG_SHIFT + G_ENV_BITS) /= 0 then
+        return C_ENV_MAX;
+      end if;
+    end if;
+    shifted := shift_right(u, G_MAG_SHIFT);
+    return resize(shifted, G_ENV_BITS);
   end function f_to_env_mag;
 
   function f_signed_to_env_mag (
     value : signed
   ) return u_env is
     variable u : unsigned(value'length - 1 downto 0);
-    constant C_DROP : natural := value'length - G_ENV_BITS;
+    variable drop : integer;
+    variable shift_n : natural;
   begin
     if value < 0 then
       u := unsigned(-value);
     else
       u := unsigned(value);
     end if;
-    if C_DROP > 0 then
-      return resize(shift_right(u, C_DROP), G_ENV_BITS);
+    drop := value'length - G_ENV_BITS - G_BAND_GAIN;
+    if drop < 0 then
+      shift_n := 0;
+    else
+      shift_n := drop;
+    end if;
+    if shift_n > 0 and value'length > shift_n + G_ENV_BITS then
+      if shift_right(u, shift_n + G_ENV_BITS) /= 0 then
+        return C_ENV_MAX;
+      end if;
+    end if;
+    if shift_n > 0 then
+      return resize(shift_right(u, shift_n), G_ENV_BITS);
     else
       return resize(u, G_ENV_BITS);
     end if;

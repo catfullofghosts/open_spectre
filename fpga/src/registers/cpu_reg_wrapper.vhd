@@ -217,6 +217,8 @@ architecture rtl of cpu_reg_wrapper is
   signal  i_noise_freq    : std_logic_vector(13 downto 0);
   signal  i_slew_in       : std_logic_vector(2 downto 0);
   signal  i_cycle_recycle : std_logic;
+  signal  i_noise_rst     : std_logic;
+  signal  i_slowdown_sel  : std_logic_vector(1 downto 0);
     -- osc 1 & 2
   signal  i_sync_sel_osc1 : std_logic_vector(1 downto 0);
   signal  i_osc_1_freq    : std_logic_vector(13 downto 0);
@@ -228,6 +230,8 @@ architecture rtl of cpu_reg_wrapper is
   signal  i_osc_2_derv    : std_logic_vector(7 downto 0);
   signal  i_osc_2_pwm_duty : std_logic_vector(8 downto 0);
   signal  i_osc_2_wave_sel : std_logic_vector(1 downto 0);
+  signal  i_speed1        : std_logic;
+  signal  i_speed2        : std_logic;
     -- Output Levels & output Active
   signal  i_col_en_bypass : std_logic;
     
@@ -330,8 +334,8 @@ begin
       noise_freq          => i_noise_freq,
       slew_in             => i_slew_in,
       cycle_recycle       => i_cycle_recycle,
-      noise_rst           => noise_rst,
-      slowdown_sel        => slowdown_sel,
+      noise_rst           => i_noise_rst,
+      slowdown_sel        => i_slowdown_sel,
       sync_sel_osc1       => i_sync_sel_osc1,
       osc_1_freq          => i_osc_1_freq,
       osc_1_derv          => i_osc_1_derv,
@@ -342,8 +346,8 @@ begin
       osc_2_derv          => i_osc_2_derv,
       osc_2_pwm_duty      => i_osc_2_pwm_duty,
       osc_2_wave_sel      => i_osc_2_wave_sel,
-      speed1                => speed1,
-      speed2                => speed2,
+      speed1                => i_speed1,
+      speed2                => i_speed2,
       col_en_bypass         => i_col_en_bypass,
       y_level             => i_y_level,
       cr_level            => i_cr_level,
@@ -426,6 +430,8 @@ begin
       noise_freq          <= i_noise_freq;
       slew_in             <= i_slew_in;
       cycle_recycle       <= i_cycle_recycle;
+      noise_rst           <= i_noise_rst;
+      slowdown_sel        <= i_slowdown_sel;
       sync_sel_osc1       <= i_sync_sel_osc1;
       osc_1_freq          <= i_osc_1_freq;
       osc_1_derv          <= i_osc_1_derv;
@@ -436,6 +442,8 @@ begin
       osc_2_derv          <= i_osc_2_derv;
       osc_2_pwm_duty      <= i_osc_2_pwm_duty;
       osc_2_wave_sel      <= i_osc_2_wave_sel;
+      speed1              <= i_speed1;
+      speed2              <= i_speed2;
       col_en_bypass         <= i_col_en_bypass;
       y_level             <= i_y_level;
       cr_level            <= i_cr_level;
