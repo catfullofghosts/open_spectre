@@ -9,6 +9,13 @@ copare triangles with the original , something is off
 sinwave has issues of clipping or wraparound
 check frame stats averages
 check audio in by debuging 
+wheck why resolution is stuffed when i change it
+
+- make big list of stuff to check at MESS ems!!!
+
+- add reg to get luma input from top bit of luma out
+
+check the slow counter speed is acurate
 
 
 latest check:
@@ -21,7 +28,7 @@ input envilope seems to have some value but it is small, filtered ins have no va
 
 check new noise reg--- cant see no DIRT!!!! (the bottom 4 bits in the noise reg are blanked to 0!!! fuuuk! hahahah)
 
-
+debug irt, remove hape gen to check
 ------------------------------------------old
 NEXT chcekc:
 

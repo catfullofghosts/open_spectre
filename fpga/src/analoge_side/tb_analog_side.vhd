@@ -90,6 +90,7 @@ begin
 
       vid_span => vid_span, osc_1_sqr_o => osc_1_sqr_o, osc_2_sqr_o => osc_2_sqr_o,
       noise_1_o => noise_1_o, noise_2_o => noise_2_o,
+      noise_dirt_o => open,
 
       matrix_pos_h_1 => matrix_pos_h_1, matrix_pos_v_1 => matrix_pos_v_1,
       matrix_zoom_h_1 => matrix_zoom_h_1, matrix_zoom_v_1 => matrix_zoom_v_1,

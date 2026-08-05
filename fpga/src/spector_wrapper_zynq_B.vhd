@@ -286,6 +286,19 @@ architecture rtl of spector_wrapper_zynq is
   signal y_out : std_logic_vector(7 downto 0);
   signal u_out : std_logic_vector(7 downto 0);
   signal v_out : std_logic_vector(7 downto 0);
+  -- Clean YUV from analog_side; dirt applied in wrapper before encoder
+  signal y_analog : std_logic_vector(7 downto 0);
+  signal u_analog : std_logic_vector(7 downto 0);
+  signal v_analog : std_logic_vector(7 downto 0);
+  signal noise_dirt : std_logic_vector(4 downto 0);
+
+  -- Align H/V/SOF with video_pre_fx path (encoder mode):
+  -- dirt(1) + color_mult(3) + encoder_out(1) + bg_regs(3) + pre_fx(1) = 9
+  -- Pipe length 8 + registered MSB tap = 9 cycles.
+  constant C_OUT_PIPE_LAT : natural := 8;
+  signal h_sync_pipe : std_logic_vector(C_OUT_PIPE_LAT - 1 downto 0) := (others => '0');
+  signal v_sync_pipe : std_logic_vector(C_OUT_PIPE_LAT - 1 downto 0) := (others => '0');
+  signal sof_pipe    : std_logic_vector(C_OUT_PIPE_LAT - 1 downto 0) := (others => '0');
 
   -- Pixel clock and video input control from CPU registers
   signal pix_clk_div_sel    : std_logic;
@@ -434,10 +447,13 @@ begin
   
   process (pix_clk)
   begin
-    if rising_edge(pix_clk) then -- make adjustible by the regs
-        h_sync_o         <= h_sync;
-        v_sync_o         <= v_sync;
-        start_of_frame_o <= start_of_frame;
+    if rising_edge(pix_clk) then
+      h_sync_pipe <= h_sync_pipe(C_OUT_PIPE_LAT - 2 downto 0) & h_sync;
+      v_sync_pipe <= v_sync_pipe(C_OUT_PIPE_LAT - 2 downto 0) & v_sync;
+      sof_pipe    <= sof_pipe(C_OUT_PIPE_LAT - 2 downto 0) & start_of_frame;
+      h_sync_o         <= h_sync_pipe(C_OUT_PIPE_LAT - 1);
+      v_sync_o         <= v_sync_pipe(C_OUT_PIPE_LAT - 1);
+      start_of_frame_o <= sof_pipe(C_OUT_PIPE_LAT - 1);
     end if;
   end process;
 
@@ -591,28 +607,28 @@ begin
     );
 
     --- Buffer overlay and sprite generator
-  overlay_framebuffer_inst : entity work.overlay_framebuffer
-    generic map (
-      G_DEPTH      => 2048,
-      G_ADDR_WIDTH => 11
-    )
-    port map (
-      cpu_clk    => regs_clk,
-      cpu_en     => overlay_bram_en,
-      cpu_we     => overlay_bram_we,
-      cpu_addr   => overlay_bram_addr,
-      cpu_wdata  => overlay_bram_wdata,
-      cpu_rdata  => overlay_bram_rdata,
-      pix_clk    => pix_clk,
-      pix_rst    => reset_n,
-      h_sync     => h_sync_n,
-      v_sync     => v_sync_n,
-      global_enable => overlay_global_en,
-      block_div     => overlay_block_div,
-      sprites       => overlay_sprites,
-      overlay_key => overlay_key,
-      overlay_rgb => overlay_rgb
-    );
+--  overlay_framebuffer_inst : entity work.overlay_framebuffer
+--    generic map (
+--      G_DEPTH      => 2048,
+--      G_ADDR_WIDTH => 11
+--    )
+--    port map (
+--      cpu_clk    => regs_clk,
+--      cpu_en     => overlay_bram_en,
+--      cpu_we     => overlay_bram_we,
+--      cpu_addr   => overlay_bram_addr,
+--      cpu_wdata  => overlay_bram_wdata,
+--      cpu_rdata  => overlay_bram_rdata,
+--      pix_clk    => pix_clk,
+--      pix_rst    => reset_n,
+--      h_sync     => h_sync_n,
+--      v_sync     => v_sync_n,
+--      global_enable => overlay_global_en,
+--      block_div     => overlay_block_div,
+--      sprites       => overlay_sprites,
+--      overlay_key => overlay_key,
+--      overlay_rgb => overlay_rgb
+--    );
 
   -------------------------------------------
   -- Digital Side
@@ -637,18 +653,18 @@ begin
         line_clk_en <= '0';
         line_div_counter := "00";
       elsif pix_clk_div_sel = '0' then
-        -- /2: one digital pixel every 2 source pixels
+        -- /2: toggle every clock → rising edge every 2 source pixels
         pix_clk_en <= not pix_clk_en;
         clk_div_counter := "00";
       else
-        -- /4: one digital pixel every 4 source pixels
+        -- /4: one-cycle enable every 4 clocks → rising edge every 4 source pixels
+        -- (X counter_re edges on 0→1 of pix_clk_en)
+        if clk_div_counter = "00" then
+          pix_clk_en <= '1';
+        else
+          pix_clk_en <= '0';
+        end if;
         clk_div_counter := clk_div_counter + 1;
-        if clk_div_counter(0) = '0' then
-          pix_clk_en <= not pix_clk_en;
-        end if;
-        if clk_div_counter = "11" then
-          clk_div_counter := "00";
-        end if;
       end if;
 
       -- Re-phase line divider at start of each frame; step on each hsync edge
@@ -661,14 +677,19 @@ begin
           line_clk_en <= not line_clk_en;
           line_div_counter := "00";
         else
-          -- /4: one digital line every 4 video lines
+          -- /4: one-cycle enable every 4 lines
+          if line_div_counter = "00" then
+            line_clk_en <= '1';
+          else
+            line_clk_en <= '0';
+          end if;
           line_div_counter := line_div_counter + 1;
-          if line_div_counter(0) = '0' then
-            line_clk_en <= not line_clk_en;
-          end if;
-          if line_div_counter = "11" then
-            line_div_counter := "00";
-          end if;
+        end if;
+      else
+        -- Line enable is a pulse sampled on hsync edge only; hold low otherwise
+        -- so counter_re sees a clean 0→1 once per /4 line group.
+        if pix_clk_div_sel = '1' then
+          line_clk_en <= '0';
         end if;
       end if;
 
@@ -847,7 +868,6 @@ begin
       slew_in          => slew_in_reg,
       cycle_recycle    => cycle_recycle_reg,
       noise_alpha      => noise_alpha_reg,
-      dirt_ctrl        => dirt_ctrl_reg,
       slowdown_sel     => slowdown_sel_reg,
       YUV_in           => YUV_in,
       y_alpha          => y_alpha_reg,
@@ -879,6 +899,7 @@ begin
       osc_2_sqr_o      => osc_2_sqr_o,
       noise_1_o        => noise_1_o,
       noise_2_o        => noise_2_o,
+      noise_dirt_o     => noise_dirt,
       noise_rst        => noise_rst_reg,
       matrix_pos_h_1   => matrix_pos_h_1,
       matrix_pos_v_1   => matrix_pos_v_1,
@@ -896,9 +917,25 @@ begin
       matrix_gear_2    => matrix_gear_2,
       matrix_lantern_2 => matrix_lantern_2,
       matrix_fizz_2    => matrix_fizz_2,
-      y_out            => y_out,
-      u_out            => u_out,
-      v_out            => v_out
+      y_out            => y_analog,
+      u_out            => u_analog,
+      v_out            => v_analog
+    );
+
+  -------------------------------------------
+  -- YUV dirt (bottom bits of analog YUV out)
+  -------------------------------------------
+  yuv_dirt_inst : entity work.yuv_dirt
+    port map (
+      clk       => pix_clk,
+      noise     => noise_dirt,
+      dirt_ctrl => dirt_ctrl_reg,
+      y_in      => y_analog,
+      u_in      => u_analog,
+      v_in      => v_analog,
+      y_out     => y_out,
+      u_out     => u_out,
+      v_out     => v_out
     );
 
   -------------------------------------------
@@ -924,31 +961,31 @@ begin
     end if;
   end process;
 
-  shape_gen1 : entity work.shape_gen
-    port map
-    (
-      clk                   => pix_clk, --clk_148_5,
-      rst                   => reset_n,
-      h_sync                => h_sync, --negated inside the module
-      v_sync                => v_sync, --negated inside the module
-      start_of_frame        => start_of_frame_n,
-      start_of_active_video => '0',
-      video_on              => '0',
-      pos_h                 => matrix_pos_h_1,
-      pos_v                 => matrix_pos_v_1,
-      zoom_h                => matrix_zoom_h_1,
-      zoom_v                => matrix_zoom_v_1,
-      circle_i              => matrix_circle_1,
-      gear_i                => matrix_gear_1,
-      lantern_i             => matrix_lantern_1,
-      fizz_i                => matrix_fizz_1,
-      shape_a_sel           => shape1_a_sel_reg,
-      shape_b_sel           => shape1_b_sel_reg,
-      x_in                  => x_in, -- digital side x
-      y_in                  => y_in, -- digital side y
-      shape_a               => shape1_a,
-      shape_b               => shape1_b
-    );
+--  shape_gen1 : entity work.shape_gen
+--    port map
+--    (
+--      clk                   => pix_clk, --clk_148_5,
+--      rst                   => reset_n,
+--      h_sync                => h_sync, --negated inside the module
+--      v_sync                => v_sync, --negated inside the module
+--      start_of_frame        => start_of_frame_n,
+--      start_of_active_video => '0',
+--      video_on              => '0',
+--      pos_h                 => matrix_pos_h_1,
+--      pos_v                 => matrix_pos_v_1,
+--      zoom_h                => matrix_zoom_h_1,
+--      zoom_v                => matrix_zoom_v_1,
+--      circle_i              => matrix_circle_1,
+--      gear_i                => matrix_gear_1,
+--      lantern_i             => matrix_lantern_1,
+--      fizz_i                => matrix_fizz_1,
+--      shape_a_sel           => shape1_a_sel_reg,
+--      shape_b_sel           => shape1_b_sel_reg,
+--      x_in                  => x_in, -- digital side x
+--      y_in                  => y_in, -- digital side y
+--      shape_a               => shape1_a,
+--      shape_b               => shape1_b
+--    );
 
 --  shape_gen2 : entity work.shape_gen
 --    port map
@@ -1068,32 +1105,32 @@ begin
 
 video_out <= video_fx_out;
 
-  frame_video_stats_inst : entity work.frame_video_stats
-    generic map (
-      G_FILTER_FRAMES => 4
-    )
-    port map (
-      clk       => pix_clk,
-      rst       => reset_n,
-      h_sync    => h_sync_n,
-      v_sync    => v_sync_n,
-      video_in  => video_pre_fx,
-      video_out => video_fx_out,
-      stats_luma_min => frame_stats_luma_min,
-      stats_luma_max => frame_stats_luma_max,
-      stats_luma_avg => frame_stats_luma_avg,
-      stats_r_min    => frame_stats_r_min,
-      stats_r_max    => frame_stats_r_max,
-      stats_r_avg    => frame_stats_r_avg,
-      stats_g_min    => frame_stats_g_min,
-      stats_g_max    => frame_stats_g_max,
-      stats_g_avg    => frame_stats_g_avg,
-      stats_b_min    => frame_stats_b_min,
-      stats_b_max    => frame_stats_b_max,
-      stats_b_avg    => frame_stats_b_avg,
-      stats_frame_id => frame_stats_frame_id,
-      stats_frame_hash      => frame_stats_hash,
-      stats_frame_pix_count => frame_stats_pix_count
-    );
+--  frame_video_stats_inst : entity work.frame_video_stats
+--    generic map (
+--      G_FILTER_FRAMES => 4
+--    )
+--    port map (
+--      clk       => pix_clk,
+--      rst       => reset_n,
+--      h_sync    => h_sync_n,
+--      v_sync    => v_sync_n,
+--      video_in  => video_pre_fx,
+--      video_out => video_fx_out,
+--      stats_luma_min => frame_stats_luma_min,
+--      stats_luma_max => frame_stats_luma_max,
+--      stats_luma_avg => frame_stats_luma_avg,
+--      stats_r_min    => frame_stats_r_min,
+--      stats_r_max    => frame_stats_r_max,
+--      stats_r_avg    => frame_stats_r_avg,
+--      stats_g_min    => frame_stats_g_min,
+--      stats_g_max    => frame_stats_g_max,
+--      stats_g_avg    => frame_stats_g_avg,
+--      stats_b_min    => frame_stats_b_min,
+--      stats_b_max    => frame_stats_b_max,
+--      stats_b_avg    => frame_stats_b_avg,
+--      stats_frame_id => frame_stats_frame_id,
+--      stats_frame_hash      => frame_stats_hash,
+--      stats_frame_pix_count => frame_stats_pix_count
+--    );
 
 end architecture;

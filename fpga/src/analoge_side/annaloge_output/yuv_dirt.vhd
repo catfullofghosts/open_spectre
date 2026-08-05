@@ -2,25 +2,24 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
--- XOR low-bit "dirt" from the analog-side noise generator into Y/U/V before
--- 12-to-8-bit export (y_result(11:4)).  Depth N XORs export LSBs y_result(4)
--- through y_result(4+N-1).  Bits 3:0 stay untouched.  Permuted noise picks:
--- Y=0,1,4  U=4,2,0,1  V=1,4,2,3 (first N entries used).
+-- XOR low-bit "dirt" from the analog-side noise generator into 8-bit Y/U/V.
+-- Depth N XORs bottom bits [0] .. [N-1].  Permuted noise picks (first N used):
+--   Y=0,1,4  U=4,2,0,1  V=1,4,2,3
 --
--- Callers must feed live noise bits (analog_side uses noise_1(9 downto 5);
--- random_voltage zeros noise_1(5:0) so the low nibble is useless here).
+-- Instantiated in spector_wrapper on the analog YUV outs.  Feed live noise
+-- (analog_side noise_dirt_o = noise_1(9 downto 5); random_voltage zeros 5:0).
 
 entity yuv_dirt is
   port (
     clk       : in  std_logic;
     noise     : in  std_logic_vector(4 downto 0);
-    dirt_ctrl : in  std_logic_vector(4 downto 0);
-    y_in      : in  std_logic_vector(11 downto 0);
-    u_in      : in  std_logic_vector(11 downto 0);
-    v_in      : in  std_logic_vector(11 downto 0);
-    y_out     : out std_logic_vector(11 downto 0);
-    u_out     : out std_logic_vector(11 downto 0);
-    v_out     : out std_logic_vector(11 downto 0)
+    dirt_ctrl : in  std_logic_vector(4 downto 0); -- [1:0]=depth, [2]=Y, [3]=U, [4]=V
+    y_in      : in  std_logic_vector(7 downto 0);
+    u_in      : in  std_logic_vector(7 downto 0);
+    v_in      : in  std_logic_vector(7 downto 0);
+    y_out     : out std_logic_vector(7 downto 0);
+    u_out     : out std_logic_vector(7 downto 0);
+    v_out     : out std_logic_vector(7 downto 0)
   );
 end entity yuv_dirt;
 
@@ -56,17 +55,17 @@ architecture rtl of yuv_dirt is
   end function f_dirt_bits;
 
   function f_apply_dirt (
-    value : std_logic_vector(11 downto 0);
+    value : std_logic_vector(7 downto 0);
     dirt  : std_logic_vector(2 downto 0);
     depth : natural;
     en    : std_logic
   ) return std_logic_vector is
-    variable r : std_logic_vector(11 downto 0) := value;
+    variable r : std_logic_vector(7 downto 0) := value;
   begin
     if en = '1' and depth > 0 then
       for i in 0 to 2 loop
         if i < depth then
-          r(4 + i) := r(4 + i) xor dirt(i);
+          r(i) := r(i) xor dirt(i);
         end if;
       end loop;
     end if;

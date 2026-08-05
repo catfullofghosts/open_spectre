@@ -23,7 +23,7 @@ entity overlay_framebuffer is
   generic (
     G_DEPTH       : positive := 2048;
     G_ADDR_WIDTH  : positive := 11;
-    G_VIDEO_LAT   : positive := 6 -- horizontal lookahead (matches video pipeline depth)
+    G_VIDEO_LAT   : positive := 9 -- horizontal lookahead (dirt+encoder+bg+pre_fx)
   );
   port (
     cpu_clk   : in  std_logic;

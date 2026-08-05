@@ -730,10 +730,10 @@ class RegisterControlWidget(QWidget):
             ("0xFC", "overlay_global_en", "Overlay Enable", 1, 0, 1, 0),
             ("0xFC", "overlay_block_div", "Overlay Block Div (0=/1..4=/16)", 3, 0, 4, 1),
             ("0x100", "sprite0_enable", "Sprite0 Enable", 1, 0, 1, 0),
-            ("0x100", "sprite0_x", "Sprite0 X", 11, 1, 2047, 0),
-            ("0x100", "sprite0_y", "Sprite0 Y", 11, 12, 2047, 0),
+            ("0x100", "sprite0_x", "Sprite0 X", 11, 0, 2047, 1),
+            ("0x100", "sprite0_y", "Sprite0 Y", 11, 0, 2047, 12),
             ("0x104", "sprite0_width", "Sprite0 Width", 11, 0, 2047, 0),
-            ("0x104", "sprite0_height", "Sprite0 Height", 11, 11, 2047, 0),
+            ("0x104", "sprite0_height", "Sprite0 Height", 11, 0, 2047, 11),
             ("0x108", "sprite0_base", "Sprite0 BRAM Base", 11, 0, 2047, 0),
         ]
         ca_defs = [
