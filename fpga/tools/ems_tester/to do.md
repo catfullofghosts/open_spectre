@@ -7,13 +7,18 @@ gear points not sharp enough, slider increases circle size but not gear teeth, w
 zoom h wraps around oddly??? same for zoom V
 copare triangles with the original , something is off
 sinwave has issues of clipping or wraparound
+sinwave seems brighter then other waves, is that just that it spends longer at the top of the brightness?
 check frame stats averages
-check audio in by debuging 
+
+check audio in by debuging -- audio in is working! filter cuttof needs checking
+
+
 wheck why resolution is stuffed when i change it
+720p works on monitor but is flashing on video assist, 720p breaks the counters on the digital side but nothing else
 
 - make big list of stuff to check at MESS ems!!!
 
-- add reg to get luma input from top bit of luma out
+- add reg to get luma input from top bit of luma out on the CA input
 
 check the slow counter speed is acurate
 

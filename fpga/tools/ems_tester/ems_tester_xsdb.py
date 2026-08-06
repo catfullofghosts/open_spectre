@@ -326,6 +326,7 @@ AUDIO_CROSSOVER_REG = 0x0C
 DIRT_CTRL_REG = 0x198
 AUDIO_MAG_PRE_REG = 0x19C
 OVERLAY_GLOBAL_EN_REG = 0xFC
+CA_CTRL_INJECT_XOR_LUMA = 1 << 8
 CA_CTRL_RULE_XOR_Y = 1 << 9
 CA_CTRL_RULE_XOR_X = 1 << 10
 CA_DIV_ENCODE = {1: 0, 2: 1, 4: 2, 8: 3}
@@ -343,14 +344,17 @@ def configure_ca(
             rule=30,
             rule_xor_y=True,
             rule_xor_x=False,
+            inject_xor_luma=False,
             x_div=8,
             y_div=8,
     ):
-            """Program 1D CA @ 0x18: rule [7:0], rule_xor_y [9], rule_xor_x [10],
-            y_div [13:12], x_div [15:14]. x_div/y_div: 1, 2, 4, or 8."""
+            """Program 1D CA @ 0x18: rule [7:0], inject^luma_msb [8], rule_xor_y [9],
+            rule_xor_x [10], y_div [13:12], x_div [15:14]. x_div/y_div: 1, 2, 4, or 8."""
             if x_div not in CA_DIV_ENCODE or y_div not in CA_DIV_ENCODE:
                 raise ValueError("x_div and y_div must be one of 1, 2, 4, 8")
             value = int(rule) & 0xFF
+            if inject_xor_luma:
+                value |= CA_CTRL_INJECT_XOR_LUMA
             if rule_xor_y:
                 value |= CA_CTRL_RULE_XOR_Y
             if rule_xor_x:
@@ -366,8 +370,22 @@ def set_ca_rule(rule):
 
 
 def set_audio_crossover(value):
-            """Set audio T/B crossover point (0=bass-heavy split .. 255=treble-heavy). @ 0x0C."""
-            wr_reg(AUDIO_CROSSOVER_REG, int(value) & 0xFF)
+            """Set audio T/B crossover point (0=bass-heavy split .. 255=treble-heavy). @ 0x0C[7:0]."""
+            cur = rd_reg(AUDIO_CROSSOVER_REG)
+            if cur is None:
+                cur = 0x00001B80  # default: mid crossover, thresh step 3 (~50%)
+            wr_reg(AUDIO_CROSSOVER_REG, (int(cur) & ~0xFF) | (int(value) & 0xFF))
+
+
+def set_audio_digital_thresh(treble=3, bass=3):
+            """Set digital-side T/B trip thresholds (0..7 ≈ 12%..94%). @ 0x0C[13:11]/[10:8]."""
+            t = max(0, min(7, int(treble)))
+            b = max(0, min(7, int(bass)))
+            cur = rd_reg(AUDIO_CROSSOVER_REG)
+            if cur is None:
+                cur = 0x80
+            value = (int(cur) & 0xFF) | (b << 8) | (t << 11)
+            wr_reg(AUDIO_CROSSOVER_REG, value)
 
 
 def set_dirt(depth=0, y_en=False, u_en=False, v_en=False):

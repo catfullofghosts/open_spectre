@@ -42,7 +42,8 @@ entity digital_side is
     ext_vid_in     : in std_logic_vector(7 downto 0);
     vid_span       : in std_logic_vector(7 downto 0);
     edge_width     : in std_logic_vector(1 downto 0); -- 00=2px, 01=4px, 10=6px, 11=8px
-    ca_cfg         : in std_logic_vector(15 downto 0); -- [7:0] rule, [9] rule^Y, [10] rule^X
+    ca_cfg         : in std_logic_vector(15 downto 0); -- [7:0] rule, [8] inject^luma_msb, [9] rule^Y, [10] rule^X
+                                                       -- [13:12] y_div, [15:14] x_div
 
     -- inputs form analoge side
     osc1_sqr : in std_logic :='0';
@@ -95,6 +96,9 @@ architecture Behavioral of digital_side is
   --Matrix In from module out
   signal inv_out        : std_logic_vector(3 downto 0);
   signal ca_inject      : std_logic;
+  signal ca_inject_base : std_logic;
+  signal luma_msb_d1    : std_logic := '0';
+  signal luma_msb_d2    : std_logic := '0';
   signal x_count        : std_logic_vector(8 downto 0);
   signal y_count        : std_logic_vector(8 downto 0);
   signal x_count_low_hi : std_logic_vector(8 downto 0);
@@ -287,7 +291,17 @@ cdc_pix_100 : process(clk)
 
   ca_frame_active <= '1' when h_sync_i = '0' and v_sync_i = '0' else '0';
 
-  ca_inject <= inv_out(0) xor inv_out(1);
+  -- 2FF luma MSB for optional CA inject XOR (ca_cfg bit 8)
+  p_luma_msb_ff : process (clk)
+  begin
+    if rising_edge(clk) then
+      luma_msb_d1 <= luma_out(3);
+      luma_msb_d2 <= luma_msb_d1;
+    end if;
+  end process p_luma_msb_ff;
+
+  ca_inject_base <= inv_out(0) xor inv_out(1);
+  ca_inject      <= ca_inject_base xor (ca_cfg(8) and luma_msb_d2);
 
   ca_1d : entity work.ca_1d_stream -- EXTRA 1 bit CA
     port map (

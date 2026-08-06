@@ -306,6 +306,8 @@ architecture rtl of spector_wrapper_zynq is
   signal edge_width_sel     : std_logic_vector(1 downto 0);
   signal ca_cfg            : std_logic_vector(15 downto 0);
   signal audio_crossover   : std_logic_vector(7 downto 0);
+  signal audio_t_thresh    : std_logic_vector(2 downto 0);
+  signal audio_b_thresh    : std_logic_vector(2 downto 0);
 
   signal audio_sig_raw     : std_logic_vector(11 downto 0);
   signal audio_t_raw       : std_logic_vector(11 downto 0);
@@ -572,6 +574,8 @@ begin
       edge_width_sel      => edge_width_sel,
       ca_cfg              => ca_cfg,
       audio_crossover     => audio_crossover,
+      audio_t_thresh      => audio_t_thresh,
+      audio_b_thresh      => audio_b_thresh,
       luma_key_enable     => luma_key_enable,
       luma_key_direction  => luma_key_direction,
       luma_key_thresh_low => luma_key_thresh_low,
@@ -784,8 +788,23 @@ begin
       audio_mag_pre => audio_mag_pre
     );
 
-  -- 2FF sync into pix domain (envelopes change slowly; bit-skew OK)
+  -- 2FF sync into pix domain (envelopes change slowly; bit-skew OK).
+  -- Digital T/B: compare top-8 envelope bits to an 8-step threshold (no 0%/100%).
+  -- Steps ≈ 12,25,37,50,62,75,87,94 % of full scale — 8-bit compare, no DSP.
   p_audio_sync : process (pix_clk) is
+    function f_thresh8 (sel : std_logic_vector(2 downto 0)) return unsigned is
+    begin
+      case sel is
+        when "000"  => return to_unsigned(31, 8);   -- ~12%
+        when "001"  => return to_unsigned(64, 8);   -- ~25%
+        when "010"  => return to_unsigned(96, 8);   -- ~37%
+        when "011"  => return to_unsigned(128, 8);  -- ~50%
+        when "100"  => return to_unsigned(160, 8);  -- ~62%
+        when "101"  => return to_unsigned(192, 8);  -- ~75%
+        when "110"  => return to_unsigned(224, 8);  -- ~87%
+        when others => return to_unsigned(240, 8);  -- ~94%
+      end case;
+    end function f_thresh8;
   begin
     if rising_edge(pix_clk) then
       audio_sig_meta <= audio_sig_raw;
@@ -798,9 +817,17 @@ begin
       audio_in_sig <= audio_sig_sync;
       audio_in_t   <= audio_t_sync;
       audio_in_b   <= audio_b_sync;
-      -- Digital matrix T/B: mid-high bit so moderate levels still trip
-      audio_T      <= audio_t_sync(9);
-      audio_B      <= audio_b_sync(9);
+
+      if unsigned(audio_t_sync(11 downto 4)) >= f_thresh8(audio_t_thresh) then
+        audio_T <= '1';
+      else
+        audio_T <= '0';
+      end if;
+      if unsigned(audio_b_sync(11 downto 4)) >= f_thresh8(audio_b_thresh) then
+        audio_B <= '1';
+      else
+        audio_B <= '0';
+      end if;
     end if;
   end process p_audio_sync;
 
