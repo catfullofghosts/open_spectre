@@ -2,7 +2,8 @@ Technical documents, articles, and images related to the EMS Spectron.
 
 ## Reference videos
 
-These videos show the EMS Spectre Unit at MESS in 2023.
+These videos are recordings from the EMS Spectre unit at MESS (Melbourne) in 2023.
+They are used to help me get a vibe for some of the basic parameters of the synth like the size of the counterson the screen, the basic appearance of the shapes ect...
 
 [![EMS Spectre Unit at MESS in 2023 — video 1](https://img.youtube.com/vi/wTyMQyw7IsY/hqdefault.jpg)](https://youtu.be/wTyMQyw7IsY)
 
