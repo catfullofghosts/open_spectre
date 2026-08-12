@@ -120,6 +120,7 @@ entity cpu_reg_wrapper is
     pix_clk_div_sel     : out std_logic; -- 0 = /2, 1 = /4 for X and Y digital counters
     ext_vid_in_mux_sel  : out std_logic; -- 0 = luma calc, 1 = y_out
     edge_width_sel      : out std_logic_vector(1 downto 0);
+    sync_hv_invert      : out std_logic;
     ca_cfg              : out std_logic_vector(15 downto 0);
     audio_crossover     : out std_logic_vector(7 downto 0);
     audio_t_thresh      : out std_logic_vector(2 downto 0);
@@ -245,6 +246,7 @@ architecture rtl of cpu_reg_wrapper is
   signal  i_pix_clk_div_sel    : std_logic;
   signal  i_ext_vid_in_mux_sel  : std_logic;
   signal  i_edge_width_sel      : std_logic_vector(1 downto 0);
+  signal  i_sync_hv_invert      : std_logic;
   signal  i_ca_cfg             : std_logic_vector(15 downto 0);
   signal  i_audio_crossover    : std_logic_vector(7 downto 0);
   signal  i_audio_t_thresh     : std_logic_vector(2 downto 0);
@@ -360,6 +362,7 @@ begin
       pix_clk_div_sel     => i_pix_clk_div_sel,
       ext_vid_in_mux_sel  => i_ext_vid_in_mux_sel,
       edge_width_sel      => i_edge_width_sel,
+      sync_hv_invert      => i_sync_hv_invert,
       ca_cfg              => i_ca_cfg,
       audio_crossover     => i_audio_crossover,
       audio_t_thresh      => i_audio_t_thresh,
@@ -458,6 +461,7 @@ begin
       pix_clk_div_sel     <= i_pix_clk_div_sel;
       ext_vid_in_mux_sel  <= i_ext_vid_in_mux_sel;
       edge_width_sel      <= i_edge_width_sel;
+      sync_hv_invert      <= i_sync_hv_invert;
       ca_cfg              <= i_ca_cfg;
       audio_t_thresh      <= i_audio_t_thresh;
       audio_b_thresh      <= i_audio_b_thresh;

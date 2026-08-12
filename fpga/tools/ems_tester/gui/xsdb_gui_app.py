@@ -713,6 +713,7 @@ class RegisterControlWidget(QWidget):
             ("0x78", "pix_clk_div_sel", "Pixel/Line Div Select (/2 or /4)", 1, 0, 1, 2),
             ("0x78", "ext_vid_in_mux_sel", "External Video In Mux Select", 1, 0, 1, 3),
             ("0x78", "edge_width_sel", "Edge Detect Width (2/4/6/8 px)", 2, 0, 3, 4),
+            ("0x78", "sync_hv_invert", "Sync H/V Invert (0=640,1=720)", 1, 0, 1, 6),
             ("0xC8", "luma_key_enable", "Luma Key Enable", 1, 0, 1, 31),
             ("0xC8", "luma_key_direction", "Luma Key Direction", 1, 0, 1, 30),
             ("0xC8", "luma_key_thresh_high", "Luma Key Threshold High", 8, 0, 255, 8),

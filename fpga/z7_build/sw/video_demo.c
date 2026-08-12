@@ -291,6 +291,8 @@ static float fast_log2(float x)
 #define OVERLAY_REG_GLOBAL_ENABLE     0x000000FCU
 #define OVERLAY_REG_SPRITE_BASE       0x00000100U
 #define OVERLAY_REG_SPRITE_STRIDE     0x00000010U
+#define VIDEO_CTRL_REG_OFFSET         0x00000078U
+#define VIDEO_CTRL_SYNC_INV_BIT       6U
 
 /* ------------------------------------------------------------ */
 /*				Global Variables								*/
@@ -316,6 +318,7 @@ static void DemoOverlaySetSprite(u32 spriteIdx, u32 enable, u32 x, u32 y, u32 wi
 static void DemoOverlayDisableAllSprites(void);
 static void DemoOverlayPatternTest(void);
 static void DemoSpriteRandomTest(u32 displayWidth, u32 displayHeight, u32 activeStartX, u32 activeStartY);
+static void DemoSetSyncPolarityInvert(u32 enableInvert);
 
 /*
  * Framebuffers for video data
@@ -702,7 +705,11 @@ void DemoChangeRes()
 			status = DisplayStop(&dispCtrl);
 			if (status == XST_SUCCESS) status = DisplaySetMode(&dispCtrl, &VMODE_640x480);
 			if (status == XST_SUCCESS) status = DisplayStart(&dispCtrl);
-			if (status == XST_SUCCESS) fResSet = 1;
+			if (status == XST_SUCCESS)
+			{
+				DemoSetSyncPolarityInvert(0U);
+				fResSet = 1;
+			}
 			if (wasStreaming) VideoStart(&videoCapt);
 			break;
 		case '2':
@@ -710,7 +717,11 @@ void DemoChangeRes()
 			status = DisplayStop(&dispCtrl);
 			if (status == XST_SUCCESS) status = DisplaySetMode(&dispCtrl, &VMODE_800x600);
 			if (status == XST_SUCCESS) status = DisplayStart(&dispCtrl);
-			if (status == XST_SUCCESS) fResSet = 1;
+			if (status == XST_SUCCESS)
+			{
+				DemoSetSyncPolarityInvert(0U);
+				fResSet = 1;
+			}
 			if (wasStreaming) VideoStart(&videoCapt);
 			break;
 		case '3':
@@ -718,7 +729,11 @@ void DemoChangeRes()
 			status = DisplayStop(&dispCtrl);
 			if (status == XST_SUCCESS) status = DisplaySetMode(&dispCtrl, &VMODE_1280x720);
 			if (status == XST_SUCCESS) status = DisplayStart(&dispCtrl);
-			if (status == XST_SUCCESS) fResSet = 1;
+			if (status == XST_SUCCESS)
+			{
+				DemoSetSyncPolarityInvert(1U);
+				fResSet = 1;
+			}
 			if (wasStreaming) VideoStart(&videoCapt);
 			break;
 		case '4':
@@ -726,7 +741,11 @@ void DemoChangeRes()
 			status = DisplayStop(&dispCtrl);
 			if (status == XST_SUCCESS) status = DisplaySetMode(&dispCtrl, &VMODE_1280x1024);
 			if (status == XST_SUCCESS) status = DisplayStart(&dispCtrl);
-			if (status == XST_SUCCESS) fResSet = 1;
+			if (status == XST_SUCCESS)
+			{
+				DemoSetSyncPolarityInvert(0U);
+				fResSet = 1;
+			}
 			if (wasStreaming) VideoStart(&videoCapt);
 			break;
 		case '5':
@@ -734,7 +753,11 @@ void DemoChangeRes()
 			status = DisplayStop(&dispCtrl);
 			if (status == XST_SUCCESS) status = DisplaySetMode(&dispCtrl, &VMODE_1920x1080);
 			if (status == XST_SUCCESS) status = DisplayStart(&dispCtrl);
-			if (status == XST_SUCCESS) fResSet = 1;
+			if (status == XST_SUCCESS)
+			{
+				DemoSetSyncPolarityInvert(0U);
+				fResSet = 1;
+			}
 			if (wasStreaming) VideoStart(&videoCapt);
 			break;
 		case 'Q':
@@ -1821,6 +1844,26 @@ static void DemoOverlayWriteReg(u32 regOffset, u32 value)
 static u32 DemoOverlayReadReg(u32 regOffset)
 {
 	return Xil_In32(REGS_BRAM_BASEADDR + regOffset);
+}
+
+static void DemoSetSyncPolarityInvert(u32 enableInvert)
+{
+	u32 regVal;
+	u32 bitMask;
+
+	bitMask = (1U << VIDEO_CTRL_SYNC_INV_BIT);
+	regVal = DemoOverlayReadReg(VIDEO_CTRL_REG_OFFSET);
+
+	if (enableInvert != 0U)
+	{
+		regVal |= bitMask;
+	}
+	else
+	{
+		regVal &= ~bitMask;
+	}
+
+	DemoOverlayWriteReg(VIDEO_CTRL_REG_OFFSET, regVal);
 }
 
 static void DemoOverlayWriteWord(u32 wordAddr, u32 value)

@@ -304,6 +304,7 @@ architecture rtl of spector_wrapper_zynq is
   signal pix_clk_div_sel    : std_logic;
   signal ext_vid_in_mux_sel : std_logic;
   signal edge_width_sel     : std_logic_vector(1 downto 0);
+  signal sync_hv_invert     : std_logic;
   signal ca_cfg            : std_logic_vector(15 downto 0);
   signal audio_crossover   : std_logic_vector(7 downto 0);
   signal audio_t_thresh    : std_logic_vector(2 downto 0);
@@ -445,10 +446,15 @@ architecture rtl of spector_wrapper_zynq is
 begin
 
   
-    process (h_sync,v_sync,reset,start_of_frame )
+    process (h_sync, v_sync, reset, start_of_frame, sync_hv_invert)
   begin
-    h_sync_n <= not h_sync;
-    v_sync_n <= not v_sync;
+    if sync_hv_invert = '1' then
+      h_sync_n <= not h_sync;
+      v_sync_n <= not v_sync;
+    else
+      h_sync_n <= h_sync;
+      v_sync_n <= v_sync;
+    end if;
     reset_n <= not reset;
     start_of_frame_n <= not start_of_frame;
     
@@ -572,6 +578,7 @@ begin
       pix_clk_div_sel     => pix_clk_div_sel,
       ext_vid_in_mux_sel  => ext_vid_in_mux_sel,
       edge_width_sel      => edge_width_sel,
+      sync_hv_invert      => sync_hv_invert,
       ca_cfg              => ca_cfg,
       audio_crossover     => audio_crossover,
       audio_t_thresh      => audio_t_thresh,
@@ -1006,57 +1013,57 @@ begin
     end if;
   end process;
 
---  shape_gen1 : entity work.shape_gen
---    port map
---    (
---      clk                   => pix_clk, --clk_148_5,
---      rst                   => reset_n,
---      h_sync                => h_sync, --negated inside the module
---      v_sync                => v_sync, --negated inside the module
---      start_of_frame        => start_of_frame_n,
---      start_of_active_video => '0',
---      video_on              => '0',
---      pos_h                 => matrix_pos_h_1,
---      pos_v                 => matrix_pos_v_1,
---      zoom_h                => matrix_zoom_h_1,
---      zoom_v                => matrix_zoom_v_1,
---      circle_i              => matrix_circle_1,
---      gear_i                => matrix_gear_1,
---      lantern_i             => matrix_lantern_1,
---      fizz_i                => matrix_fizz_1,
---      shape_a_sel           => shape1_a_sel_reg,
---      shape_b_sel           => shape1_b_sel_reg,
---      x_in                  => x_in, -- digital side x
---      y_in                  => y_in, -- digital side y
---      shape_a               => shape1_a,
---      shape_b               => shape1_b
---    );
+  shape_gen1 : entity work.shape_gen
+    port map
+    (
+      clk                   => pix_clk, --clk_148_5,
+      rst                   => reset_n,
+      h_sync                => h_sync, --negated inside the module
+      v_sync                => v_sync, --negated inside the module
+      start_of_frame        => start_of_frame_n,
+      start_of_active_video => '0',
+      video_on              => '0',
+      pos_h                 => matrix_pos_h_1,
+      pos_v                 => matrix_pos_v_1,
+      zoom_h                => matrix_zoom_h_1,
+      zoom_v                => matrix_zoom_v_1,
+      circle_i              => matrix_circle_1,
+      gear_i                => matrix_gear_1,
+      lantern_i             => matrix_lantern_1,
+      fizz_i                => matrix_fizz_1,
+      shape_a_sel           => shape1_a_sel_reg,
+      shape_b_sel           => shape1_b_sel_reg,
+      x_in                  => x_in, -- digital side x
+      y_in                  => y_in, -- digital side y
+      shape_a               => shape1_a,
+      shape_b               => shape1_b
+    );
 
---  shape_gen2 : entity work.shape_gen
---    port map
---    (
---      clk                   => pix_clk, --clk_148_5,
---      rst                   => reset_n,
---      h_sync                => h_sync, --negated inside the module
---      v_sync                => v_sync, --negated inside the module
---      start_of_frame        => start_of_frame_n,
---      start_of_active_video => '0',
---      video_on              => '0',
---      pos_h                 => matrix_pos_h_2,
---      pos_v                 => matrix_pos_v_2,
---      zoom_h                => matrix_zoom_h_2,
---      zoom_v                => matrix_zoom_v_2,
---      circle_i              => matrix_circle_2,
---      gear_i                => matrix_gear_2,
---      lantern_i             => matrix_lantern_2,
---      fizz_i                => matrix_fizz_2,
---      shape_a_sel           => shape2_a_sel_reg,
---      shape_b_sel           => shape2_b_sel_reg,
---      x_in                  => x_in, --digital side x
---      y_in                  => y_in, --digital side y
---      shape_a               => shape2_a,
---      shape_b               => shape2_b
---    );
+  shape_gen2 : entity work.shape_gen
+    port map
+    (
+      clk                   => pix_clk, --clk_148_5,
+      rst                   => reset_n,
+      h_sync                => h_sync, --negated inside the module
+      v_sync                => v_sync, --negated inside the module
+      start_of_frame        => start_of_frame_n,
+      start_of_active_video => '0',
+      video_on              => '0',
+      pos_h                 => matrix_pos_h_2,
+      pos_v                 => matrix_pos_v_2,
+      zoom_h                => matrix_zoom_h_2,
+      zoom_v                => matrix_zoom_v_2,
+      circle_i              => matrix_circle_2,
+      gear_i                => matrix_gear_2,
+      lantern_i             => matrix_lantern_2,
+      fizz_i                => matrix_fizz_2,
+      shape_a_sel           => shape2_a_sel_reg,
+      shape_b_sel           => shape2_b_sel_reg,
+      x_in                  => x_in, --digital side x
+      y_in                  => y_in, --digital side y
+      shape_a               => shape2_a,
+      shape_b               => shape2_b
+    );
 
   -------------------------------------------
   -- Luma Key

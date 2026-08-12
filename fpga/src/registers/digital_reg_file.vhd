@@ -131,6 +131,7 @@ entity digital_reg_file is
     pix_clk_div_sel     : out std_logic; -- 0 = /2, 1 = /4 for X and Y digital counters
     ext_vid_in_mux_sel  : out std_logic; -- 0 = luma calc, 1 = y_out
     edge_width_sel      : out std_logic_vector(1 downto 0); -- edge stretch: 00=2px 01=4px 10=6px 11=8px
+    sync_hv_invert      : out std_logic; -- 0=pass incoming syncs, 1=invert incoming H/V syncs
     ca_cfg              : out std_logic_vector(15 downto 0); -- [7:0] rule, [8] inject^luma_msb, [9] rule^Y, [10] rule^X, [13:12] y_div, [15:14] x_div
     audio_crossover     : out std_logic_vector(7 downto 0); -- T/B split @ 0x0C[7:0]
     audio_t_thresh      : out std_logic_vector(2 downto 0); -- digital T cutoff step 0..7 @ 0x0C[13:11]
@@ -296,6 +297,7 @@ architecture RTL of digital_reg_file is
   signal pix_clk_div_sel_i    : std_logic;
   signal ext_vid_in_mux_sel_i : std_logic;
   signal edge_width_sel_i     : std_logic_vector(1 downto 0) := "00"; -- default 2px edge width
+  signal sync_hv_invert_i     : std_logic := '0';
   signal ca_cfg_i             : std_logic_vector(15 downto 0) := x"C21E"; -- Rule 30, rule_xor_y, /8 X&Y
   signal audio_crossover_i    : std_logic_vector(7 downto 0) := x"80"; -- mid crossover default
   signal audio_crossover_r    : std_logic_vector(7 downto 0) := x"80";
@@ -415,7 +417,7 @@ begin
   -- output y,cr,cb levels (moved to make room for osc registers)
   regs(ra(x"58")) <= x"0" & cr_level_i & x"0" & y_level_i;
   regs(ra(x"5C")) <= x"00000" & cb_level_i;
-  regs(ra(x"78")) <= x"000000" & "00" & edge_width_sel_i & ext_vid_in_mux_sel_i & pix_clk_div_sel_i & col_en_bypass_i & video_active;
+  regs(ra(x"78")) <= x"000000" & "0" & sync_hv_invert_i & edge_width_sel_i & ext_vid_in_mux_sel_i & pix_clk_div_sel_i & col_en_bypass_i & video_active;
   regs(ra(x"18")) <= x"0000" & ca_cfg_i;
   -- Luma key control
   regs(ra(x"C8")) <= luma_key_enable_i & luma_key_direction_i & "00000000000000" & luma_key_thresh_high_i & luma_key_thresh_low_i;
@@ -657,6 +659,7 @@ begin
             pix_clk_div_sel_i <= write_reg(2);
             ext_vid_in_mux_sel_i <= write_reg(3);
             edge_width_sel_i <= write_reg(5 downto 4);
+            sync_hv_invert_i <= write_reg(6);
           when x"0C" =>
             audio_crossover_i <= write_reg(7 downto 0);
             audio_b_thresh_i  <= write_reg(10 downto 8);
@@ -792,6 +795,7 @@ begin
   pix_clk_div_sel <= pix_clk_div_sel_i;
   ext_vid_in_mux_sel <= ext_vid_in_mux_sel_i;
   edge_width_sel <= edge_width_sel_i;
+  sync_hv_invert <= sync_hv_invert_i;
   ca_cfg         <= ca_cfg_i;
   audio_crossover <= audio_crossover_r;
   audio_t_thresh  <= audio_t_thresh_r;
