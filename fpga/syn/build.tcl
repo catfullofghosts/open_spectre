@@ -4,10 +4,12 @@
 # Only sources that changed (typically RTL VHDL) trigger synth/impl refresh.
 #
 # Run:
-#   vivado -mode batch -source build.tcl
-#   vivado -mode batch -source build.tcl -tclargs skip_impl
+#   vivado -mode batch -source build.tcl -tclargs synth
+#   vivado -mode batch -source build.tcl -tclargs route
+#   vivado -mode batch -source build.tcl -tclargs bitstream
+#   vivado -mode batch -source build.tcl -tclargs all
 #   vivado -mode batch -source build.tcl -tclargs clean
-#   vivado -mode batch -source build.tcl -tclargs clean skip_impl
+#   (skip_impl is accepted as an alias for synth)
 
 # -----------------------------------------------------------------------------
 # Build settings
@@ -30,13 +32,28 @@ set project_name   "open_spec"
 set project_dir    [file normalize [file join $build_dir $project_name]]
 set project_file   [file normalize [file join $project_dir "${project_name}.xpr"]]
 set bitstream_out  [file normalize [file join $build_dir "${bd_name}.bit"]]
+set xsa_out        [file normalize [file join $build_dir "${bd_name}.xsa"]]
 
-# Args: clean | skip_impl (any order)
-set skip_impl 0
-set do_clean  0
+# Args: clean | synth | route | bitstream | all
+#   synth     - stop after synthesis
+#   route     - stop after route_design
+#   bitstream - write bitstream (no XSA)
+#   all       - bitstream + export fixed XSA (default)
+set build_stage "all"
+set do_clean    0
 foreach arg $argv {
-  if {$arg eq "skip_impl"} { set skip_impl 1 }
-  if {$arg eq "clean"}     { set do_clean 1 }
+  switch -- $arg {
+    clean       { set do_clean 1 }
+    synth       -
+    skip_impl   { set build_stage "synth" }
+    route       { set build_stage "route" }
+    bitstream   { set build_stage "bitstream" }
+    all         -
+    full        { set build_stage "all" }
+    default {
+      puts "WARNING: unknown arg '$arg' (ignored)"
+    }
+  }
 }
 
 puts "============================================================"
@@ -46,6 +63,7 @@ puts "  BD script : $bd_tcl"
 puts "  XDC       : $xdc_file"
 puts "  VHDL list : $vhdl_src_tcl"
 puts "  project   : $project_dir"
+puts "  stage     : $build_stage"
 puts "  clean     : $do_clean"
 puts "============================================================"
 
@@ -408,13 +426,13 @@ if {$synth_prog eq "100%" && !$synth_needs} {
   puts "Synthesis complete."
 }
 
-if {$skip_impl} {
-  puts "skip_impl set — stopping after synthesis."
+if {$build_stage eq "synth"} {
+  puts "stage=synth — stopping after synthesis."
   exit 0
 }
 
 # -----------------------------------------------------------------------------
-# Implementation + bitstream — launch only if stale
+# Implementation — route and/or bitstream
 # -----------------------------------------------------------------------------
 set impl_run [get_runs impl_1]
 set impl_needs [get_property NEEDS_REFRESH $impl_run]
@@ -423,24 +441,43 @@ set impl_status [get_property STATUS $impl_run]
 
 puts "impl_1: STATUS=$impl_status PROGRESS=$impl_prog NEEDS_REFRESH=$impl_needs"
 
-# Prefer an existing bitstream if impl is current
+if {$build_stage eq "route"} {
+  set impl_to_step "route_design"
+} else {
+  set impl_to_step "write_bitstream"
+}
+
 set bit_candidates [glob -nocomplain \
   [file join $project_dir "${project_name}.runs" "impl_1" "*.bit"]]
 
-if {$impl_prog eq "100%" && !$impl_needs && [llength $bit_candidates] > 0} {
-  puts "Implementation/bitstream up to date — skipping impl_1"
+set impl_up_to_date 0
+if {$impl_prog eq "100%" && !$impl_needs} {
+  if {$build_stage eq "route"} {
+    set impl_up_to_date 1
+  } elseif {[llength $bit_candidates] > 0} {
+    set impl_up_to_date 1
+  }
+}
+
+if {$impl_up_to_date} {
+  puts "Implementation up to date — skipping impl_1 (target step: $impl_to_step)"
 } else {
-  puts "Launching implementation + write_bitstream ($jobs jobs)..."
+  puts "Launching implementation to $impl_to_step ($jobs jobs)..."
   reset_run impl_1
-  launch_runs impl_1 -to_step write_bitstream -jobs $jobs
+  launch_runs impl_1 -to_step $impl_to_step -jobs $jobs
   wait_on_run impl_1
 
   if {[get_property PROGRESS [get_runs impl_1]] != "100%"} {
-    puts "ERROR: implementation / bitstream failed. See run log under $project_dir"
+    puts "ERROR: implementation failed at/before $impl_to_step. See run log under $project_dir"
     exit 1
   }
   set bit_candidates [glob -nocomplain \
     [file join $project_dir "${project_name}.runs" "impl_1" "*.bit"]]
+}
+
+if {$build_stage eq "route"} {
+  puts "stage=route — stopping after route_design."
+  exit 0
 }
 
 if {[llength $bit_candidates] == 0} {
@@ -450,5 +487,19 @@ if {[llength $bit_candidates] == 0} {
 set bit_src [lindex $bit_candidates 0]
 file copy -force $bit_src $bitstream_out
 puts "Bitstream written: $bitstream_out"
+
+if {$build_stage eq "bitstream"} {
+  puts "stage=bitstream — skipping XSA export."
+  puts "Build finished OK."
+  exit 0
+}
+
+# -----------------------------------------------------------------------------
+# Export fixed hardware platform (.xsa) for Vitis
+# -----------------------------------------------------------------------------
+puts "Exporting hardware platform: $xsa_out"
+open_run impl_1
+write_hw_platform -fixed -include_bit -force -file $xsa_out
+puts "XSA written: $xsa_out"
 puts "Build finished OK."
 exit 0
