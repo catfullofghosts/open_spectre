@@ -1,3 +1,4 @@
+--VHDL2008
 -- Streaming 1D elementary cellular automaton (Wolfram rule 0-255).
 -- Steps on rising edges of gated step_en; h-sync line reset; optional block stride.
 
@@ -47,27 +48,73 @@ architecture rtl of ca_1d_stream is
   begin
     u := unsigned(count);
     case div_sel is
-      when "00"   => return '1';
-      when "01"   => return '0' when u(0) /= '0' else '1';
-      when "10"   => return '0' when u(1 downto 0) /= "00" else '1';
-      when others => return '0' when u(2 downto 0) /= "000" else '1';
+      when "00" =>
+        return '1';
+      when "01" =>
+        if u(0) /= '0' then
+          return '0';
+        else
+          return '1';
+        end if;
+      when "10" =>
+        if u(1 downto 0) /= "00" then
+          return '0';
+        else
+          return '1';
+        end if;
+      when others =>
+        if u(2 downto 0) /= "000" then
+          return '0';
+        else
+          return '1';
+        end if;
     end case;
   end function f_div_ok;
 
 begin
-  xorY <=  (y_line when rule_xor_y = '1' else (others => '0'));
-  xorX <= (x_pos  when rule_xor_x = '1' else (others => '0'));
+  -- Conditional assignments rewritten without when/else: Vivado 2024.2
+  -- flags some of those forms as VHDL-2019 even under -vhdl2008.
+  process (y_line, rule_xor_y)
+  begin
+    if rule_xor_y = '1' then
+      xorY <= y_line;
+    else
+      xorY <= (others => '0');
+    end if;
+  end process;
+
+  process (x_pos, rule_xor_x)
+  begin
+    if rule_xor_x = '1' then
+      xorX <= x_pos;
+    else
+      xorX <= (others => '0');
+    end if;
+  end process;
+
   rule_eff <= rule xor xorY xor xorX;
 
   x_div_ok  <= f_div_ok(x_pos, x_div);
   y_div_ok  <= f_div_ok(y_line, y_div);
-  step_en_g <= step_en when (frame_active = '1' and x_div_ok = '1'  and y_div_ok = '1') else '0';
+
+  process (step_en, frame_active, x_div_ok, y_div_ok)
+  begin
+    if frame_active = '1' and x_div_ok = '1' and y_div_ok = '1' then
+      step_en_g <= step_en;
+    else
+      step_en_g <= '0';
+    end if;
+  end process;
 
   process (clk)
   begin
     if rising_edge(clk) then
-      step_d    <= step_en_g;
-      step_edge <= '1' when step_d = '0' and step_en_g = '1' else '0';
+      step_d <= step_en_g;
+      if step_d = '0' and step_en_g = '1' then
+        step_edge <= '1';
+      else
+        step_edge <= '0';
+      end if;
 
       if rst = '1' then
         left_r   <= '0';
