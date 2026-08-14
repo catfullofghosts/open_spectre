@@ -26,6 +26,8 @@ use ieee.numeric_std.all;
 library UNISIM;
 use UNISIM.vcomponents.all;
 
+use work.overlay_sprite_pkg.all;
+
 entity digital_reg_file is
   generic (
     reg_version_id : std_logic_vector(7 downto 0) := x"00";
@@ -126,8 +128,14 @@ entity digital_reg_file is
     cb_level       : out std_logic_vector(11 downto 0);
     video_active_O : out std_logic;
     -- Pixel clock and video input control
-    pix_clk_div_sel     : out std_logic; -- 0 = /2, 1 = /4 for pix_clk_en
+    pix_clk_div_sel     : out std_logic; -- 0 = /2, 1 = /4 for X and Y digital counters
     ext_vid_in_mux_sel  : out std_logic; -- 0 = luma calc, 1 = y_out
+    edge_width_sel      : out std_logic_vector(1 downto 0); -- edge stretch: 00=2px 01=4px 10=6px 11=8px
+    sync_hv_invert      : out std_logic; -- 0=pass incoming syncs, 1=invert incoming H/V syncs
+    ca_cfg              : out std_logic_vector(15 downto 0); -- [7:0] rule, [8] inject^luma_msb, [9] rule^Y, [10] rule^X, [13:12] y_div, [15:14] x_div
+    audio_crossover     : out std_logic_vector(7 downto 0); -- T/B split @ 0x0C[7:0]
+    audio_t_thresh      : out std_logic_vector(2 downto 0); -- digital T cutoff step 0..7 @ 0x0C[13:11]
+    audio_b_thresh      : out std_logic_vector(2 downto 0); -- digital B cutoff step 0..7 @ 0x0C[10:8]
     -- Luma key control
     luma_key_enable     : out std_logic;
     luma_key_direction  : out std_logic; -- 0 = key < threshold, 1 = key > threshold
@@ -139,11 +147,44 @@ entity digital_reg_file is
     dsm_hi_alpha   : out std_logic_vector(11 downto 0);
     dsm_lo_alpha   : out std_logic_vector(11 downto 0);
     noise_alpha    : out std_logic_vector(11 downto 0);
+    -- YUV low-bit dirt on analog output
+    dirt_ctrl      : out std_logic_vector(4 downto 0);
     -- Shape select controls
     shape1_a_sel   : out std_logic_vector(3 downto 0);
     shape1_b_sel   : out std_logic_vector(3 downto 0);
     shape2_a_sel   : out std_logic_vector(3 downto 0);
     shape2_b_sel   : out std_logic_vector(3 downto 0);
+    -- Final video output effects (register 0xE4)
+    video_fx_ctrl     : out std_logic_vector(31 downto 0);
+    video_fx_bitplane : out std_logic_vector(31 downto 0);
+    video_fx_dither   : out std_logic_vector(31 downto 0);
+    video_fx_mirror   : out std_logic_vector(31 downto 0);
+    video_fx_chromatic : out std_logic_vector(31 downto 0);
+    video_fx_sharpness : out std_logic_vector(31 downto 0);
+    -- Overlay sprites (shared BRAM atlas, up to C_NUM_SPRITES slots)
+    overlay_global_en : out std_logic;
+    overlay_block_div : out std_logic_vector(2 downto 0); -- 0=/1 1=/2 2=/4 3=/8 4=/16
+    overlay_sprites   : out t_sprite_array;
+
+    -- Final video frame stats (read-only, filtered over 4 frames)
+    frame_stats_luma_min : in std_logic_vector(7 downto 0);
+    frame_stats_luma_max : in std_logic_vector(7 downto 0);
+    frame_stats_luma_avg : in std_logic_vector(7 downto 0);
+    frame_stats_r_min    : in std_logic_vector(7 downto 0);
+    frame_stats_r_max    : in std_logic_vector(7 downto 0);
+    frame_stats_r_avg    : in std_logic_vector(7 downto 0);
+    frame_stats_g_min    : in std_logic_vector(7 downto 0);
+    frame_stats_g_max    : in std_logic_vector(7 downto 0);
+    frame_stats_g_avg    : in std_logic_vector(7 downto 0);
+    frame_stats_b_min    : in std_logic_vector(7 downto 0);
+    frame_stats_b_max    : in std_logic_vector(7 downto 0);
+    frame_stats_b_avg    : in std_logic_vector(7 downto 0);
+    frame_stats_frame_id : in std_logic_vector(7 downto 0);
+    frame_stats_hash      : in std_logic_vector(31 downto 0);
+    frame_stats_pix_count : in std_logic_vector(31 downto 0);
+
+    -- Audio input (read-only)
+    audio_mag_pre         : in std_logic_vector(11 downto 0);
 
     -- debug
     debug            : out std_logic_vector(127 downto 0);
@@ -155,7 +196,7 @@ end entity digital_reg_file;
 architecture RTL of digital_reg_file is
 
   type regs32 is array (natural range <>) of std_logic_vector(31 downto 0);
-  signal regs : regs32(63 downto 0)
+  signal regs : regs32(127 downto 0)
   := (others => (others => '0'));
 
   -- Function for converting byte adresses to an index
@@ -255,6 +296,15 @@ architecture RTL of digital_reg_file is
   -- Pixel clock and video input control
   signal pix_clk_div_sel_i    : std_logic;
   signal ext_vid_in_mux_sel_i : std_logic;
+  signal edge_width_sel_i     : std_logic_vector(1 downto 0) := "00"; -- default 2px edge width
+  signal sync_hv_invert_i     : std_logic := '0';
+  signal ca_cfg_i             : std_logic_vector(15 downto 0) := x"C21E"; -- Rule 30, rule_xor_y, /8 X&Y
+  signal audio_crossover_i    : std_logic_vector(7 downto 0) := x"80"; -- mid crossover default
+  signal audio_crossover_r    : std_logic_vector(7 downto 0) := x"80";
+  signal audio_t_thresh_i     : std_logic_vector(2 downto 0) := "011"; -- ~50% default (was MSB)
+  signal audio_b_thresh_i     : std_logic_vector(2 downto 0) := "011";
+  signal audio_t_thresh_r     : std_logic_vector(2 downto 0) := "011";
+  signal audio_b_thresh_r     : std_logic_vector(2 downto 0) := "011";
   -- Luma key control
   signal luma_key_enable_i     : std_logic;
   signal luma_key_direction_i  : std_logic;
@@ -266,11 +316,44 @@ architecture RTL of digital_reg_file is
   signal dsm_hi_alpha_i   : std_logic_vector(11 downto 0);
   signal dsm_lo_alpha_i   : std_logic_vector(11 downto 0);
   signal noise_alpha_i    : std_logic_vector(11 downto 0);
+  signal dirt_ctrl_i      : std_logic_vector(4 downto 0) := (others => '0');
   -- Shape select controls
   signal shape1_a_sel_i   : std_logic_vector(3 downto 0);
   signal shape1_b_sel_i   : std_logic_vector(3 downto 0);
   signal shape2_a_sel_i   : std_logic_vector(3 downto 0);
   signal shape2_b_sel_i   : std_logic_vector(3 downto 0);
+  signal video_fx_ctrl_i     : std_logic_vector(31 downto 0);
+  signal video_fx_bitplane_i : std_logic_vector(31 downto 0) := x"00000FFF"; -- all channels bypass
+  signal video_fx_dither_i   : std_logic_vector(31 downto 0) := (others => '0'); -- dither bypass
+  signal video_fx_mirror_i   : std_logic_vector(31 downto 0) := x"000002D0"; -- half=360px, disabled
+  signal video_fx_chromatic_i : std_logic_vector(31 downto 0) := (others => '0');
+  signal video_fx_sharpness_i : std_logic_vector(31 downto 0) := (others => '0');
+  signal overlay_global_en_i : std_logic := '0';
+  signal overlay_block_div_i : std_logic_vector(2 downto 0) := "000";
+  signal overlay_sprites_i   : t_sprite_array := (others => (
+    enable => '0',
+    x      => (others => '0'),
+    y      => (others => '0'),
+    width  => (others => '0'),
+    height => (others => '0'),
+    base   => (others => '0'),
+    tile_w => (others => '0'),
+    tile_h => (others => '0')
+  ));
+  signal overlay_sprites_r   : t_sprite_array := (others => (
+    enable => '0',
+    x      => (others => '0'),
+    y      => (others => '0'),
+    width  => (others => '0'),
+    height => (others => '0'),
+    base   => (others => '0'),
+    tile_w => (others => '0'),
+    tile_h => (others => '0')
+  ));
+  signal sprite_wr_en        : std_logic := '0';
+  signal sprite_wr_idx       : integer range 0 to C_NUM_SPRITES - 1 := 0;
+  signal sprite_wr_off       : std_logic_vector(3 downto 0) := (others => '0');
+  signal sprite_wr_data      : std_logic_vector(31 downto 0) := (others => '0');
   signal exception_addr : std_logic; -- toggles on address out of range error for reg file -- need better solution with reset + exception for sniffer
 
 begin
@@ -284,7 +367,7 @@ begin
       if regs_en = '0' then
         read_reg <= x"00000000";
       else
-        read_reg <= regs(ra(regs_addr(7 downto 0)));
+        read_reg <= regs(ra(regs_addr));
       end if;
     end if;
   end process;
@@ -296,6 +379,7 @@ begin
   -- digital side
   regs(ra(x"04")) <= x"000000" & "00" & matrix_out_addr_int; -- this is the matrix output
   regs(ra(x"08")) <= x"000000" & "0000000" & matrix_load_int; -- load flag
+  regs(ra(x"0C")) <= x"0000" & "00" & audio_t_thresh_i & audio_b_thresh_i & audio_crossover_i;
   regs(ra(x"10")) <= mask_lower;
   regs(ra(x"14")) <= mask_upper;
   -- regs(ra(x"18")) <= xxxxxxxxxxxx; saved for future matrix expantion
@@ -333,7 +417,8 @@ begin
   -- output y,cr,cb levels (moved to make room for osc registers)
   regs(ra(x"58")) <= x"0" & cr_level_i & x"0" & y_level_i;
   regs(ra(x"5C")) <= x"00000" & cb_level_i;
-  regs(ra(x"78")) <= x"000000" & "0000" & ext_vid_in_mux_sel_i & pix_clk_div_sel_i & col_en_bypass_i & video_active;
+  regs(ra(x"78")) <= x"000000" & "0" & sync_hv_invert_i & edge_width_sel_i & ext_vid_in_mux_sel_i & pix_clk_div_sel_i & col_en_bypass_i & video_active;
+  regs(ra(x"18")) <= x"0000" & ca_cfg_i;
   -- Luma key control
   regs(ra(x"C8")) <= luma_key_enable_i & luma_key_direction_i & "00000000000000" & luma_key_thresh_high_i & luma_key_thresh_low_i;
   -- Alpha controls for analog side
@@ -344,6 +429,40 @@ begin
   regs(ra(x"DC")) <= x"00000" & noise_alpha_i;
   -- Shape select controls
   regs(ra(x"E0")) <= x"0000" & shape2_b_sel_i & shape2_a_sel_i & shape1_b_sel_i & shape1_a_sel_i;
+  -- Video output effects: [0]=inv R, [1]=inv G, [2]=inv B, [4:3]=swap, [7:5]=bit rev,
+  --   [8]=scan en, [10:9]=scan delay, [12:11]=logic w/ prev pixel (01=OR 10=AND 11=XOR)
+  regs(ra(x"E4")) <= video_fx_ctrl_i;
+  -- Bit plane slice: R[3:0] G[7:4] B[11:8]; bit3 per channel = bypass
+  regs(ra(x"E8")) <= video_fx_bitplane_i;
+  -- Horizontal ordered dither: [0]=en, [2:1]=depth (6/5/4/3-bit)
+  regs(ra(x"EC")) <= video_fx_dither_i;
+  -- Horizontal mirror: [0]=en, [11:1]=half line width (pixels)
+  regs(ra(x"F0")) <= video_fx_mirror_i;
+  -- Chromatic aberration: [0]=en, [3:1]=G delay, [6:4]=B delay (0-5 px)
+  regs(ra(x"F4")) <= video_fx_chromatic_i;
+  -- Sharpness/blur: [0]=en, [1]=mode (0=blur 1=sharp), [15:8]=strength
+  regs(ra(x"F8")) <= video_fx_sharpness_i;
+  -- Overlay master enable
+  regs(ra(x"FC")) <= "0000000000000000000000000000" & overlay_block_div_i & overlay_global_en_i;
+
+  g_sprite_read : for i in 0 to C_NUM_SPRITES - 1 generate
+    constant c_base : unsigned(12 downto 0) :=
+      unsigned(C_SPRITE_REG_LO) + to_unsigned(i * C_SPRITE_STRIDE, 13);
+  begin
+    regs(ra(std_logic_vector(c_base + 0))) <= "000000000" & overlay_sprites_i(i).y & overlay_sprites_i(i).x & overlay_sprites_i(i).enable;
+    regs(ra(std_logic_vector(c_base + 4))) <= "000000000" & overlay_sprites_i(i).height & '0' & overlay_sprites_i(i).width;
+    regs(ra(std_logic_vector(c_base + 8))) <= overlay_sprites_i(i).tile_h(9 downto 0) & overlay_sprites_i(i).tile_w & overlay_sprites_i(i).base;
+  end generate g_sprite_read;
+
+  -- Frame video stats (read-only @ 0x180, bytes increase with address)
+  regs(ra(x"180")) <= frame_stats_frame_id & frame_stats_luma_avg & frame_stats_luma_max & frame_stats_luma_min;
+  regs(ra(x"184")) <= frame_stats_g_min & frame_stats_r_avg & frame_stats_r_max & frame_stats_r_min;
+  regs(ra(x"188")) <= frame_stats_b_max & frame_stats_b_min & frame_stats_g_avg & frame_stats_g_max;
+  regs(ra(x"18C")) <= x"000000" & frame_stats_b_avg;
+  regs(ra(x"190")) <= frame_stats_hash;
+  regs(ra(x"194")) <= frame_stats_pix_count;
+  regs(ra(x"198")) <= x"000000" & "000" & dirt_ctrl_i;
+  regs(ra(x"19C")) <= x"00000" & audio_mag_pre;
 
   -- hardware interface
 --  regs(ra(x"7C")) <= 0x"0000000" & Rotery_addr_mux_i;
@@ -382,13 +501,81 @@ begin
       end if;
     end if;
   end process;
-  -- ---------------------------------------------------------------------------
+  ---------------------------------------------------------------------------
+  -- Sprite register writes: pipeline decode (cycle N) then update (cycle N+1)
+  -- to avoid a long combinatorial path from the CPU bus into tile_h/base FFs.
+  ---------------------------------------------------------------------------
+  p_sprite_decode : process (regs_clk)
+  begin
+    if rising_edge(regs_clk) then
+      sprite_wr_en <= '0';
+      if write_en = '1' then
+        -- 0x100..0x17F: sprite_idx = addr[7:4], word offset = addr[3:0]
+        if addr_reg(11 downto 8) = x"1"
+           and unsigned(addr_reg(7 downto 4)) <= C_NUM_SPRITES - 1 then
+          sprite_wr_en   <= '1';
+          sprite_wr_idx  <= to_integer(unsigned(addr_reg(7 downto 4)));
+          sprite_wr_off  <= addr_reg(3 downto 0);
+          sprite_wr_data <= write_reg;
+        end if;
+      end if;
+    end if;
+  end process p_sprite_decode;
+
+  p_sprite_apply : process (regs_clk)
+  begin
+    if rising_edge(regs_clk) then
+      if sprite_wr_en = '1' then
+        case sprite_wr_off is
+          when x"0" =>
+            overlay_sprites_i(sprite_wr_idx).enable <= sprite_wr_data(0);
+            overlay_sprites_i(sprite_wr_idx).x      <= sprite_wr_data(11 downto 1);
+            overlay_sprites_i(sprite_wr_idx).y      <= sprite_wr_data(22 downto 12);
+          when x"4" =>
+            overlay_sprites_i(sprite_wr_idx).width  <= sprite_wr_data(10 downto 0);
+            overlay_sprites_i(sprite_wr_idx).height <= sprite_wr_data(21 downto 11);
+          when x"8" =>
+            overlay_sprites_i(sprite_wr_idx).base   <= sprite_wr_data(10 downto 0);
+            overlay_sprites_i(sprite_wr_idx).tile_w <= sprite_wr_data(21 downto 11);
+            overlay_sprites_i(sprite_wr_idx).tile_h <= '0' & sprite_wr_data(31 downto 22);
+          when others =>
+            null;
+        end case;
+      end if;
+    end if;
+  end process p_sprite_apply;
+
+  p_sprite_out : process (regs_clk)
+  begin
+    if rising_edge(regs_clk) then
+      overlay_sprites_r <= overlay_sprites_i;
+    end if;
+  end process p_sprite_out;
+
+  p_audio_crossover_out : process (regs_clk)
+  begin
+    if rising_edge(regs_clk) then
+      audio_crossover_r <= audio_crossover_i;
+      audio_t_thresh_r  <= audio_t_thresh_i;
+      audio_b_thresh_r  <= audio_b_thresh_i;
+    end if;
+  end process p_audio_crossover_out;
+
+  ---------------------------------------------------------------------------
   -- WRITE: Get the data from the incoming write port and pass it to the internal signal for each reg
   ---------------------------------------------------------------------------
   process (regs_clk)
   begin
     if rising_edge(regs_clk) then
       if (write_en = '1') then
+        -- Decode overlay global enable by low byte to avoid width-mismatch compares.
+        if addr_reg(7 downto 0) = x"FC" then
+          overlay_global_en_i <= write_reg(0);
+          overlay_block_div_i <= write_reg(3 downto 1);
+        elsif addr_reg(11 downto 8) = x"1"
+              and unsigned(addr_reg(7 downto 4)) <= C_NUM_SPRITES - 1 then
+          null; -- sprite descriptor writes handled by p_sprite_decode/p_sprite_apply
+        else
         case addr_reg(7 downto 0) is
           when x"04" =>
             matrix_out_addr_int <= write_reg(5 downto 0);
@@ -471,6 +658,14 @@ begin
             col_en_bypass_i <= write_reg(1);
             pix_clk_div_sel_i <= write_reg(2);
             ext_vid_in_mux_sel_i <= write_reg(3);
+            edge_width_sel_i <= write_reg(5 downto 4);
+            sync_hv_invert_i <= write_reg(6);
+          when x"0C" =>
+            audio_crossover_i <= write_reg(7 downto 0);
+            audio_b_thresh_i  <= write_reg(10 downto 8);
+            audio_t_thresh_i  <= write_reg(13 downto 11);
+          when x"18" =>
+            ca_cfg_i <= write_reg(15 downto 0);
           when x"C8" =>
             luma_key_enable_i <= write_reg(31);
             luma_key_direction_i <= write_reg(30);
@@ -486,11 +681,25 @@ begin
             dsm_lo_alpha_i <= write_reg(11 downto 0);
           when x"DC" =>
             noise_alpha_i <= write_reg(11 downto 0);
+          when x"198" =>
+            dirt_ctrl_i <= write_reg(4 downto 0);
           when x"E0" =>
             shape1_a_sel_i <= write_reg(3 downto 0);
             shape1_b_sel_i <= write_reg(7 downto 4);
             shape2_a_sel_i <= write_reg(11 downto 8);
             shape2_b_sel_i <= write_reg(15 downto 12);
+          when x"E4" =>
+            video_fx_ctrl_i <= write_reg;
+          when x"E8" =>
+            video_fx_bitplane_i <= write_reg;
+          when x"EC" =>
+            video_fx_dither_i <= write_reg;
+          when x"F0" =>
+            video_fx_mirror_i <= write_reg;
+          when x"F4" =>
+            video_fx_chromatic_i <= write_reg;
+          when x"F8" =>
+            video_fx_sharpness_i <= write_reg;
           when x"7C" =>
             Rotery_addr_mux_i <= write_reg(3 downto 0);
             -- Note the Gap in addresses for the read only Rot encoders?
@@ -520,6 +729,7 @@ begin
 
             -- do nothing
         end case;
+        end if;
       end if;
     end if;
   end process;
@@ -584,6 +794,12 @@ begin
   video_active_O <= video_active;
   pix_clk_div_sel <= pix_clk_div_sel_i;
   ext_vid_in_mux_sel <= ext_vid_in_mux_sel_i;
+  edge_width_sel <= edge_width_sel_i;
+  sync_hv_invert <= sync_hv_invert_i;
+  ca_cfg         <= ca_cfg_i;
+  audio_crossover <= audio_crossover_r;
+  audio_t_thresh  <= audio_t_thresh_r;
+  audio_b_thresh  <= audio_b_thresh_r;
   
   luma_key_enable <= luma_key_enable_i;
   luma_key_direction <= luma_key_direction_i;
@@ -595,11 +811,23 @@ begin
   dsm_hi_alpha <= dsm_hi_alpha_i;
   dsm_lo_alpha <= dsm_lo_alpha_i;
   noise_alpha <= noise_alpha_i;
+  dirt_ctrl   <= dirt_ctrl_i;
 
   shape1_a_sel <= shape1_a_sel_i;
   shape1_b_sel <= shape1_b_sel_i;
   shape2_a_sel <= shape2_a_sel_i;
   shape2_b_sel <= shape2_b_sel_i;
+
+  video_fx_ctrl     <= video_fx_ctrl_i;
+  video_fx_bitplane <= video_fx_bitplane_i;
+  video_fx_dither   <= video_fx_dither_i;
+  video_fx_mirror   <= video_fx_mirror_i;
+  video_fx_chromatic <= video_fx_chromatic_i;
+  video_fx_sharpness <= video_fx_sharpness_i;
+
+  overlay_global_en <= overlay_global_en_i;
+  overlay_block_div <= overlay_block_div_i;
+  overlay_sprites   <= overlay_sprites_r;
 
   Rotery_addr_mux     <= Rotery_addr_mux_i;
   Rotery_enc_preset_w <= Rotery_enc_preset_w_i;

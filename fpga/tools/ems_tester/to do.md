@@ -1,3 +1,174 @@
+!!! REMEMBER IF SOMETHIGN DOESNT WORK CHECK THE REST AND H/Vsync are correct poliarity!!!!
+
+todo:
+
+ca div, get rid of, they are a pain
+gear points not sharp enough, slider increases circle size but not gear teeth, why?
+zoom h wraps around oddly??? same for zoom V
+copare triangles with the original , something is off
+sinwave has issues of clipping or wraparound
+sinwave seems brighter then other waves, is that just that it spends longer at the top of the brightness?
+check frame stats averages
+
+check audio in by debuging -- audio in is working! filter cuttof needs checking
+
+
+wheck why resolution is stuffed when i change it
+720p works on monitor but is flashing on video assist, 720p breaks the counters on the digital side but nothing else
+
+- make big list of stuff to check at MESS ems!!!
+
+- add reg to get luma input from top bit of luma out on the CA input
+
+check the slow counter speed is acurate
+
+
+latest check:
+-----check stats, averages dont work!!!, but hash works, pielscount works frame count works
+--------check audio in,inputs routable, but not doing anything, needs proper probe,
+input envilope seems to have some value but it is small, filtered ins have no value?
+
+0x19C (AXI: 0x4000019C) — audio_mag_pre = i can see audio in (0x10D is the max i have ever seen, but i can t see it getting to the amnalog matrix)
+!!! trace the signal all the way in and out of the analog matrix and see if the signal is just too small or what?
+
+check new noise reg--- cant see no DIRT!!!! (the bottom 4 bits in the noise reg are blanked to 0!!! fuuuk! hahahah)
+
+debug irt, remove hape gen to check
+------------------------------------------old
+NEXT chcekc:
+
+- YES!!!!  cna you mix on the analog materix now???
+- fixed!!!!   !! SOMEthing is wrong with the x counters!!! - fix in next build
+- remove in next build 1BIT CA STILL NOT RESPONDING TO ENABLES FROM the devided pixel clock
+- shapes are sterestech in x direction slightly- is this because of the frame not being a square?, does x need to get devided as tho the frame was square?
+- is sin wave un even?? when used on zoom there is a bump at the bottom where it drops to the min
+- fuzz scale not driven from analog matrix for some reason
+- now works!!!  fuzz scale too small, should be related to circle size? -- scale upped *8, fu
+- check cog, i changed the rolling aver age from 2 to 1 to get a smoother cog, is it still too sharp
+
+- at some pointhe analoge matrix needs to go signed, but thats a bit job, so save it till other problems are iorned out
+- need to actualy test all shapes, lots are still borken?
+span is connected on the analog matrix now
+
+
+
+--check stats work!!!
+-- check 1 bit CA is interesting enough now then sign off
+--check shape gen x/y routing from the analoge matrix is devided by the correct ammount ,, seems good now!! not too big for X and Y pos
+-- check oscilators, is the freq range ok for all speeds and syncs,
+much better for requencies in x any y directions, Y is still blocky!!! thop
+- oscilator, does the vertical synced osc have high enough resolution?
+-- AUDIO MODULE
+    does the audio module compile
+    does the test bench look correct
+    does it synthisize into the design
+
+-------------
+to do: numbers are priority
+1 easy- 1 bit ca needs to have enable devided by 8 minimum -- scrapped
+1 easy- also needs to have a propper reset to stop rolling -- x 1-3 still has issue
+3- re-introduce video FX
+3- re introduce frame stats -- done
+2- add audio in basic
+1- look at the shape outs from the analog matrix, can i devide the outputs to the shape gen by like 16? so they are in a more appropriate range? -- 
+2- add filter to audio to get T and B
+3- route the span from the analog matrix to the actual span controls
+
+
+NEXT build check:
+check 1 bit CA
+-- notes 
+x out 0-3 cause rolling higher vaues dotn have rolling
+ca rule xor Y is ver effective
+ca line seed y0 doent do anything
+ca xor inject y0 doesent do anything these should be driven by other inputs like x
+ydiv cropss the bottom and x dix causes rolling, probs get rid of these if we can stop rolling then we dotn need them
+
+check vertical OSC freq
+better still not as fast as id like, also the resolution of the wavesa becomes super blocky!!!!
+
+check shapes output to analog matrix devider:
+went one step too far,
+also the wave shifts only in 1 direction, need to fix for things like pos, needs to be addtion/subtraction
+
+chekc frame stat regs working now
+
+investigate functions for sprites and how they work, they work in isolation but 
+the gui doent work so there si something im missing
+
+
+
+------------------
+
+old checks
+done - check oscilator wavweforms working now with derivation added (do sim first) -- fixed
+- check osc speed slow on vertical sync, is it fast enough now (changed from 23-17 clock counter per toggle)-- highest speed not fastenough, slowest speed way too slow for verical
+
+issue - check edge thickness comes from the correct diretion -- direction of width fixed but now some lines missing vericly?!
+- check overlay debug and sprite debug (full signal debug using 'dont touch') -- overlay fixed ems tester.py makes a grid across the whole screen
+done----- - check slow counters still work after mid frame gating
+- 1bit CA full debug, working, check the new expanded rules to see if that helps make ti more interesting
+- check resolution change
+done------ check if alpha blending still has the hard right edge ---fixed
+
+
+to do before next build:
+- look for 1bit ca issue -- added debug put reset to 0
+- add dont touch to overlay signals added debug
+- fix edge direction -- fixed edges, were backwards-- working but falling and rising are revered in the matrix? were they always like that
+- try to fix osc derivation issue -- out assign was only in th sinwave part of the case statement
+- check if alpha blending still has the hard right edge
+
+
+
+2/7/2026:
+
+spriutes look like they are working but overlay isnt for some reason
+frame buffer addr seems to jump and is not smooth
+add full mark debug, if syncs are backwards then why do sprites work (sort of)?
+
+
+
+
+check oscilators sync select what should those be connected to? - they look fine but the gui has an extra value it that doesnt do anything
+does osc sinwave look right compare to actual video
+when sync is 2 = vertical sync highest freek isnt high enough
+also when vert sync sinwave looks blocky- the sin res is too low, should i use sinwave from BGI synth?
+osc alph (and maybe all alpha) results in a hard line on the left edge before the alpha takes effect
+
+other waveforms not working now that derivation has been introduced
+
+edge detector width regs dont work on edge detect 1 and 2 only 3 and 4, also sometime a signal gets stuck going through the edge detector?? and we see the full signal not just the edge
+* are there really 4 edges out? why == first 2 are thin secodn 2 are thick (now has regs driving thickenss)
+
+!!! EDGE THICKNESS STARTS FROM THE WRONG EDGE!!! and gets thicker towards the rising edge!!!
+
+video effects and frame stats are broken
+
+debug 1bit CA cant see anything!!! you need to feed it with invert 1, maybe it should be fed by count 9 at satartup by SW, CA inut is actualy XY invert 9 for some reason?!
+also CA is stuck after the first signal goes to it it gets stuck and rule changes dotn work
+
+
+
+dsm to analoge matrix doent work <- check in next build> -- was in reset !! works now but filter is too strong! -- works now, maybe filter is still too smooth but fix later when looking at actual unit responce
+
+delay works -- is it masked by vertical or horizontal interupt?
+
+-- any shape stuff that has been deiscivered by debug ,- should be fixed now -- it is
+
+working, registers only write %2 but it works in x and y directions-- add control for the counter pix clock devider, so the lines can get more and less chunky --- it creates an odd 3 line smearing, shuld reset oh hs!! <- check next build >
+
+-- add blanking values to blanking video out
+
+-- debug why counters dont seem to run when i change resolution
+
+
+-- te4st luma key!! -- need to re activate
+
+DONE ---check app changes to slider order work as well as number box to set value
+
+
+----------------
 check new build:
 
 counters only seem to work at lowest res? are they not reset on a format change or clock loss?

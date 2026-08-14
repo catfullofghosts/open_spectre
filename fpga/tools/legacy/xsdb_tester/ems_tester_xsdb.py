@@ -45,40 +45,38 @@ class color:
     END = "\033[0m"
 # add ability to check single reg from search term in reg/reg name
 
-def rst_digital_side_matrix(matrix_out):    
-            matrix_in_shifted = 0
-            # Read register value using XSCT
+def _pulse_digital_matrix_load():
+            command = f"mwr -force  0x40000008 0x1"
+            xsct.do(command) # needs gracefull fail state
+            command = f"mwr -force  0x40000008 0x0"
+            xsct.do(command) # needs gracefull fail state
+
+
+def _commit_digital_matrix_mask(matrix_out, mask_lower, mask_upper):
             command = f"mwr -force  0x40000004 {hex(matrix_out)}"
             print(command)
-            output = xsct.do(command) # needs gracefull fail state
-            command = f"mwr -force  0x40000010 {hex(matrix_in_shifted)}"
+            xsct.do(command) # needs gracefull fail state
+            command = f"mwr -force  0x40000010 {hex(mask_lower)}"
             print(command)
+            xsct.do(command) # needs gracefull fail state
+            command = f"mwr -force  0x40000014 {hex(mask_upper)}"
+            print(command)
+            xsct.do(command) # needs gracefull fail state
+            _pulse_digital_matrix_load()
 
-            output = xsct.do(command) # needs gracefull fail state
-            command = f"mwr -force  0x40000008 0x1"
-            output = xsct.do(command) # needs gracefull fail state
-            command = f"mwr -force  0x40000008 0x0"
-            output = xsct.do(command) # needs gracefull fail state
+
+def rst_digital_side_matrix(matrix_out):    
+            _commit_digital_matrix_mask(matrix_out, 0, 0)
 
 
 def prog_digital_side_matrix(matrix_out, matrix_in): 
-            if matrix_in > 31:
-                matrix_in_addr = "0x40000014"
+            if matrix_in <= 31:
+                mask_lower = 1 << matrix_in
+                mask_upper = 0
             else:
-                 matrix_in_addr = "0x40000010"
-            matrix_in_shifted = 1 << (matrix_in % 32)
-            # Read register value using XSCT
-            command = f"mwr -force  0x40000004 {hex(matrix_out)}"
-            print(command)
-            output = xsct.do(command) # needs gracefull fail state
-            command = f"mwr -force  {matrix_in_addr} {hex(matrix_in_shifted)}"
-            print(command)
-
-            output = xsct.do(command) # needs gracefull fail state
-            command = f"mwr -force  0x40000008 0x1"
-            output = xsct.do(command) # needs gracefull fail state
-            command = f"mwr -force  0x40000008 0x0"
-            output = xsct.do(command) # needs gracefull fail state
+                mask_lower = 0
+                mask_upper = 1 << (matrix_in % 32)
+            _commit_digital_matrix_mask(matrix_out, mask_lower, mask_upper)
 
 
 if __name__ == "__main__":

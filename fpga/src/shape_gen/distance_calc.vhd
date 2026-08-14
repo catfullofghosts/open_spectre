@@ -1,4 +1,4 @@
--- Calculated the distence between 2 points on a per pixel basis with a pipeline of 11 clocks
+-- Calculated the distence between 2 points on a per pixel basis just using squares, not pythag
 
 
 library ieee;

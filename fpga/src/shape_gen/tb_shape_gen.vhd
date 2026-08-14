@@ -86,7 +86,6 @@ begin
     clk    => clk, 
     rst    => h_sync, --rst, -- x needs to be reset by hs otherwise some bits out run over and get out of sync on the next line
     counter_up => clk_div2,
-    enable => '1',
     count  => x_in
     );
     
@@ -97,7 +96,6 @@ begin
     clk    => clk, 
     rst    => v_sync, --rst, -- x needs to be reset by hs otherwise some bits out run over and get out of sync on the next line
     counter_up => clk_divV,
-    enable => '1',
     count  => y_in
     );
 

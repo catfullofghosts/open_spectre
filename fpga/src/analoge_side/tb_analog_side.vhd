@@ -35,7 +35,7 @@ architecture testbench of analog_side_tb is
   signal YUV_in  : std_logic_vector(23 downto 0) := x"123456";
   signal y_alpha, u_alpha, v_alpha : std_logic_vector(11 downto 0) := (others => '0'); -- alpha of 0 = full colour passthrough
 
-  signal audio_in_t, audio_in_b, audio_in_sig : std_logic_vector(9 downto 0) := (others => '0');
+  signal audio_in_t, audio_in_b, audio_in_sig : std_logic_vector(11 downto 0) := (others => '0');
 
   signal sync_sel_osc1, sync_sel_osc2 : std_logic_vector(1 downto 0) := "00";
   signal osc_1_freq, osc_2_freq       : std_logic_vector(9 downto 0) := (others => '0');
@@ -90,6 +90,7 @@ begin
 
       vid_span => vid_span, osc_1_sqr_o => osc_1_sqr_o, osc_2_sqr_o => osc_2_sqr_o,
       noise_1_o => noise_1_o, noise_2_o => noise_2_o,
+      noise_dirt_o => open,
 
       matrix_pos_h_1 => matrix_pos_h_1, matrix_pos_v_1 => matrix_pos_v_1,
       matrix_zoom_h_1 => matrix_zoom_h_1, matrix_zoom_v_1 => matrix_zoom_v_1,

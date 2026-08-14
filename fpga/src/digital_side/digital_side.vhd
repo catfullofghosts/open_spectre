@@ -29,7 +29,8 @@ entity digital_side is
     sys_clk   : in std_logic;
     h_sync      : in std_logic; -- Hsync
     v_sync       : in std_logic; -- Vsync
-    pix_clk : in std_logic; -- pixel clk (is actualy enables on every pixel clock)
+    pix_clk  : in std_logic; -- divided pixel enable for X counter
+    line_clk : in std_logic; -- divided line enable for Y counter
     rst       : in std_logic;
     YCRCB   : out std_logic_vector (23 downto 0);
 
@@ -40,6 +41,9 @@ entity digital_side is
     invert_matrix  : in std_logic_vector(63 downto 0); --inverts a matrix input globaly
     ext_vid_in     : in std_logic_vector(7 downto 0);
     vid_span       : in std_logic_vector(7 downto 0);
+    edge_width     : in std_logic_vector(1 downto 0); -- 00=2px, 01=4px, 10=6px, 11=8px
+    ca_cfg         : in std_logic_vector(15 downto 0); -- [7:0] rule, [8] inject^luma_msb, [9] rule^Y, [10] rule^X
+                                                       -- [13:12] y_div, [15:14] x_div
 
     -- inputs form analoge side
     osc1_sqr : in std_logic :='0';
@@ -48,7 +52,6 @@ entity digital_side is
     random2  : in std_logic :='0';
     audio_T  : in std_logic :='0';
     audio_B  : in std_logic :='0';
-    extinput : in std_logic :='0';
     
     shape1_a : in std_logic :='0';
     shape1_b : in std_logic :='0';
@@ -92,6 +95,10 @@ architecture Behavioral of digital_side is
   signal not_overlay_gate2 : std_logic_vector(3 downto 0);
   --Matrix In from module out
   signal inv_out        : std_logic_vector(3 downto 0);
+  signal ca_inject      : std_logic;
+  signal ca_inject_base : std_logic;
+  signal luma_msb_d1    : std_logic := '0';
+  signal luma_msb_d2    : std_logic := '0';
   signal x_count        : std_logic_vector(8 downto 0);
   signal y_count        : std_logic_vector(8 downto 0);
   signal x_count_low_hi : std_logic_vector(8 downto 0);
@@ -111,6 +118,8 @@ architecture Behavioral of digital_side is
   signal overlay_gate_out  : std_logic_vector(3 downto 0);
   signal ff_out_a          : std_logic;
   signal ff_out_b          : std_logic;
+  signal ca_out            : std_logic;
+  signal ca_frame_active   : std_logic;
 
   signal comp_output : std_logic_vector (6 downto 0);
 
@@ -138,8 +147,11 @@ architecture Behavioral of digital_side is
   signal B  : std_logic_vector(7 downto 0);
   --External signals
   signal pix_clk_d      : std_logic;
-  signal pix_clk_d2      : std_logic;
+  signal pix_clk_d2     : std_logic;
   signal pix_clk_i      : std_logic;
+  signal line_clk_d     : std_logic;
+  signal line_clk_d2    : std_logic;
+  signal line_clk_i     : std_logic;
   signal h_sync_d      : std_logic;
   signal h_sync_d2      : std_logic;
   signal h_sync_i      : std_logic;
@@ -154,8 +166,14 @@ architecture Behavioral of digital_side is
 
   --mux function
   function multi321 (A, B : in std_logic_vector) return std_logic is
+    variable idx : natural;
   begin
-    return A(to_integer(unsigned(B)));
+    idx := to_integer(unsigned(B));
+    if idx >= A'length then
+      return '0';
+    else
+      return A(idx);
+    end if;
   end multi321;
 
   function rev_v (a : in std_logic_vector)
@@ -184,6 +202,10 @@ cdc_pix_100 : process(clk)
         pix_clk_d <= pix_clk;
         pix_clk_d2 <= pix_clk_d;
         pix_clk_i <= pix_clk_d2;
+
+        line_clk_d <= line_clk;
+        line_clk_d2 <= line_clk_d;
+        line_clk_i <= line_clk_d2;
         
         v_sync_d <= v_sync;
         v_sync_d2 <= v_sync_d;
@@ -203,7 +225,6 @@ cdc_pix_100 : process(clk)
     clk    => clk, 
     rst    => h_sync_i, --rst, -- x needs to be reset by hs otherwise some bits out run over and get out of sync on the next line
     counter_up => pix_clk_i,
-    enable => '1',
     count  => x_count_low_hi
     );
 
@@ -214,8 +235,7 @@ cdc_pix_100 : process(clk)
     map (
     clk    => clk, 
     rst    => v_sync_i, --vsync reset to stop rolling
-    counter_up => h_sync_i,
-    enable => '1',
+    counter_up => line_clk_i,
     count  => y_count_low_hi
     );
 
@@ -234,6 +254,7 @@ cdc_pix_100 : process(clk)
     port
     map (
     clk   => clk,
+    frame_sync => h_sync_i,
     hz6   => slow_cnt_6,
     hz3   => slow_cnt_3,
     hz1_5 => slow_cnt_1_5,
@@ -262,31 +283,62 @@ cdc_pix_100 : process(clk)
   edge : entity work.monstable_4
     port
     map(
-    input  => edge_detector_in,
-    clk    => clk,
-    output => edge_detector_out
+    input      => edge_detector_in,
+    clk        => clk,
+    edge_width => edge_width,
+    output     => edge_detector_out
+    );
+
+  ca_frame_active <= '1' when h_sync_i = '0' and v_sync_i = '0' else '0';
+
+  -- 2FF luma MSB for optional CA inject XOR (ca_cfg bit 8)
+  p_luma_msb_ff : process (clk)
+  begin
+    if rising_edge(clk) then
+      luma_msb_d1 <= luma_out(3);
+      luma_msb_d2 <= luma_msb_d1;
+    end if;
+  end process p_luma_msb_ff;
+
+  ca_inject_base <= inv_out(0) xor inv_out(1);
+  ca_inject      <= ca_inject_base xor (ca_cfg(8) and luma_msb_d2);
+
+  ca_1d : entity work.ca_1d_stream -- EXTRA 1 bit CA
+    port map (
+      clk          => clk,
+      rst          => h_sync_i,
+      step_en      => pix_clk_i,
+      frame_active => ca_frame_active,
+      rule         => ca_cfg(7 downto 0),
+      rule_xor_y   => ca_cfg(9),
+      rule_xor_x   => ca_cfg(10),
+      x_div        => ca_cfg(15 downto 14),
+      y_div        => ca_cfg(13 downto 12),
+      y_line       => y_count(7 downto 0),
+      x_pos        => x_count(7 downto 0),
+      inject       => ca_inject,
+      ca_out       => ca_out
     );
 
   delay_in_vec <= '0' & delay_in;
   delay_out       <= delay_out_vec(0);
   
-  delay_800 : entity work.delay_800us -- need another solution to this even at 25mhz enables for write we would need a fifo of lenght of 2_000_000!!
+  delay_800 : entity work.delay_800us -- BRAM delay sampled at full pixel clock
     generic
     map(
-    g_DEPTH => 512 -- would need to be 80k depth to do 800us
+    g_WIDTH => 2,
+    g_DEPTH => 59400
     )
     port
     map(
     i_rst_sync => rst,
     i_clk      => clk,
 
-    -- FIFO Write Interface
-    i_wr_en   => pix_clk_i, --'1',
+    i_wr_en   => '1',
     i_wr_data => delay_in_vec,
     o_full    => open,
 
-    -- FIFO Read Interface
-    i_rd_en   => pix_clk_i,--'1',
+    i_rd_en   => '1',
     o_rd_data => delay_out_vec,
     o_empty   => open
 
@@ -385,13 +437,11 @@ cdc_pix_100 : process(clk)
   matrix_in(54)           <= random2  ; -- 
   matrix_in(55)           <= audio_T  ; -- 
   matrix_in(56)           <= audio_B  ; -- 
-  matrix_in(57)           <= extinput ; -- 
+  matrix_in(57)           <= ca_out;
 
   matrix_in(63)           <= '1' ; -- 1 used to set all outputs in simulation
-  --matrix in extras add later
-  -- special x/y counter 1?
-  -- celular automita
-  -- sequancer???
+  --matrix in extras
+  -- matrix_in(58-62) spare
 
   -- MATRIX OUT
   xy_inv_in(17 downto 0) <= matrix_out(17 downto 0);

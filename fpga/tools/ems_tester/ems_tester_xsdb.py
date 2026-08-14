@@ -22,6 +22,7 @@ import argparse
 import os
 import sys
 import logging
+import random
 import time
 from datetime import datetime
 from core import * #core file is local
@@ -76,7 +77,7 @@ MATRIX_IN_MAP["random1"] = 53
 MATRIX_IN_MAP["random2"] = 54
 MATRIX_IN_MAP["audio_T"] = 55
 MATRIX_IN_MAP["audio_B"] = 56
-MATRIX_IN_MAP["extinput"] = 57
+MATRIX_IN_MAP["ca_out"] = 57
 MATRIX_IN_MAP["vcc"] = 63  # '1' used to set all outputs
 
 def resolve_matrix_in(value):
@@ -160,42 +161,60 @@ class color:
     END = "\033[0m"
 # add ability to check single reg from search term in reg/reg name
 
+def _pulse_digital_matrix_load():
+            command = f"mwr -force  0x40000008 0x1"
+            xsct.do(command) # needs gracefull fail state
+            command = f"mwr -force  0x40000008 0x0"
+            xsct.do(command) # needs gracefull fail state
+
+
+def _commit_digital_matrix_mask(matrix_out, mask_lower, mask_upper):
+            """Write a complete 64-bit mask (both halves) and pulse load once."""
+            resolved_matrix_out = resolve_matrix_out(matrix_out)
+
+            command = f"mwr -force  0x40000004 {hex(resolved_matrix_out)}"
+            print(command)
+            xsct.do(command) # needs gracefull fail state
+
+            command = f"mwr -force  0x40000010 {hex(mask_lower)}"
+            print(command)
+            xsct.do(command) # needs gracefull fail state
+
+            command = f"mwr -force  0x40000014 {hex(mask_upper)}"
+            print(command)
+            xsct.do(command) # needs gracefull fail state
+
+            _pulse_digital_matrix_load()
+
+
+def _digital_matrix_mask_from_inputs(matrix_in):
+            """Build lower/upper mask halves from one or more matrix inputs."""
+            pins = matrix_in if isinstance(matrix_in, list) else [matrix_in]
+            mask_lower = 0
+            mask_upper = 0
+            for pin in [resolve_matrix_in(p) for p in pins]:
+                if pin <= 31:
+                    mask_lower |= 1 << pin
+                else:
+                    mask_upper |= 1 << (pin % 32)
+            return mask_lower, mask_upper
+
+
 def rst_digital_side_matrix(matrix_out=None, pullup = False):    
             # If no argument passed, step through all matrix_out values 0-56
             if matrix_out is None:
                 for out_val in range(57):  # 0 to 56 inclusive backwards to avoid the apperence of pin removal causing the viodeo the freakout
                     rst_digital_side_matrix(56-out_val)
                 return
-            
-            # Resolve matrix_out name to number if needed
-            resolved_matrix_out = resolve_matrix_out(matrix_out)
-            
-            # Read register value using XSCT
-            command = f"mwr -force  0x40000004 {hex(resolved_matrix_out)}"
 
-            output = xsct.do(command) # needs gracefull fail state
-            if pullup == False:
-                command = f"mwr -force  0x40000010 0x0" # first value to set!!
+            if pullup:
+                mask_lower = 0x32
+                mask_upper = 0x32
             else:
-                 command = f"mwr -force  0x40000010 0x32" # pullup
+                mask_lower = 0
+                mask_upper = 0
 
-            output = xsct.do(command) # needs gracefull fail state
-            command = f"mwr -force  0x40000008 0x1"
-            output = xsct.do(command) # needs gracefull fail state
-            command = f"mwr -force  0x40000008 0x0"
-            output = xsct.do(command) # needs gracefull fail state
-
-            if pullup == False:
-                command = f"mwr -force  0x40000014 0x0" # second value to set!!
-            else:
-                command = f"mwr -force  0x40000014 0x32" # second value to set!!
-            
-            output = xsct.do(command) # needs gracefull fail state
-            command = f"mwr -force  0x40000008 0x1"
-            output = xsct.do(command) # needs gracefull fail state
-            command = f"mwr -force  0x40000008 0x0"
-            output = xsct.do(command) # needs gracefull fail state
-            print(command)
+            _commit_digital_matrix_mask(matrix_out, mask_lower, mask_upper)
 
 
 def prog_digital_side_matrix(matrix_out, matrix_in): 
@@ -204,126 +223,432 @@ def prog_digital_side_matrix(matrix_out, matrix_in):
                 for out_val in matrix_out:
                     prog_digital_side_matrix(out_val, matrix_in)
                 return
-            
-            # Resolve matrix_out name to number if needed
+
+            mask_lower, mask_upper = _digital_matrix_mask_from_inputs(matrix_in)
+            if not isinstance(matrix_in, list):
+                print(f"resolved matrix in = {resolve_matrix_in(matrix_in)}")
+
+            _commit_digital_matrix_mask(matrix_out, mask_lower, mask_upper)
+
+
+def _pulse_analog_matrix_load():
+            command = f"mwr -force  0x40000034 0x1"
+            xsct.do(command) # needs gracefull fail state
+            command = f"mwr -force  0x40000034 0x0"
+            xsct.do(command) # needs gracefull fail state
+
+
+def _analog_matrix_mask_from_inputs(matrix_in):
+            """Build 16-bit unmute mask from one or more matrix inputs (OR of 1<<row)."""
+            pins = matrix_in if isinstance(matrix_in, list) else [matrix_in]
+            mask = 0
+            for pin in [resolve_matrix_in(p) for p in pins]:
+                mask |= 1 << pin
+            return mask & 0xFFFF
+
+
+def _commit_analog_matrix_mask(matrix_out, mask):
+            """Write a complete 16-bit mask for one output and pulse load once."""
             resolved_matrix_out = resolve_matrix_out(matrix_out)
-            
-            # Handle matrix_in as a list - OR all bits together
-            if isinstance(matrix_in, list):
-                matrix_in_shifted_low = 0   # Bits 0-31
-                matrix_in_shifted_high = 0  # Bits 32-63
-                resolved_pins = [resolve_matrix_in(pin) for pin in matrix_in]
-                for pin in resolved_pins:
-                    if pin <= 31:
-                        matrix_in_shifted_low = matrix_in_shifted_low | 1 << pin
-                    else:
-                        matrix_in_shifted_high = matrix_in_shifted_high | 1 << (pin % 32)
-                
-                # Set matrix output address
-                command = f"mwr -force  0x40000004 {hex(resolved_matrix_out)}"
-                print(command)
-                output = xsct.do(command) # needs gracefull fail state
-                
-                # Write low register (bits 0-31) if any pins in that range
-                if matrix_in_shifted_low > 0:
-                    command = f"mwr -force  0x40000010 {hex(matrix_in_shifted_low)}"
-                    print(command)
-                    output = xsct.do(command) # needs gracefull fail state
-                    command = f"mwr -force  0x40000008 0x1"
-                    output = xsct.do(command) # needs gracefull fail state
-                    command = f"mwr -force  0x40000008 0x0"
-                    output = xsct.do(command) # needs gracefull fail state
-                
-                # Write high register (bits 32-63) if any pins in that range
-                if matrix_in_shifted_high > 0:
-                    command = f"mwr -force  0x40000014 {hex(matrix_in_shifted_high)}"
-                    print(command)
-                    output = xsct.do(command) # needs gracefull fail state
-                    command = f"mwr -force  0x40000008 0x1"
-                    output = xsct.do(command) # needs gracefull fail state
-                    command = f"mwr -force  0x40000008 0x0"
-                    output = xsct.do(command) # needs gracefull fail state
-                
-                return  # Early return for list case
+
+            command = f"mwr -force  0x40000028 {hex(resolved_matrix_out)}"
+            print(command)
+            xsct.do(command) # needs gracefull fail state
+
+            command = f"mwr -force  0x40000030 {hex(mask)}"
+            print(command)
+            xsct.do(command) # needs gracefull fail state
+
+            _pulse_analog_matrix_load()
+
+
+def prog_annaloge_side_matrix(matrix_out, matrix_in):
+            if isinstance(matrix_out, list):
+                for out_val in matrix_out:
+                    prog_annaloge_side_matrix(out_val, matrix_in)
+                return
+
+            mask = _analog_matrix_mask_from_inputs(matrix_in)
+            if not isinstance(matrix_in, list):
+                print(f"resolved matrix in = {resolve_matrix_in(matrix_in)}")
+
+            _commit_analog_matrix_mask(matrix_out, mask)
+
+
+def rst_annaloge_side_matrix(matrix_out):
+            _commit_analog_matrix_mask(matrix_out, 0)
+
+def wr_reg(addr, val_in):
+            """Write a 32-bit CPU register. addr is a hex offset string or int (e.g. '18', 0xFC)."""
+            if isinstance(addr, str):
+                offset = int(addr, 16)
             else:
-                # Single matrix_in value - resolve name to number if needed
-                resolved_matrix_in = resolve_matrix_in(matrix_in)
-                print(f"resolved matrix in = {resolved_matrix_in}")
-                if resolved_matrix_in > 31:
-                    matrix_in_addr = "0x40000014"
-                else:
-                    matrix_in_addr = "0x40000010"
-                matrix_in_shifted = 1 << (resolved_matrix_in % 32)
-            
-            # Read register value using XSCT (for single input case)
-            command = f"mwr -force  0x40000004 {hex(resolved_matrix_out)}"
+                offset = int(addr)
+            command = f"mwr -force  0x{0x40000000 + offset:08X} {hex(val_in)}"
             print(command)
-            output = xsct.do(command) # needs gracefull fail state
-            command = f"mwr -force  {matrix_in_addr} {hex(matrix_in_shifted)}"
-            print(command)
-
-            output = xsct.do(command) # needs gracefull fail state
-            command = f"mwr -force  0x40000008 0x1"
-            output = xsct.do(command) # needs gracefull fail state
-            command = f"mwr -force  0x40000008 0x0"
-            output = xsct.do(command) # needs gracefull fail state
+            xsct.do(command)  # needs gracefull fail state
 
 
-def prog_annaloge_side_matrix(matrix_out, matrix_in): 
-            
-            matrix_in_addr = "0x40000030"
+def rd_reg(addr):
+            """Read a 32-bit CPU register. addr is a hex offset string or int (e.g. '19C', 0x19C)."""
+            if isinstance(addr, str):
+                offset = int(addr, 16)
+            else:
+                offset = int(addr)
+            command = f"mrd -force 0x{0x40000000 + offset:08X}"
+            print(command)
+            result = xsct.do(command)
+            if result is None:
+                return None
+            for token in str(result).replace(":", " ").split():
+                if token.startswith("0x") or token.startswith("0X"):
+                    return int(token, 16)
+            return None
 
-            resolved_matrix_out = matrix_out
-            matrix_in_shifted = (1 << matrix_in)  # am i worng about this? is the value inverted somewhere in the fpga
-            # matrix_in_shifted = ~(1 << matrix_in) & 0xFFFFFFFF # remember all fs = muted
-            # Read register value using XSCT
-            command = f"mwr -force  0x40000028 {hex(resolved_matrix_out)}"
-            print(command)
-            output = xsct.do(command) # needs gracefull fail state
-            command = f"mwr -force  {matrix_in_addr} {hex(matrix_in_shifted)}"
-            print(command)
 
-            output = xsct.do(command) # needs gracefull fail state
-            command = f"mwr -force  0x40000034 0x1"
-            print(command)
-            output = xsct.do(command) # needs gracefull fail state
-            command = f"mwr -force  0x40000034 0x0"
-            output = xsct.do(command) # needs gracefull fail state
-            print(command)
+def read_audio_mag_pre():
+            """Read pre-envelope audio magnitude (12-bit in bits [11:0]). @ 0x19C."""
+            value = rd_reg(AUDIO_MAG_PRE_REG)
+            if value is None:
+                return None
+            return value & 0xFFF
 
-def rst_annaloge_side_matrix(matrix_out): 
-            
-            matrix_in_addr = "0x40000030"
 
-            # Resolve matrix_out name to number if needed
-            resolved_matrix_out = matrix_out
-            
-            matrix_in_shifted = 0
-            # Read register value using XSCT
-            command = f"mwr -force  0x40000028 {hex(resolved_matrix_out)}"
-            print(command)
-            output = xsct.do(command) # needs gracefull fail state
-            command = f"mwr -force  {matrix_in_addr} {hex(matrix_in_shifted)}"
-            print(command)
+REG_BASE_ADDR = 0x40000000
+OVERLAY_BRAM_BYTE_BASE = 0x400
+# AXI BRAM ctrl maps 8KB @ 0x40000000; first 1KB is CPU regs, rest is overlay atlas.
+OVERLAY_BRAM_AXI_BYTES = 0x1C00
+OVERLAY_BRAM_WORDS = OVERLAY_BRAM_AXI_BYTES // 4  # 1792 words (VHDL depth is 2048)
+SPRITE_REG_BASE = 0x100
+SPRITE_REG_STRIDE = 0x10
+CA_RULE_REG = 0x18
+AUDIO_CROSSOVER_REG = 0x0C
+DIRT_CTRL_REG = 0x198
+AUDIO_MAG_PRE_REG = 0x19C
+OVERLAY_GLOBAL_EN_REG = 0xFC
+CA_CTRL_INJECT_XOR_LUMA = 1 << 8
+CA_CTRL_RULE_XOR_Y = 1 << 9
+CA_CTRL_RULE_XOR_X = 1 << 10
+CA_DIV_ENCODE = {1: 0, 2: 1, 4: 2, 8: 3}
+OVERLAY_BLOCK_DIV_ENCODE = {1: 0, 2: 1, 4: 2, 8: 3, 16: 4}
+_overlay_fc_state = {"enabled": False, "block_div": 1}
 
-            output = xsct.do(command) # needs gracefull fail state
-            command = f"mwr -force  0x40000034 0x1"
-            print(command)
-            output = xsct.do(command) # needs gracefull fail state
-            command = f"mwr -force  0x40000034 0x0"
-            output = xsct.do(command) # needs gracefull fail state
-            print(command)
 
-def wr_reg(addr, val_in): 
-            
-            matrix_in_addr = "0x40000030"
+def _write_overlay_fc_reg():
+            enc = OVERLAY_BLOCK_DIV_ENCODE.get(_overlay_fc_state["block_div"], 0)
+            value = (1 if _overlay_fc_state["enabled"] else 0) | (enc << 1)
+            wr_reg(OVERLAY_GLOBAL_EN_REG, value)
 
-            matrix_in_shifted = 1 << (matrix_in)
-            # Read register value using XSCT
-            command = f"mwr -force  0x400000{addr} {hex(val_in)}"
-            print(command)
-            output = xsct.do(command) # needs gracefull fail state
 
+def configure_ca(
+            rule=30,
+            rule_xor_y=True,
+            rule_xor_x=False,
+            inject_xor_luma=False,
+            x_div=8,
+            y_div=8,
+    ):
+            """Program 1D CA @ 0x18: rule [7:0], inject^luma_msb [8], rule_xor_y [9],
+            rule_xor_x [10], y_div [13:12], x_div [15:14]. x_div/y_div: 1, 2, 4, or 8."""
+            if x_div not in CA_DIV_ENCODE or y_div not in CA_DIV_ENCODE:
+                raise ValueError("x_div and y_div must be one of 1, 2, 4, 8")
+            value = int(rule) & 0xFF
+            if inject_xor_luma:
+                value |= CA_CTRL_INJECT_XOR_LUMA
+            if rule_xor_y:
+                value |= CA_CTRL_RULE_XOR_Y
+            if rule_xor_x:
+                value |= CA_CTRL_RULE_XOR_X
+            value |= CA_DIV_ENCODE[x_div] << 14
+            value |= CA_DIV_ENCODE[y_div] << 12
+            wr_reg(CA_RULE_REG, value)
+
+
+def set_ca_rule(rule):
+            """Program the 1D CA Wolfram rule (0-255). Register @ 0x18 (not 0x100)."""
+            configure_ca(rule=rule, rule_xor_y=False)
+
+
+def set_audio_crossover(value):
+            """Set audio T/B crossover point (0=bass-heavy split .. 255=treble-heavy). @ 0x0C[7:0]."""
+            cur = rd_reg(AUDIO_CROSSOVER_REG)
+            if cur is None:
+                cur = 0x00001B80  # default: mid crossover, thresh step 3 (~50%)
+            wr_reg(AUDIO_CROSSOVER_REG, (int(cur) & ~0xFF) | (int(value) & 0xFF))
+
+
+def set_audio_digital_thresh(treble=3, bass=3):
+            """Set digital-side T/B trip thresholds (0..7 ≈ 12%..94%). @ 0x0C[13:11]/[10:8]."""
+            t = max(0, min(7, int(treble)))
+            b = max(0, min(7, int(bass)))
+            cur = rd_reg(AUDIO_CROSSOVER_REG)
+            if cur is None:
+                cur = 0x80
+            value = (int(cur) & 0xFF) | (b << 8) | (t << 11)
+            wr_reg(AUDIO_CROSSOVER_REG, value)
+
+
+def set_dirt(depth=0, y_en=False, u_en=False, v_en=False):
+            """Set YUV dirt: depth 0-3 LSB bits, per-channel enables. @ 0x198."""
+            value = (int(depth) & 0x3) | ((1 if y_en else 0) << 2) | ((1 if u_en else 0) << 3) | ((1 if v_en else 0) << 4)
+            wr_reg(DIRT_CTRL_REG, value)
+
+
+def set_overlay_global_enable(enabled=True):
+            _overlay_fc_state["enabled"] = bool(enabled)
+            _write_overlay_fc_reg()
+
+
+def set_overlay_block_div(div=1):
+            """Set overlay BRAM address blockiness: 1, 2, 4, 8, or 16."""
+            if div not in OVERLAY_BLOCK_DIV_ENCODE:
+                raise ValueError("block_div must be one of 1, 2, 4, 8, 16")
+            _overlay_fc_state["block_div"] = int(div)
+            _write_overlay_fc_reg()
+
+
+def _sprite_reg_addr(sprite_idx, word_offset):
+            return SPRITE_REG_BASE + sprite_idx * SPRITE_REG_STRIDE + word_offset
+
+
+def configure_sprite(sprite_idx, x, y, width, height, base, enable=True, tile_w=0, tile_h=0):
+            """Configure one overlay sprite descriptor (registers 0x100+).
+
+            width/height: on-screen coverage in pixels.
+            tile_w/tile_h: repeating BRAM pattern size (0 = legacy non-tiled, uses width/height).
+            """
+            if not 0 <= sprite_idx < 8:
+                raise ValueError(f"sprite_idx must be 0-7, got {sprite_idx}")
+            ctrl = (1 if enable else 0) | ((int(x) & 0x7FF) << 1) | ((int(y) & 0x7FF) << 12)
+            size = (int(width) & 0x7FF) | ((int(height) & 0x7FF) << 11)
+            atlas = (
+                (int(base) & 0x7FF)
+                | ((int(tile_w) & 0x7FF) << 11)
+                | ((int(tile_h) & 0x3FF) << 22)
+            )
+            wr_reg(_sprite_reg_addr(sprite_idx, 0), ctrl)
+            wr_reg(_sprite_reg_addr(sprite_idx, 4), size)
+            wr_reg(_sprite_reg_addr(sprite_idx, 8), atlas)
+
+
+def write_overlay_bram_word(word_addr, value):
+            """Write one 32-bit overlay pixel word. Bit31=opaque, [23:16]=B, [15:8]=G, [7:0]=R."""
+            word_addr = int(word_addr)
+            if word_addr < 0 or word_addr >= OVERLAY_BRAM_WORDS:
+                raise ValueError(
+                    f"overlay BRAM word {word_addr} out of range 0..{OVERLAY_BRAM_WORDS - 1}"
+                )
+            byte_addr = OVERLAY_BRAM_BYTE_BASE + word_addr * 4
+            wr_reg(byte_addr, int(value) & 0xFFFFFFFF)
+
+
+def fill_overlay_sprite(base, width, height, rgb=0x00FF00, opaque=True):
+            """Fill a contiguous BRAM atlas region with one RGB colour."""
+            base, width, height = int(base), int(width), int(height)
+            if base + width * height > OVERLAY_BRAM_WORDS:
+                raise ValueError(
+                    f"sprite needs {width * height} words at base {base}, "
+                    f"max {OVERLAY_BRAM_WORDS} words available"
+                )
+            pixel = (0x80000000 if opaque else 0x00000000) | (int(rgb) & 0x00FFFFFF)
+            for ly in range(height):
+                for lx in range(width):
+                    write_overlay_bram_word(base + ly * width + lx, pixel)
+
+
+def setup_test_overlay(sprite_idx=0, x=100, y=80, width=32, height=32, base=0, rgb=0x00FF00):
+            """Enable overlay, configure one solid sprite, and fill its atlas."""
+            fill_overlay_sprite(base, width, height, rgb=rgb, opaque=True)
+            configure_sprite(sprite_idx, x, y, width, height, base, enable=True)
+            set_overlay_global_enable(True)
+
+
+def fill_overlay_checkerboard(base, width, height):
+            """Fill atlas with an opaque red/cyan checkerboard."""
+            base, width, height = int(base), int(width), int(height)
+            if base + width * height > OVERLAY_BRAM_WORDS:
+                raise ValueError(
+                    f"checkerboard needs {width * height} words at base {base}, "
+                    f"max {OVERLAY_BRAM_WORDS} words available"
+                )
+            red  = 0x800000FF  # opaque, R=FF
+            cyan = 0x80FFFF00  # opaque, G=FF B=FF
+            for ly in range(height):
+                for lx in range(width):
+                    pixel = red if (lx + ly) % 2 == 0 else cyan
+                    write_overlay_bram_word(base + ly * width + lx, pixel)
+
+
+def fill_overlay_noise(base=0, width=32, height=32, seed=1, sparse=0.0):
+            """Fill a BRAM atlas region with pseudo-random opaque RGB noise.
+
+            base/width/height: word-addressed sprite atlas rectangle at buffer start.
+            seed: RNG seed for reproducible patterns.
+            sparse: 0.0 = every pixel opaque noise; higher values randomly leave pixels transparent.
+            """
+            base, width, height = int(base), int(width), int(height)
+            sparse = float(sparse)
+            if not 0.0 <= sparse < 1.0:
+                raise ValueError(f"sparse must be in [0.0, 1.0), got {sparse}")
+            if base + width * height > OVERLAY_BRAM_WORDS:
+                raise ValueError(
+                    f"noise fill needs {width * height} words at base {base}, "
+                    f"max {OVERLAY_BRAM_WORDS} words available"
+                )
+
+            rng = random.Random(seed)
+            print(
+                f"[overlay] Filling noise {width}x{height} at BRAM base {base} "
+                f"(seed={seed}, sparse={sparse})..."
+            )
+            for ly in range(height):
+                for lx in range(width):
+                    if sparse > 0.0 and rng.random() < sparse:
+                        pixel = 0x00000000
+                    else:
+                        r = rng.randint(0, 255)
+                        g = rng.randint(0, 255)
+                        b = rng.randint(0, 255)
+                        pixel = 0x80000000 | (b << 16) | (g << 8) | r
+                    write_overlay_bram_word(base + ly * width + lx, pixel)
+            print(f"[overlay] Wrote {width * height} noise words.")
+
+
+def test_overlay_visible(
+            sprite_idx=0,
+            screen_w=720,
+            screen_h=576,
+            tile_w=16,
+            tile_h=16,
+            x=0,
+            y=0,
+            base=0,
+    ):
+            """
+            Tile a small checkerboard pattern across the full screen.
+            Only tile_w * tile_h words are written to BRAM; hardware repeats the tile.
+            Requires FPGA build with overlay tile-repeat support.
+            """
+            print(
+                f"[overlay] Loading {tile_w}x{tile_h} tile, "
+                f"tiled across {screen_w}x{screen_h} screen..."
+            )
+            fill_overlay_checkerboard(base, tile_w, tile_h)
+
+            print(f"[overlay] Configuring sprite{sprite_idx} full-screen @ ({x},{y})...")
+            configure_sprite(
+                sprite_idx, x, y, screen_w, screen_h, base,
+                enable=True, tile_w=tile_w, tile_h=tile_h,
+            )
+
+            print("[overlay] Enabling global overlay...")
+            set_overlay_global_enable(True)
+
+            print(
+                f"[overlay] Done. Expect a {tile_w}x{tile_h} red/cyan checker "
+                f"repeated over the full {screen_w}x{screen_h} screen."
+            )
+
+
+def test_overlay_multi_sprites(block_div=8):
+            """Example with four visible sprites using separate BRAM atlas regions."""
+            print("[overlay] Loading multi-sprite demo atlases...")
+            fill_overlay_noise(base=0, width=32, height=32, seed=11)
+            fill_overlay_checkerboard(base=1024, width=16, height=16)
+            fill_overlay_sprite(base=1280, width=16, height=16, rgb=0x00FF00, opaque=True)
+            fill_overlay_noise(base=1536, width=16, height=16, seed=99, sparse=0.15)
+
+            sprites = [
+                # idx, x, y, w, h, base, tile_w, tile_h
+                (0, 20, 20, 220, 160, 0, 32, 32),
+                (1, 280, 80, 260, 180, 1024, 16, 16),
+                (2, 520, 300, 180, 140, 1280, 16, 16),
+                (3, 80, 380, 200, 160, 1536, 16, 16),
+            ]
+            for idx, x, y, w, h, base, tw, th in sprites:
+                print(f"[overlay] Sprite {idx} @ ({x},{y}) size {w}x{h}, base={base}")
+                configure_sprite(
+                    idx, x, y, w, h, base,
+                    enable=True, tile_w=tw, tile_h=th,
+                )
+
+            set_overlay_block_div(block_div)
+            set_overlay_global_enable(True)
+            print(
+                f"[overlay] Multi-sprite demo active "
+                f"(noise + checker + green + sparse noise, block_div={block_div})."
+            )
+
+
+def setup_ca_test_routing():
+            """Route inverters 0+1; CA inject = inv_out(0) XOR inv_out(1). CA out to luma."""
+            prog_digital_side_matrix('inv_in_0', 'xy_inv_out_0')
+            prog_digital_side_matrix('inv_in_1', 'xy_inv_out_2')
+            prog_digital_side_matrix(49, 'ca_out')
+            prog_digital_side_matrix(50, 'ca_out')
+            prog_digital_side_matrix(51, 'ca_out')
+
+
+def _run_ca_mode_test(mode_name, rule=30, dwell_sec=8, **ca_kwargs):
+            print(f"[ca] {mode_name}: rule={rule}, ctrl={ca_kwargs}")
+            setup_ca_test_routing()
+            configure_ca(rule=rule, **ca_kwargs)
+            print(f"[ca] Hold {dwell_sec}s...")
+            time.sleep(dwell_sec)
+
+
+def test_ca_mode_plain(rule=30, dwell_sec=8):
+            """CA baseline: fixed rule, no line/X modulation."""
+            _run_ca_mode_test(
+                "plain",
+                rule=rule,
+                dwell_sec=dwell_sec,
+                rule_xor_y=False,
+                rule_xor_x=False,
+            )
+
+
+def test_ca_mode_rule_xor_y(rule=30, dwell_sec=8):
+            """CA rule morphs per scanline (rule XOR Y)."""
+            _run_ca_mode_test(
+                "rule_xor_y",
+                rule=rule,
+                dwell_sec=dwell_sec,
+                rule_xor_y=True,
+                rule_xor_x=False,
+            )
+
+
+def test_ca_mode_rule_xor_x(rule=30, dwell_sec=8):
+            """CA rule morphs per pixel column (rule XOR X)."""
+            _run_ca_mode_test(
+                "rule_xor_x",
+                rule=rule,
+                dwell_sec=dwell_sec,
+                rule_xor_y=False,
+                rule_xor_x=True,
+            )
+
+
+def test_ca_mode_rule_xor_xy(rule=30, dwell_sec=8):
+            """CA rule morphs with both X and Y counters."""
+            _run_ca_mode_test(
+                "rule_xor_xy",
+                rule=rule,
+                dwell_sec=dwell_sec,
+                rule_xor_y=True,
+                rule_xor_x=True,
+            )
+
+
+def test_ca_all_modes(rule=30, dwell_sec=8):
+            """Step through CA rule-XOR modes."""
+            print(f"[ca] Running all modes (rule={rule}, {dwell_sec}s each)...")
+            test_ca_mode_plain(rule=rule, dwell_sec=dwell_sec)
+            test_ca_mode_rule_xor_y(rule=rule, dwell_sec=dwell_sec)
+            test_ca_mode_rule_xor_x(rule=rule, dwell_sec=dwell_sec)
+            test_ca_mode_rule_xor_xy(rule=rule, dwell_sec=dwell_sec)
+            print("[ca] All modes complete.")
 
 
 if __name__ == "__main__":
@@ -378,7 +703,7 @@ if __name__ == "__main__":
     wr_reg('78',int("2", 16)) #bypass colour encoder , dotn devide pix clk
 # 0x40000078 = 0x2 bypasses color
 
-    # rst_digital_side_matrix(pullup = True) 
+    rst_digital_side_matrix(pullup = True) 
    
     # rst_annaloge_side_matrix(16)
     # rst_annaloge_side_matrix(17)
@@ -402,15 +727,15 @@ if __name__ == "__main__":
     # test osc 1 
     # with vertical sync enabled only freqs of 1 or 0 work, may need to adjust the counter range for this sync
     
-    # Horixontal test
+    # # Horixontal test
     # wr_reg('68',int("40f000f0", 16)) #-- look at adding a way to de sync the second oscilaor
     # prog_annaloge_side_matrix(16,1) # routes osc1 sin to luma out
     
-    # # vertical test
+    # # # vertical test
     # wr_reg('68',int("80000000", 16)) #-- look at adding a way to de sync the second oscilaor
     # prog_annaloge_side_matrix(16,1) # routes osc1 sin to luma out
 
-    # unsynced test  running slow
+    # # unsynced test  running slow
     # wr_reg('68',int("100fffff", 16)) #-- look at adding a way to de sync the second oscilaor
     # prog_annaloge_side_matrix(16,1) # routes osc1 sin to luma out
 
@@ -644,7 +969,38 @@ if __name__ == "__main__":
     # prog_digital_side_matrix(55, "xy_inv_out_12")
     # prog_digital_side_matrix(54, "xy_inv_out_12")
 
+    ################################################################
+    ############ Overlay test — checkerboard sprite on screen
+    ################################################################
+    # Bypass colour encoder so overlay RGB shows directly (already set above via wr_reg('78', 2))
+    # test_overlay_visible(
+    #     sprite_idx=0,
+    #     screen_w=720,
+    #     screen_h=576,
+    #     tile_w=16,
+    #     tile_h=16,
+    #     x=0,
+    #     y=0,
+    #     base=0,
+    # )
 
+    ################################################################
+    ############ Overlay multi-sprite demo (4 visible sprites)
+    ################################################################
+    test_overlay_multi_sprites(block_div=8)
+
+    ################################################################
+    ############ 1D CA tests — inv_in_0 + inv_in_1 -> CA inject (XOR)
+    ################################################################
+    # Uncomment one block below (comment overlay test above if using CA).
+
+    # test_ca_mode_plain(rule=30, dwell_sec=10)
+    # test_ca_mode_rule_xor_y(rule=30, dwell_sec=10)
+    # test_ca_mode_rule_xor_x(rule=30, dwell_sec=10)
+    # test_ca_mode_rule_xor_xy(rule=30, dwell_sec=10)
+
+    # Or step through all modes automatically:
+    # test_ca_all_modes(rule=30, dwell_sec=10)
 
     print("Ending program...")
     xsct.close()

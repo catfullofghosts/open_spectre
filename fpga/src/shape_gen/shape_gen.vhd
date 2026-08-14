@@ -108,10 +108,16 @@ architecture Behavioral of shape_gen is
   attribute MARK_DEBUG of vert_seg : signal is "TRUE";
   attribute MARK_DEBUG of cutout : signal is "TRUE";
 
-  --mux function
+  --mux function (shape_bus is 16 bits: indices 0..15)
   function multi321 (A, B : in std_logic_vector) return std_logic is
+    variable idx : natural;
   begin
-    return A(to_integer(unsigned(B)));
+    idx := to_integer(unsigned(B));
+    if idx >= A'length then
+      return '0';
+    else
+      return A(idx);
+    end if;
   end multi321;
 
 begin
@@ -120,7 +126,7 @@ begin
   cy_pixel <= "0000" & pos_v;
   h_sync_n <= not h_sync;
   v_sync_n <= not v_sync;
-  rst_n <= not rst;
+  rst_n <= rst; -- incoming reset is already inverted so just change its name
 
   process (clk)
   begin
@@ -141,7 +147,7 @@ begin
     port map
     (
       px_clk => clk,
-      reset  => rst,
+      reset  => rst_n,
       -- center coordinate inputs
       cx_level => cx_pixel,
       cy_level => cy_pixel,
@@ -158,8 +164,8 @@ begin
     port map
     (
       i_clk        => clk,
-      i_rstb       => rst,
-      i_sync_reset => h_sync_n, -- is one when video is active 0 other wise that means that the ramp restarts at each line
+      i_rstb       => rst_n,
+      i_sync_reset => h_sync, -- is one when video is active 0 other wise that means that the ramp restarts at each line
       i_enable     => '1',
       i_repeat     => '1',
       i_fcw        => zoom_h(8 downto 0),
@@ -170,8 +176,8 @@ begin
     port map
     (
       i_clk        => clk,
-      i_rstb       => rst,
-      i_sync_reset => v_sync_n, -- is one when video is active 0 other wise that means that the ramp restarts at frame 
+      i_rstb       => rst_n,
+      i_sync_reset => v_sync, -- is one when video is active 0 other wise that means that the ramp restarts at frame 
       i_enable     => vramp_en,
       i_repeat     => '1',
       i_fcw        => zoom_v(8 downto 0),
@@ -187,7 +193,7 @@ begin
       q     => noise
     );
 
-  fizz    <= "0000000000" & noise(5 downto 0);
+  fizz    <= "000000" & noise(5 downto 0) & noise(2 downto 1) & noise(5) & noise(0); -- was "0000000000" & noise(5 downto 0), but the fizz was too small
   gear_x5 <= "000000000" & x_in(4) & "000000";
 
   -- lantern inputs scaled and mixed
@@ -198,13 +204,13 @@ begin
   slew_med : entity work.moving_average
     generic map(
       G_NBIT      => 16,
-      G_MAX_DELTA => 2 -- fine turne with actual x5
+      G_MAX_DELTA => 1 -- fine turne with actual x5, was a 2 but that might kill the shape too much
     )
     port map
     (
       i_clk        => clk,
-      i_rstb       => rst,
-      i_sync_reset => rst,
+      i_rstb       => rst_n,
+      i_sync_reset => rst_n,
       i_data_ena   => '1',
       i_data       => gear_x5,
       o_data_valid => open,
@@ -266,8 +272,8 @@ begin
         gear <= '0';
       end if;
 
-      --fizz
-      if (unsigned(circle_i) + unsigned(fizz) + unsigned(fizz_i)) > unsigned(distance) then
+      -- fizz: fizz_i scales noise amplitude (matrix / register), not circle radius
+      if (unsigned(circle_i) + shift_right(unsigned(fizz) * unsigned(fizz_i), 12)) > unsigned(distance) then
         frizz <= '1';
       else
         frizz <= '0';

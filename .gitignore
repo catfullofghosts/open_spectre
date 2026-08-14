@@ -1,0 +1,13 @@
+rebuild2/
+shape_test/
+z7_build_copu/
+vitis/
+individ_tests/
+
+# Vivado one-shot build artifacts / deps
+fpga/deps/
+fpga/syn/build/
+fpga/syn/vhdl_sources.tcl
+fpga/syn/*.jou
+fpga/syn/*.log
+fpga/syn/.Xil/

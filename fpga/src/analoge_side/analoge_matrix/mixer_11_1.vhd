@@ -1,3 +1,4 @@
+--VHDL2008
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -73,9 +74,11 @@ begin
 
       total_sum <= partial_sum;
 
-      -- Saturation to 12 bits
+      -- Clip to 12-bit unsigned range [0, 4095]
       if total_sum > to_unsigned(4095, 16) then
         mixed_reg <= std_logic_vector(to_unsigned(4095, 12));
+      elsif total_sum < to_unsigned(0, 16) then
+        mixed_reg <= (others => '0');
       else
         mixed_reg <= std_logic_vector(total_sum(11 downto 0));
       end if;

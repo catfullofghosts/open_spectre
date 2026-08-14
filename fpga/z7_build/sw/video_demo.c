@@ -36,6 +36,7 @@
 #include <stdlib.h>
 #include "xil_types.h"
 #include "xil_cache.h"
+#include "xil_io.h"
 #include "timer_ps/timer_ps.h"
 #include "xparameters.h"
 
@@ -47,53 +48,124 @@
  * These avoid linking the math library
  */
 
-/* Fast sine approximation using lookup table */
-static float fast_sin(float x)
+/*
+ * Trig LUT and fixed-point helpers.
+ * Phase format: 32-bit unsigned where 2^32 == 2*PI radians.
+ */
+#define SIN_LUT_BITS 10U
+#define SIN_LUT_SIZE (1U << SIN_LUT_BITS)
+#define SIN_LUT_MASK (SIN_LUT_SIZE - 1U)
+#define SIN_LUT_FRAC_BITS (32U - SIN_LUT_BITS)
+#define SIN_LUT_FRAC_MASK ((1U << SIN_LUT_FRAC_BITS) - 1U)
+#define PHASE_PI_2 0x40000000U
+#define PHASE_PER_RAD 683565280.0f
+
+static float g_sinLut[SIN_LUT_SIZE + 1U];
+static int g_sinLutInit = 0;
+
+/* Polynomial sine approximation used only during LUT generation. */
+static float fast_sin_poly(float x)
 {
-	// Normalize to [0, 2*PI]
 	const float PI = 3.14159265359f;
 	const float TWO_PI = 6.28318530718f;
-	
-	// Wrap to [0, 2*PI]
+	float x2, x3, x5, x7;
+
 	while (x < 0.0f) x += TWO_PI;
 	while (x >= TWO_PI) x -= TWO_PI;
-	
-	// Taylor series approximation: sin(x) ≈ x - x³/6 + x⁵/120 - x⁷/5040
-	float x2 = x * x;
-	float x3 = x2 * x;
-	float x5 = x3 * x2;
-	float x7 = x5 * x2;
-	
+
+	x2 = x * x;
+	x3 = x2 * x;
+	x5 = x3 * x2;
+	x7 = x5 * x2;
+
 	return x - (x3 / 6.0f) + (x5 / 120.0f) - (x7 / 5040.0f);
 }
 
-/* Fast cosine using sin(x + PI/2) */
-static float fast_cos(float x)
+static void InitSinLut(void)
 {
-	const float PI = 3.14159265359f;
-	return fast_sin(x + PI / 2.0f);
+	u32 i;
+	const float twoPiOverN = 6.28318530718f / (float)SIN_LUT_SIZE;
+	if (g_sinLutInit)
+	{
+		return;
+	}
+	for (i = 0U; i < SIN_LUT_SIZE; i++)
+	{
+		g_sinLut[i] = fast_sin_poly(twoPiOverN * (float)i);
+	}
+	g_sinLut[SIN_LUT_SIZE] = g_sinLut[0];
+	g_sinLutInit = 1;
 }
 
-/* Fast square root using Newton's method */
+static u32 rad_to_phase(float radians)
+{
+	return (u32)(radians * PHASE_PER_RAD);
+}
+
+static float fast_sin_phase(u32 phase)
+{
+	u32 idx;
+	u32 fracRaw;
+	float frac;
+	float a;
+	float b;
+
+	if (!g_sinLutInit)
+	{
+		InitSinLut();
+	}
+
+	idx = phase >> SIN_LUT_FRAC_BITS;
+	fracRaw = phase & SIN_LUT_FRAC_MASK;
+	frac = (float)fracRaw * (1.0f / (float)(1U << SIN_LUT_FRAC_BITS));
+	a = g_sinLut[idx & SIN_LUT_MASK];
+	b = g_sinLut[(idx + 1U) & SIN_LUT_MASK];
+	return a + (b - a) * frac;
+}
+
+/* Fast sine via LUT + linear interpolation. */
+static float fast_sin(float x)
+{
+	return fast_sin_phase(rad_to_phase(x));
+}
+
+/* Fast cosine via quarter-phase offset. */
+static float fast_cos(float x)
+{
+	return fast_sin_phase(rad_to_phase(x) + PHASE_PI_2);
+}
+
+/*
+ * Fast square root approximation.
+ * Uses inverse-sqrt bit hack + one Newton refinement:
+ *   sqrt(x) ~= x * inv_sqrt(x)
+ * This is significantly cheaper than iterative divide-based Newton sqrt
+ * and is good enough for visual pattern generation.
+ */
 static float fast_sqrt(float x)
 {
-	if (x < 0.0f) return 0.0f;
-	if (x == 0.0f) return 0.0f;
-	
-	// Initial guess
-	float result = x;
-	float prev = 0.0f;
-	
-	// Newton's method: x_{n+1} = (x_n + x/x_n) / 2
-	int iterations = 0;
-	while (result != prev && iterations < 10)
+	union
 	{
-		prev = result;
-		result = (result + x / result) * 0.5f;
-		iterations++;
+		float f;
+		u32 i;
+	} conv;
+	float xHalf;
+	float invSqrt;
+
+	if (x <= 0.0f)
+	{
+		return 0.0f;
 	}
-	
-	return result;
+
+	xHalf = 0.5f * x;
+	conv.f = x;
+	conv.i = 0x5f3759dfU - (conv.i >> 1); /* Initial invsqrt approximation */
+	invSqrt = conv.f;
+
+	/* One Newton-Raphson step for inverse sqrt. */
+	invSqrt = invSqrt * (1.5f - xHalf * invSqrt * invSqrt);
+
+	return x * invSqrt;
 }
 
 /* Fast atan2 approximation */
@@ -206,6 +278,22 @@ static float fast_log2(float x)
 #define SCU_TIMER_ID XPAR_SCUTIMER_BASEADDR
 #define UART_BASEADDR XPAR_XUARTPS_0_BASEADDR
 
+#if defined(XPAR_AXI_BRAM_CTRL_0_S_AXI_BASEADDR)
+#define REGS_BRAM_BASEADDR XPAR_AXI_BRAM_CTRL_0_S_AXI_BASEADDR
+#elif defined(XPAR_AXI_BRAM_CTRL_0_BASEADDR)
+#define REGS_BRAM_BASEADDR XPAR_AXI_BRAM_CTRL_0_BASEADDR
+#else
+#error "Overlay test requires AXI BRAM controller base address macro"
+#endif
+
+#define OVERLAY_BRAM_BYTE_BASE        0x00000400U
+#define OVERLAY_BRAM_WORDS            2048U
+#define OVERLAY_REG_GLOBAL_ENABLE     0x000000FCU
+#define OVERLAY_REG_SPRITE_BASE       0x00000100U
+#define OVERLAY_REG_SPRITE_STRIDE     0x00000010U
+#define VIDEO_CTRL_REG_OFFSET         0x00000078U
+#define VIDEO_CTRL_SYNC_INV_BIT       6U
+
 /* ------------------------------------------------------------ */
 /*				Global Variables								*/
 /* ------------------------------------------------------------ */
@@ -218,6 +306,19 @@ XAxiVdma vdma;
 VideoCapture videoCapt;
 INTC intc;
 char fRefresh; //flag used to trigger a refresh of the Menu on video detect
+
+static u32 g_overlayRandState = 0xC0DEC0DEU;
+
+static u32 DemoNextRandom(void);
+static void DemoOverlayWriteReg(u32 regOffset, u32 value);
+static u32 DemoOverlayReadReg(u32 regOffset);
+static void DemoOverlayWriteWord(u32 wordAddr, u32 value);
+static u32 DemoOverlayReadWord(u32 wordAddr);
+static void DemoOverlaySetSprite(u32 spriteIdx, u32 enable, u32 x, u32 y, u32 width, u32 height, u32 baseWord);
+static void DemoOverlayDisableAllSprites(void);
+static void DemoOverlayPatternTest(void);
+static void DemoSpriteRandomTest(u32 displayWidth, u32 displayHeight, u32 activeStartX, u32 activeStartY);
+static void DemoSetSyncPolarityInvert(u32 enableInvert);
 
 /*
  * Framebuffers for video data
@@ -352,8 +453,28 @@ void DemoRun()
 		/* Store the first character in the UART receive FIFO and echo it */
 		if (XUartPs_IsReceiveData(UART_BASEADDR))
 		{
+			char rxChar;
 			userInput = XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-			xil_printf("%c", userInput);
+
+			/* Ignore trailing CR/LF characters that some terminals append. */
+			while (XUartPs_IsReceiveData(UART_BASEADDR))
+			{
+				rxChar = (char)XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
+				if (rxChar != '\r' && rxChar != '\n')
+				{
+					userInput = rxChar;
+				}
+			}
+
+			if (userInput != '\r' && userInput != '\n')
+			{
+				xil_printf("%c", userInput);
+			}
+			else
+			{
+				/* Treat naked CR/LF as "refresh menu", not an invalid command. */
+				userInput = 'r';
+			}
 		}
 		else  //Refresh triggered by video detect interrupt
 		{
@@ -457,6 +578,19 @@ void DemoRun()
 		case 'I':
 			DemoEffectMenu();
 			break;
+		case 'j':
+		case 'J':
+			DemoOverlayPatternTest();
+			break;
+		case 'k':
+		case 'K':
+			DemoSpriteRandomTest(
+				dispCtrl.vMode.width,
+				dispCtrl.vMode.height,
+				dispCtrl.vMode.hmax - dispCtrl.vMode.hpe,
+				dispCtrl.vMode.vmax - dispCtrl.vMode.vpe
+			);
+			break;
 		case 'q':
 			break;
 		case 'r':
@@ -504,6 +638,8 @@ void DemoPrintMenu()
 	xil_printf("G - Lissajous Pattern (animated)\n\r");
 	xil_printf("H - Flow Field Pattern (animated)\n\r");
 	xil_printf("I - Apply Video Effects Menu\n\r");
+	xil_printf("J - Overlay VRAM Pattern Test (with transparency)\n\r");
+	xil_printf("K - Sprite VRAM Test (random position)\n\r");
 	xil_printf("q - Quit\n\r");
 	xil_printf("\n\r");
 	xil_printf("\n\r");
@@ -515,6 +651,9 @@ void DemoChangeRes()
 	int fResSet = 0;
 	int status;
 	char userInput = 0;
+	u32 waitCount;
+	int wasStreaming;
+	char rxChar;
 
 	/* Flush UART FIFO */
 	while (XUartPs_IsReceiveData(UART_BASEADDR))
@@ -526,46 +665,102 @@ void DemoChangeRes()
 	{
 		DemoCRMenu();
 
-		/* Wait for data on UART */
+		/*
+		 * Wait for data on UART, but never block forever.
+		 * If no input arrives for a while, return to main menu.
+		 */
+		waitCount = 0U;
 		while (!XUartPs_IsReceiveData(UART_BASEADDR))
-		{}
+		{
+			waitCount++;
+			if (waitCount > 80000000U)
+			{
+				xil_printf("\n\rResolution menu timeout, returning to main menu.\n\r");
+				return;
+			}
+		}
 
-		/* Store the first character in the UART recieve FIFO and echo it */
+		/* Read command and ignore terminal CR/LF noise. */
 		userInput = XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
+		while (XUartPs_IsReceiveData(UART_BASEADDR))
+		{
+			rxChar = (char)XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
+			if (rxChar != '\r' && rxChar != '\n')
+			{
+				userInput = rxChar;
+			}
+		}
+		if (userInput == '\r' || userInput == '\n')
+		{
+			continue;
+		}
 		xil_printf("%c", userInput);
+
 		status = XST_SUCCESS;
+		wasStreaming = (videoCapt.state == VIDEO_STREAMING);
 		switch (userInput)
 		{
 		case '1':
+			if (wasStreaming) VideoStop(&videoCapt);
 			status = DisplayStop(&dispCtrl);
-			DisplaySetMode(&dispCtrl, &VMODE_640x480);
-			DisplayStart(&dispCtrl);
-			fResSet = 1;
+			if (status == XST_SUCCESS) status = DisplaySetMode(&dispCtrl, &VMODE_640x480);
+			if (status == XST_SUCCESS) status = DisplayStart(&dispCtrl);
+			if (status == XST_SUCCESS)
+			{
+				DemoSetSyncPolarityInvert(0U);
+				fResSet = 1;
+			}
+			if (wasStreaming) VideoStart(&videoCapt);
 			break;
 		case '2':
+			if (wasStreaming) VideoStop(&videoCapt);
 			status = DisplayStop(&dispCtrl);
-			DisplaySetMode(&dispCtrl, &VMODE_800x600);
-			DisplayStart(&dispCtrl);
-			fResSet = 1;
+			if (status == XST_SUCCESS) status = DisplaySetMode(&dispCtrl, &VMODE_800x600);
+			if (status == XST_SUCCESS) status = DisplayStart(&dispCtrl);
+			if (status == XST_SUCCESS)
+			{
+				DemoSetSyncPolarityInvert(0U);
+				fResSet = 1;
+			}
+			if (wasStreaming) VideoStart(&videoCapt);
 			break;
 		case '3':
+			if (wasStreaming) VideoStop(&videoCapt);
 			status = DisplayStop(&dispCtrl);
-			DisplaySetMode(&dispCtrl, &VMODE_1280x720);
-			DisplayStart(&dispCtrl);
-			fResSet = 1;
+			if (status == XST_SUCCESS) status = DisplaySetMode(&dispCtrl, &VMODE_1280x720);
+			if (status == XST_SUCCESS) status = DisplayStart(&dispCtrl);
+			if (status == XST_SUCCESS)
+			{
+				DemoSetSyncPolarityInvert(1U);
+				fResSet = 1;
+			}
+			if (wasStreaming) VideoStart(&videoCapt);
 			break;
 		case '4':
+			if (wasStreaming) VideoStop(&videoCapt);
 			status = DisplayStop(&dispCtrl);
-			DisplaySetMode(&dispCtrl, &VMODE_1280x1024);
-			DisplayStart(&dispCtrl);
-			fResSet = 1;
+			if (status == XST_SUCCESS) status = DisplaySetMode(&dispCtrl, &VMODE_1280x1024);
+			if (status == XST_SUCCESS) status = DisplayStart(&dispCtrl);
+			if (status == XST_SUCCESS)
+			{
+				DemoSetSyncPolarityInvert(0U);
+				fResSet = 1;
+			}
+			if (wasStreaming) VideoStart(&videoCapt);
 			break;
 		case '5':
+			if (wasStreaming) VideoStop(&videoCapt);
 			status = DisplayStop(&dispCtrl);
-			DisplaySetMode(&dispCtrl, &VMODE_1920x1080);
-			DisplayStart(&dispCtrl);
-			fResSet = 1;
+			if (status == XST_SUCCESS) status = DisplaySetMode(&dispCtrl, &VMODE_1920x1080);
+			if (status == XST_SUCCESS) status = DisplayStart(&dispCtrl);
+			if (status == XST_SUCCESS)
+			{
+				DemoSetSyncPolarityInvert(0U);
+				fResSet = 1;
+			}
+			if (wasStreaming) VideoStart(&videoCapt);
 			break;
+		case 'Q':
 		case 'q':
 			fResSet = 1;
 			break;
@@ -576,6 +771,11 @@ void DemoChangeRes()
 		if (status == XST_DMA_ERROR)
 		{
 			xil_printf("\n\rWARNING: AXI VDMA Error detected and cleared\n\r");
+		}
+		else if (status != XST_SUCCESS)
+		{
+			xil_printf("\n\rResolution change failed, status=%d\n\r", status);
+			TimerDelay(500000);
 		}
 	}
 }
@@ -605,6 +805,7 @@ void DemoEffectMenu()
 {
 	int fEffectSet = 0;
 	char userInput = 0;
+	char rxChar;
 	int nextFrame;
 	u32 width, height;
 	u8 *srcFrame;
@@ -657,12 +858,22 @@ void DemoEffectMenu()
 			xil_printf("\n\r");
 		xil_printf("Select an effect:");
 
-		/* Wait for data on UART */
-		while (!XUartPs_IsReceiveData(UART_BASEADDR))
-		{}
+		/* Wait for and decode a non-CR/LF command character. */
+		do
+		{
+			while (!XUartPs_IsReceiveData(UART_BASEADDR))
+			{}
+			userInput = XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
+			while (XUartPs_IsReceiveData(UART_BASEADDR))
+			{
+				rxChar = (char)XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
+				if (rxChar != '\r' && rxChar != '\n')
+				{
+					userInput = rxChar;
+				}
+			}
+		} while (userInput == '\r' || userInput == '\n');
 
-		/* Store the first character in the UART receive FIFO and echo it */
-		userInput = XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
 		xil_printf("%c", userInput);
 		
 		// Check for quit first
@@ -1619,6 +1830,226 @@ void DemoISR(void *callBackRef, void *pVideo)
 	*data = 1; //set fRefresh to 1
 }
 
+static u32 DemoNextRandom(void)
+{
+	g_overlayRandState = g_overlayRandState * 1664525U + 1013904223U;
+	return g_overlayRandState;
+}
+
+static void DemoOverlayWriteReg(u32 regOffset, u32 value)
+{
+	Xil_Out32(REGS_BRAM_BASEADDR + regOffset, value);
+}
+
+static u32 DemoOverlayReadReg(u32 regOffset)
+{
+	return Xil_In32(REGS_BRAM_BASEADDR + regOffset);
+}
+
+static void DemoSetSyncPolarityInvert(u32 enableInvert)
+{
+	u32 regVal;
+	u32 bitMask;
+
+	bitMask = (1U << VIDEO_CTRL_SYNC_INV_BIT);
+	regVal = DemoOverlayReadReg(VIDEO_CTRL_REG_OFFSET);
+
+	if (enableInvert != 0U)
+	{
+		regVal |= bitMask;
+	}
+	else
+	{
+		regVal &= ~bitMask;
+	}
+
+	DemoOverlayWriteReg(VIDEO_CTRL_REG_OFFSET, regVal);
+}
+
+static void DemoOverlayWriteWord(u32 wordAddr, u32 value)
+{
+	Xil_Out32(REGS_BRAM_BASEADDR + OVERLAY_BRAM_BYTE_BASE + (wordAddr << 2), value);
+}
+
+static u32 DemoOverlayReadWord(u32 wordAddr)
+{
+	return Xil_In32(REGS_BRAM_BASEADDR + OVERLAY_BRAM_BYTE_BASE + (wordAddr << 2));
+}
+
+static void DemoOverlaySetSprite(u32 spriteIdx, u32 enable, u32 x, u32 y, u32 width, u32 height, u32 baseWord)
+{
+	u32 spriteBase;
+	u32 ctrlWord;
+	u32 sizeWord;
+	u32 baseAddrWord;
+
+	if (spriteIdx >= 8U)
+	{
+		return;
+	}
+
+	spriteBase = OVERLAY_REG_SPRITE_BASE + spriteIdx * OVERLAY_REG_SPRITE_STRIDE;
+	ctrlWord = ((y & 0x7FFU) << 12) | ((x & 0x7FFU) << 1) | (enable & 0x1U);
+	sizeWord = ((height & 0x7FFU) << 11) | (width & 0x7FFU);
+	baseAddrWord = (baseWord & 0x7FFU);
+
+	DemoOverlayWriteReg(spriteBase + 0x0U, ctrlWord);
+	DemoOverlayWriteReg(spriteBase + 0x4U, sizeWord);
+	DemoOverlayWriteReg(spriteBase + 0x8U, baseAddrWord);
+}
+
+static void DemoOverlayDisableAllSprites(void)
+{
+	u32 i;
+	for (i = 0; i < 8U; i++)
+	{
+		DemoOverlaySetSprite(i, 0U, 0U, 0U, 0U, 0U, 0U);
+	}
+}
+
+static void DemoOverlayPatternTest(void)
+{
+	u32 i;
+	u32 x;
+	u32 y;
+	u32 rgbaWord;
+	u32 readBackErrors = 0U;
+	u32 activeStartX;
+	u32 activeStartY;
+	u32 spriteX;
+	u32 spriteY;
+	const u32 patternWidth = 64U;
+	const u32 patternHeight = 16U;
+	const u32 patternWords = patternWidth * patternHeight; /* 1024 words */
+
+	if (patternWords > OVERLAY_BRAM_WORDS)
+	{
+		xil_printf("\n\rOverlay test pattern does not fit BRAM.\n\r");
+		return;
+	}
+
+	for (i = 0U; i < patternWords; i++)
+	{
+		x = i % patternWidth;
+		y = i / patternWidth;
+		/* Visible checker + transparent holes to test overlay keying path. */
+		if (((x + y) & 0x3U) == 0U)
+		{
+			rgbaWord = 0x00000000U; /* transparent */
+		}
+		else
+		{
+			u32 red = (x * 9U) & 0xFFU;
+			u32 green = (y * 15U + x * 3U) & 0xFFU;
+			u32 blue = ((x ^ y) * 19U) & 0xFFU;
+			rgbaWord = 0x80000000U | (blue << 16) | (green << 8) | red;
+		}
+		DemoOverlayWriteWord(i, rgbaWord);
+	}
+
+	/* Read a sparse subset back to validate CPU mux + BRAM write path. */
+	for (i = 0U; i < patternWords; i += 17U)
+	{
+		x = i % patternWidth;
+		y = i / patternWidth;
+		if (((x + y) & 0x3U) == 0U)
+		{
+			rgbaWord = 0x00000000U;
+		}
+		else
+		{
+			u32 red = (x * 9U) & 0xFFU;
+			u32 green = (y * 15U + x * 3U) & 0xFFU;
+			u32 blue = ((x ^ y) * 19U) & 0xFFU;
+			rgbaWord = 0x80000000U | (blue << 16) | (green << 8) | red;
+		}
+
+		if (DemoOverlayReadWord(i) != rgbaWord)
+		{
+			readBackErrors++;
+		}
+	}
+
+	DemoOverlayDisableAllSprites();
+	activeStartX = dispCtrl.vMode.hmax - dispCtrl.vMode.hpe;
+	activeStartY = dispCtrl.vMode.vmax - dispCtrl.vMode.vpe;
+	spriteX = activeStartX + 32U;
+	spriteY = activeStartY + 32U;
+	DemoOverlaySetSprite(0U, 1U, spriteX, spriteY, patternWidth, patternHeight, 0U);
+	DemoOverlayWriteReg(OVERLAY_REG_GLOBAL_ENABLE, 1U);
+
+	xil_printf("\n\rOverlay test loaded: sprite0=%dx%d @ (%d,%d), BRAM words=%d\n\r",
+	           (int)patternWidth, (int)patternHeight, (int)spriteX, (int)spriteY, (int)patternWords);
+	xil_printf("Overlay global enable=%d, readback errors=%d\n\r",
+	           (int)(DemoOverlayReadReg(OVERLAY_REG_GLOBAL_ENABLE) & 0x1U),
+	           (int)readBackErrors);
+}
+
+static void DemoSpriteRandomTest(u32 displayWidth, u32 displayHeight, u32 activeStartX, u32 activeStartY)
+{
+	u32 i;
+	u32 x;
+	u32 y;
+	u32 pixelWord;
+	u32 randX;
+	u32 randY;
+	const u32 spriteIdx = 1U;
+	const u32 spriteWidth = 32U;
+	const u32 spriteHeight = 16U;
+	const u32 spriteWords = spriteWidth * spriteHeight; /* 512 words */
+	const u32 spriteBaseWord = 1024U;                   /* after overlay test block */
+	u32 maxX;
+	u32 maxY;
+	u32 posX;
+	u32 posY;
+
+	if ((spriteBaseWord + spriteWords) > OVERLAY_BRAM_WORDS)
+	{
+		xil_printf("\n\rSprite test data does not fit overlay BRAM.\n\r");
+		return;
+	}
+
+	for (i = 0U; i < spriteWords; i++)
+	{
+		x = i % spriteWidth;
+		y = i / spriteWidth;
+
+		/* "Information" style sprite: border + row/column encoded intensity bars. */
+		if (x == 0U || y == 0U || x == (spriteWidth - 1U) || y == (spriteHeight - 1U))
+		{
+			pixelWord = 0x80FFFFFFU;
+		}
+		else if ((y & 0x3U) == 0U || (x & 0x7U) == 0U)
+		{
+			u32 red = (x * 6U) & 0xFFU;
+			u32 green = (y * 14U) & 0xFFU;
+			u32 blue = ((x + y) * 10U) & 0xFFU;
+			pixelWord = 0x80000000U | (blue << 16) | (green << 8) | red;
+		}
+		else
+		{
+			pixelWord = 0x00000000U; /* transparent interior gaps */
+		}
+
+		DemoOverlayWriteWord(spriteBaseWord + i, pixelWord);
+	}
+
+	randX = DemoNextRandom();
+	randY = DemoNextRandom();
+	maxX = (displayWidth > spriteWidth) ? (displayWidth - spriteWidth) : 0U;
+	maxY = (displayHeight > spriteHeight) ? (displayHeight - spriteHeight) : 0U;
+	posX = activeStartX + ((maxX > 0U) ? (randX % (maxX + 1U)) : 0U);
+	posY = activeStartY + ((maxY > 0U) ? (randY % (maxY + 1U)) : 0U);
+
+	/* Keep overlay enabled and move/update sprite slot every run. */
+	DemoOverlayWriteReg(OVERLAY_REG_GLOBAL_ENABLE, 1U);
+	DemoOverlaySetSprite(spriteIdx, 1U, posX, posY, spriteWidth, spriteHeight, spriteBaseWord);
+
+	xil_printf("\n\rSprite test loaded: sprite%d=%dx%d @ (%d,%d), baseWord=%d\n\r",
+	           (int)spriteIdx, (int)spriteWidth, (int)spriteHeight, (int)posX, (int)posY, (int)spriteBaseWord);
+	xil_printf("Active window starts near (%d,%d)\n\r", (int)activeStartX, (int)activeStartY);
+}
+
 
 /*
  * Plasma Pattern - Monochrome wave pattern that evolves over time
@@ -1628,41 +2059,45 @@ void DemoPlasmaPattern(u8 *frame, u32 width, u32 height, u32 stride, float time)
 {
 	u32 xcoi, ycoi;
 	u32 iPixelAddr;
-	u8 monochrome;
-	double x, y;
-	double value;
-	double centerX = width / 2.0;
-	double centerY = height / 2.0;
+	float centerX = (float)width * 0.5f;
+	float centerY = (float)height * 0.5f;
+	const u32 phaseStepX16 = rad_to_phase(1.0f / 16.0f);
+	const u32 phaseStepY12 = rad_to_phase(1.0f / 12.0f);
+	const u32 phaseStepXY14 = rad_to_phase(1.0f / 14.0f);
+	const u32 phaseTime1 = rad_to_phase(time * 20.0f / 16.0f);
+	const u32 phaseTime2 = rad_to_phase(time * 15.0f / 12.0f);
+	const u32 phaseTime3 = rad_to_phase(time * 10.0f / 14.0f);
+	const u32 phaseTime4 = rad_to_phase(time * 25.0f);
 	
 	for(ycoi = 0; ycoi < height; ycoi++)
 	{
-		y = (double)ycoi;
+		u32 phaseX1 = phaseTime1;
+		u32 phaseY2 = phaseTime2 + ycoi * phaseStepY12;
+		u32 phaseXY = phaseTime3 + ycoi * phaseStepXY14;
+		float waveY = fast_sin_phase(phaseY2);
+		float dy = (float)ycoi - centerY;
 		iPixelAddr = ycoi * stride;
 		
 		for(xcoi = 0; xcoi < width; xcoi++)
 		{
-			x = (double)xcoi;
-			
-			// Create multiple sine waves with different frequencies and phases
-			value = fast_sin((x + time * 20.0f) / 16.0f) +
-					fast_sin((y + time * 15.0f) / 12.0f) +
-					fast_sin((x + y + time * 10.0f) / 14.0f) +
-					fast_sin(fast_sqrt((x - centerX) * (x - centerX) + (y - centerY) * (y - centerY)) / 8.0f + time * 25.0f);
-			
-			// Normalize to 0-1 range
-			value = (value + 4.0) / 8.0;
-			
-			// Clamp and convert to monochrome (0-255)
-			if (value < 0.0) value = 0.0;
-			if (value > 1.0) value = 1.0;
-			monochrome = (u8)(value * 255.0);
-			
-			// Write monochrome value to all RGB channels
+			float dx = (float)xcoi - centerX;
+			float radialPhase = fast_sqrt(dx * dx + dy * dy) * 0.125f; /* /8 */
+			float waveR = fast_sin_phase(phaseTime4 + rad_to_phase(radialPhase));
+			float value = fast_sin_phase(phaseX1) + waveY + fast_sin_phase(phaseXY) + waveR;
+			int mono = (int)((value + 4.0f) * (255.0f / 8.0f));
+			u8 monochrome;
+
+			mono = (mono < 0) ? 0 : mono;
+			mono = (mono > 255) ? 255 : mono;
+			monochrome = (u8)mono;
+
 			frame[iPixelAddr] = monochrome;
 			frame[iPixelAddr + 1] = monochrome;
 			frame[iPixelAddr + 2] = monochrome;
 			
 			iPixelAddr += 3;
+			phaseX1 += phaseStepX16;
+			phaseXY += phaseStepXY14;
 		}
 	}
 	
@@ -1728,104 +2163,81 @@ void DemoRipplePattern(u8 *frame, u32 width, u32 height, u32 stride, float time)
 	u32 xcoi, ycoi;
 	u32 iPixelAddr;
 	u8 monochrome;
-	double cx, cy;  // Complex plane coordinates
-	double zx, zy;  // Iteration variables
-	double zx2, zy2; // Squared values for optimization
+	float cx, cy;   /* Complex plane coordinates */
+	float zx, zy;   /* Iteration variables */
+	float zx2, zy2; /* Squared values for optimization */
 	u32 iterations;
 	u32 maxIterations = 50;
-	double value;
+	float value;
 	
-	// Pre-calculate inverses to avoid divisions in loops
-	double invWidth = 1.0 / (double)width;
-	double invHeight = 1.0 / (double)height;
-	double invMaxIter = 1.0 / (double)maxIterations;
+	/* Pre-calculate inverses to avoid divisions in loops */
+	float invWidth = 1.0f / (float)width;
+	float invHeight = 1.0f / (float)height;
+	float invMaxIter = 1.0f / (float)maxIterations;
 	
-	// Evolve view: zoom in/out and pan around
-	double zoom = 0.5 + 0.3 * fast_sin(time * 0.05f);  // Zoom oscillates
-	double centerX = -0.5 + 0.3 * fast_sin(time * 0.03f);  // Pan X
-	double centerY = 0.0 + 0.2 * fast_cos(time * 0.04f);   // Pan Y
+	/* Evolve view: zoom in/out and pan around */
+	float zoom = 0.5f + 0.3f * fast_sin(time * 0.05f);
+	float centerX = -0.5f + 0.3f * fast_sin(time * 0.03f);
+	float centerY = 0.0f + 0.2f * fast_cos(time * 0.04f);
 	
-	// Calculate scale based on zoom
-	double scale = 2.5 / zoom;
-	double offsetX = centerX;
-	double offsetY = centerY;
+	float scale = 2.5f / zoom;
+	float offsetX = centerX;
+	float offsetY = centerY;
 	
-	// Pre-calculate Y scaling factor
-	double yScale = scale * invHeight;
-	double yOffset = (offsetY - 0.5 * scale);
+	float yScale = scale * invHeight;
+	float yOffset = (offsetY - 0.5f * scale);
+	float xScale = scale * invWidth;
+	float xOffset = (offsetX - 0.5f * scale);
 	
 	for(ycoi = 0; ycoi < height; ycoi++)
 	{
 		iPixelAddr = ycoi * stride;
-		
-		// Map pixel Y to complex plane (pre-calculated)
-		cy = (double)ycoi * yScale + yOffset;
-		
-		// Pre-calculate X scaling factor for this row
-		double xScale = scale * invWidth;
-		double xOffset = (offsetX - 0.5 * scale);
+		cy = (float)ycoi * yScale + yOffset;
+		cx = xOffset;
 		
 		for(xcoi = 0; xcoi < width; xcoi++)
 		{
-			// Map pixel X to complex plane (optimized)
-			cx = (double)xcoi * xScale + xOffset;
-			
-			// Mandelbrot iteration: z = z^2 + c
-			zx = 0.0;
-			zy = 0.0;
+			zx = 0.0f;
+			zy = 0.0f;
 			iterations = 0;
 			
-			// Iterate until escape or max iterations
 			while (iterations < maxIterations)
 			{
 				zx2 = zx * zx;
 				zy2 = zy * zy;
-				
-				// Check if escaped (|z| > 2)
-				if (zx2 + zy2 > 4.0)
+				if (zx2 + zy2 > 4.0f)
 					break;
-				
-				// z = z^2 + c
-				zy = 2.0 * zx * zy + cy;
+				zy = 2.0f * zx * zy + cy;
 				zx = zx2 - zy2 + cx;
-				
 				iterations++;
 			}
 			
-			// Smooth coloring based on iterations
 			if (iterations >= maxIterations)
 			{
-				// Inside set - black
-				value = 0.0;
+				value = 0.0f;
 			}
 			else
+			{
+				float dist = zx * zx + zy * zy;
+				if (dist > 4.0f && dist < 100.0f)
 				{
-					// Smooth escape time coloring using distance estimate
-					double dist = zx * zx + zy * zy;
-					if (dist > 4.0 && dist < 100.0)
-					{
-						// Use log-based smoothing for better gradients
-						double smoothIter = (double)iterations + 1.0 - fast_log2(fast_log2(dist));
-						if (smoothIter < 0.0) smoothIter = 0.0;
-						value = smoothIter * invMaxIter;
-					}
-					else
-					{
-						// Fallback to simple iteration count (optimized)
-						value = (double)iterations * invMaxIter;
-					}
-					if (value > 1.0) value = 1.0;
+					float smoothIter = (float)iterations + 1.0f - fast_log2(fast_log2(dist));
+					smoothIter = (smoothIter < 0.0f) ? 0.0f : smoothIter;
+					value = smoothIter * invMaxIter;
 				}
-			
-			// Convert to monochrome (0-255)
+				else
+				{
+					value = (float)iterations * invMaxIter;
+				}
+				value = (value > 1.0f) ? 1.0f : value;
+			}
+
 			monochrome = (u8)(value * 255.0);
-			
-			// Write monochrome value to all RGB channels
 			frame[iPixelAddr] = monochrome;
 			frame[iPixelAddr + 1] = monochrome;
 			frame[iPixelAddr + 2] = monochrome;
-			
 			iPixelAddr += 3;
+			cx += xScale;
 		}
 	}
 	
@@ -1839,40 +2251,41 @@ void DemoWavePattern(u8 *frame, u32 width, u32 height, u32 stride, float time)
 {
 	u32 xcoi, ycoi;
 	u32 iPixelAddr;
-	u8 monochrome;
-	double x, y;
-	double wave1, wave2, wave3;
-	double combined;
-	
+	u32 phaseX1, phaseY2, phaseXY;
+	const u32 phaseStepX1 = rad_to_phase(0.1f);
+	const u32 phaseStepY2 = rad_to_phase(0.1f);
+	const u32 phaseStepXY = rad_to_phase(0.07f);
+	const u32 phaseTime1 = rad_to_phase(time * 20.0f);
+	const u32 phaseTime2 = rad_to_phase(time * 15.0f);
+	const u32 phaseTime3 = rad_to_phase(time * 25.0f);
+
 	for(ycoi = 0; ycoi < height; ycoi++)
 	{
-		y = (double)ycoi;
+		float wave2;
 		iPixelAddr = ycoi * stride;
-		
+		phaseX1 = phaseTime1;
+		phaseY2 = phaseTime2 + (u32)ycoi * phaseStepY2;
+		phaseXY = phaseTime3 + (u32)ycoi * phaseStepXY;
+		wave2 = fast_sin_phase(phaseY2);
+
 		for(xcoi = 0; xcoi < width; xcoi++)
 		{
-			x = (double)xcoi;
-			
-			// Create multiple waves with different directions and frequencies
-			wave1 = fast_sin((x * 0.1f) + (time * 20.0f));
-			wave2 = fast_sin((y * 0.1f) + (time * 15.0f));
-			wave3 = fast_sin(((x + y) * 0.07f) + (time * 25.0f));
-			
-			// Combine waves to create interference pattern
-			combined = (wave1 + wave2 + wave3) / 3.0;
-			combined = (combined + 1.0) / 2.0; // Normalize to 0-1
-			
-			// Clamp and convert to monochrome (0-255)
-			if (combined < 0.0) combined = 0.0;
-			if (combined > 1.0) combined = 1.0;
-			monochrome = (u8)(combined * 255.0);
-			
-			// Write monochrome value to all RGB channels
+			float wave1 = fast_sin_phase(phaseX1);
+			float wave3 = fast_sin_phase(phaseXY);
+			int mono = (int)((wave1 + wave2 + wave3 + 3.0f) * (255.0f / 6.0f));
+			u8 monochrome;
+
+			mono = (mono < 0) ? 0 : mono;
+			mono = (mono > 255) ? 255 : mono;
+			monochrome = (u8)mono;
+
 			frame[iPixelAddr] = monochrome;
 			frame[iPixelAddr + 1] = monochrome;
 			frame[iPixelAddr + 2] = monochrome;
-			
+
 			iPixelAddr += 3;
+			phaseX1 += phaseStepX1;
+			phaseXY += phaseStepXY;
 		}
 	}
 	
@@ -1887,101 +2300,81 @@ void DemoGradientPattern(u8 *frame, u32 width, u32 height, u32 stride, float tim
 	u32 xcoi, ycoi;
 	u32 iPixelAddr;
 	u8 monochrome;
-	double zx, zy;  // Iteration variables
-	double zx2, zy2; // Squared values for optimization
+	float zx, zy;   /* Iteration variables */
+	float zx2, zy2; /* Squared values for optimization */
 	u32 iterations;
 	u32 maxIterations = 50;
-	double value;
+	float value;
 	
-	// Pre-calculate inverses to avoid divisions in loops
-	double invWidth = 1.0 / (double)width;
-	double invHeight = 1.0 / (double)height;
-	double invMaxIter = 1.0 / (double)maxIterations;
+	float invWidth = 1.0f / (float)width;
+	float invHeight = 1.0f / (float)height;
+	float invMaxIter = 1.0f / (float)maxIterations;
 	
-	// Evolve Julia constant c over time (creates morphing patterns)
-	double cReal = 0.7885 * fast_cos(time * 0.1f);  // Real part oscillates
-	double cImag = 0.7885 * fast_sin(time * 0.1f);  // Imaginary part oscillates
+	float cReal = 0.7885f * fast_cos(time * 0.1f);
+	float cImag = 0.7885f * fast_sin(time * 0.1f);
 	
-	// Fixed view window for Julia set
-	double scale = 3.0;
-	double offsetX = 0.0;
-	double offsetY = 0.0;
+	float scale = 3.0f;
+	float offsetX = 0.0f;
+	float offsetY = 0.0f;
 	
-	// Pre-calculate Y scaling factors
-	double yScale = scale * invHeight;
-	double yOffset = (offsetY - 0.5 * scale);
+	float yScale = scale * invHeight;
+	float yOffset = (offsetY - 0.5f * scale);
 	
-	// Pre-calculate X scaling factors
-	double xScale = scale * invWidth;
-	double xOffset = (offsetX - 0.5 * scale);
+	float xScale = scale * invWidth;
+	float xOffset = (offsetX - 0.5f * scale);
 	
 	for(ycoi = 0; ycoi < height; ycoi++)
 	{
+		float zxStart = xOffset;
+		float zyStart = (float)ycoi * yScale + yOffset;
 		iPixelAddr = ycoi * stride;
-		
-		// Map pixel Y to complex plane (optimized)
-		zy = (double)ycoi * yScale + yOffset;
 		
 		for(xcoi = 0; xcoi < width; xcoi++)
 		{
-			// Map pixel X to complex plane (optimized)
-			zx = (double)xcoi * xScale + xOffset;
-			
-			// Julia iteration: z = z^2 + c (c is constant, z starts at pixel)
+			zx = zxStart;
+			zy = zyStart;
 			iterations = 0;
 			
-			// Iterate until escape or max iterations
 			while (iterations < maxIterations)
 			{
 				zx2 = zx * zx;
 				zy2 = zy * zy;
-				
-				// Check if escaped (|z| > 2)
-				if (zx2 + zy2 > 4.0)
+				if (zx2 + zy2 > 4.0f)
 					break;
-				
-				// z = z^2 + c
-				double temp = zx2 - zy2 + cReal;
-				zy = 2.0 * zx * zy + cImag;
-				zx = temp;
-				
+				{
+					float temp = zx2 - zy2 + cReal;
+					zy = 2.0f * zx * zy + cImag;
+					zx = temp;
+				}
 				iterations++;
 			}
 			
-			// Smooth coloring based on iterations
 			if (iterations >= maxIterations)
 			{
-				// Inside set - black
-				value = 0.0;
+				value = 0.0f;
 			}
 			else
+			{
+				float dist = zx * zx + zy * zy;
+				if (dist > 4.0f && dist < 100.0f)
 				{
-					// Smooth escape time coloring using distance estimate
-					double dist = zx * zx + zy * zy;
-					if (dist > 4.0 && dist < 100.0)
-					{
-						// Use log-based smoothing for better gradients
-						double smoothIter = (double)iterations + 1.0 - fast_log2(fast_log2(dist));
-						if (smoothIter < 0.0) smoothIter = 0.0;
-						value = smoothIter * invMaxIter;
-					}
-					else
-					{
-						// Fallback to simple iteration count (optimized)
-						value = (double)iterations * invMaxIter;
-					}
-					if (value > 1.0) value = 1.0;
+					float smoothIter = (float)iterations + 1.0f - fast_log2(fast_log2(dist));
+					smoothIter = (smoothIter < 0.0f) ? 0.0f : smoothIter;
+					value = smoothIter * invMaxIter;
 				}
-			
-			// Convert to monochrome (0-255)
+				else
+				{
+					value = (float)iterations * invMaxIter;
+				}
+				value = (value > 1.0f) ? 1.0f : value;
+			}
+
 			monochrome = (u8)(value * 255.0);
-			
-			// Write monochrome value to all RGB channels
 			frame[iPixelAddr] = monochrome;
 			frame[iPixelAddr + 1] = monochrome;
 			frame[iPixelAddr + 2] = monochrome;
-			
 			iPixelAddr += 3;
+			zxStart += xScale;
 		}
 	}
 	
@@ -1996,46 +2389,37 @@ void DemoMoirePattern(u8 *frame, u32 width, u32 height, u32 stride, float time)
 {
 	u32 xcoi, ycoi;
 	u32 iPixelAddr;
-	u8 monochrome;
-	double x, y;
-	double grid1, grid2, grid3;
-	double combined;
-	double centerX = width / 2.0;
-	double centerY = height / 2.0;
-	double dx, dy;
+	float centerX = (float)width * 0.5f;
+	float centerY = (float)height * 0.5f;
+	const float angle = time * 0.05f;
+	const float cosA = fast_cos(angle);
+	const float sinA = fast_sin(angle);
+	const u32 phaseStepX = rad_to_phase(0.08f);
+	const u32 phaseStepY = rad_to_phase(0.08f);
+	const u32 phaseTime1 = rad_to_phase(time * 12.0f);
+	const u32 phaseTime2 = rad_to_phase(time * 10.0f);
+	const u32 phaseTime3 = rad_to_phase(time * 8.0f);
 	
 	for(ycoi = 0; ycoi < height; ycoi++)
 	{
-		y = (double)ycoi;
+		float dy = (float)ycoi - centerY;
+		float rotX = (-centerX) * cosA - dy * sinA;
+		float rotY = (-centerX) * sinA + dy * cosA;
+		u32 phaseX = phaseTime2;
+		u32 phaseY = phaseTime1 + ycoi * phaseStepY;
+		float grid1 = fast_sin_phase(phaseY);
 		iPixelAddr = ycoi * stride;
 		
 		for(xcoi = 0; xcoi < width; xcoi++)
 		{
-			x = (double)xcoi;
-			dx = x - centerX;
-			dy = y - centerY;
-			
-			// Create overlapping grids with different orientations and frequencies
-			// Grid 1: Horizontal lines with slow rotation
-			grid1 = fast_sin((y * 0.08f) + (time * 12.0f));
-			
-			// Grid 2: Vertical lines with slow rotation
-			grid2 = fast_sin((x * 0.08f) + (time * 10.0f));
-			
-			// Grid 3: Diagonal grid with rotation
-			double angle = time * 0.05f;
-			double rotX = dx * fast_cos(angle) - dy * fast_sin(angle);
-			double rotY = dx * fast_sin(angle) + dy * fast_cos(angle);
-			grid3 = fast_sin((rotX + rotY) * 0.06f + time * 8.0f);
-			
-			// Combine grids to create moiré interference
-			combined = (grid1 + grid2 + grid3) / 3.0;
-			combined = (combined + 1.0) / 2.0; // Normalize to 0-1
-			
-			// Clamp and convert to monochrome (0-255)
-			if (combined < 0.0) combined = 0.0;
-			if (combined > 1.0) combined = 1.0;
-			monochrome = (u8)(combined * 255.0);
+			float grid2 = fast_sin_phase(phaseX);
+			float grid3 = fast_sin_phase(rad_to_phase((rotX + rotY) * 0.06f) + phaseTime3);
+			int mono = (int)((grid1 + grid2 + grid3 + 3.0f) * (255.0f / 6.0f));
+			u8 monochrome;
+
+			mono = (mono < 0) ? 0 : mono;
+			mono = (mono > 255) ? 255 : mono;
+			monochrome = (u8)mono;
 			
 			// Write monochrome value to all RGB channels
 			frame[iPixelAddr] = monochrome;
@@ -2043,6 +2427,9 @@ void DemoMoirePattern(u8 *frame, u32 width, u32 height, u32 stride, float time)
 			frame[iPixelAddr + 2] = monochrome;
 			
 			iPixelAddr += 3;
+			phaseX += phaseStepX;
+			rotX += cosA;
+			rotY += sinA;
 		}
 	}
 	
@@ -2813,6 +3200,10 @@ void Demo3DPlaneEffect(u8 *srcFrame, u8 *destFrame, u32 width, u32 height, u32 s
 	// Center point
 	float centerX = (float)width * 0.5f;
 	float centerY = (float)height * 0.5f;
+	float invCenterX = 1.0f / centerX;
+	float invCenterY = 1.0f / centerY;
+	float maxX = (float)(width - 1U);
+	float maxY = (float)(height - 1U);
 	
 	// Perspective distance (viewer distance from plane)
 	// Controls how much perspective effect - smaller = more dramatic
@@ -2821,17 +3212,15 @@ void Demo3DPlaneEffect(u8 *srcFrame, u8 *destFrame, u32 width, u32 height, u32 s
 	// For inverse mapping: for each destination pixel, find which source pixel maps to it
 	for(ycoi = 0; ycoi < height; ycoi++)
 	{
+		float screenY = ((float)ycoi - centerY) * invCenterY;
+		float screenX = (-centerX) * invCenterX;
 		destAddr = ycoi * stride;
 		
 		for(xcoi = 0; xcoi < width; xcoi++)
 		{
-			// Destination pixel in normalized coordinates (-1 to 1)
-			float screenX = ((float)xcoi - centerX) / centerX;
-			float screenY = ((float)ycoi - centerY) / centerY;
-			
 			// Apply inverse scaling
-			screenX /= scale;
-			screenY /= scale;
+			float scaledX = screenX / scale;
+			float scaledY = screenY / scale;
 			
 			// For a plane rotating in 3D space:
 			// The source image is a plane at Z=0
@@ -2841,8 +3230,8 @@ void Demo3DPlaneEffect(u8 *srcFrame, u8 *destFrame, u32 width, u32 height, u32 s
 			
 			// Use iterative method to solve for source coordinates
 			// Start with screen coordinates as initial guess
-			float srcNX = screenX;
-			float srcNY = screenY;
+			float srcNX = scaledX;
+			float srcNY = scaledY;
 			
 			// Iterate to find the correct source coordinates
 			// Usually converges in 2-3 iterations, reduced to 3 for performance
@@ -2873,8 +3262,8 @@ void Demo3DPlaneEffect(u8 *srcFrame, u8 *destFrame, u32 width, u32 height, u32 s
 				float projY = py * perspFactor;
 				
 				// Calculate error
-				float errX = screenX - projX;
-				float errY = screenY - projY;
+				float errX = scaledX - projX;
+				float errY = scaledY - projY;
 				
 				// Adjust source coordinates based on error
 				// Approximate inverse by scaling error by inverse of derivative
@@ -2887,8 +3276,6 @@ void Demo3DPlaneEffect(u8 *srcFrame, u8 *destFrame, u32 width, u32 height, u32 s
 			srcY = srcNY * centerY + centerY + offsetY;
 			
 			// Clamp to source bounds (optimized)
-			float maxX = (float)(width - 1);
-			float maxY = (float)(height - 1);
 			if (srcX < 0.0f) srcX = 0.0f;
 			else if (srcX > maxX) srcX = maxX;
 			if (srcY < 0.0f) srcY = 0.0f;
@@ -2910,6 +3297,7 @@ void Demo3DPlaneEffect(u8 *srcFrame, u8 *destFrame, u32 width, u32 height, u32 s
 			// If out of bounds, pixel remains cleared (black)
 			
 			destAddr += 3;
+			screenX += invCenterX;
 		}
 	}
 	
