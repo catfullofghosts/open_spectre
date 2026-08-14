@@ -18,6 +18,9 @@ The aim of this project is to preserve this rare and unique video synth by recre
 For more info on this process, take a look at: 
 [Cloning Hardware Ethos](documentation/Cloning%20a%20process%20not%20a%20device.md)
 
+### FPGA build
+- [How to build with Vivado 2024.2 / `build.bat`](fpga/readme.md)
+
 ### 🍣Want to Contribute?🍣
 Amazing! If you have FPGA and or Verilog/VHDL skills, we would love to have you involved. But first, there are a few things you should know. 
 #### What to do first
