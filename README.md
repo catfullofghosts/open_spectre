@@ -81,3 +81,8 @@ We are very thankful to have received donations from the following people:
 Chris Korvin,
 Jay Hotchin,
 Milton Grimshaw, and more amazing anonymous people.
+
+## Thank yous
+- Violet Shylet
+- MESS Melbourne
+- Flo Kaufmann
