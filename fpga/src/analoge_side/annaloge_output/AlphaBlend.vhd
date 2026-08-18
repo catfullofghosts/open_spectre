@@ -18,7 +18,12 @@ use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.numeric_std.ALL;
 
 entity AlphaBlend is
-    Port ( 
+    generic (
+      -- false: unipolar video [0, 4095]. true: signed analog [-2048, 2047],
+      -- blending toward 0 (centre) rather than black.
+      G_SIGNED : boolean := false
+    );
+    Port (
             clk : in std_logic;
             signal1 : in STD_LOGIC_VECTOR(11 downto 0);
            signal2 : in STD_LOGIC_VECTOR(11 downto 0);
@@ -28,7 +33,9 @@ end AlphaBlend;
 
 architecture Behavioral of AlphaBlend is
 
-  constant c_max : integer := 4095;
+  constant c_max        : integer := 4095;
+  constant c_signed_max : integer := 2047;
+  constant c_signed_min : integer := -2048;
 
   -- signal1 is delayed in step with diff/mult/shift so the final add uses
   -- the same sample that produced shift_result (fixes edge artifacts).
@@ -59,7 +66,11 @@ begin
       -- Stage 2: diff, advance signal1/alpha delay line
       s1_d2 <= s1_d1;
       a_d2  <= a_d1;
-      diff_d2 <= resize(signed('0' & s2_d1), 13) - resize(signed('0' & s1_d1), 13);
+      if G_SIGNED then
+        diff_d2 <= resize(signed(s2_d1), 13) - resize(signed(s1_d1), 13);
+      else
+        diff_d2 <= resize(signed('0' & s2_d1), 13) - resize(signed('0' & s1_d1), 13);
+      end if;
 
       -- Stage 3: multiply, advance signal1 delay line
       s1_d3 <= s1_d2;
@@ -70,13 +81,24 @@ begin
       shift_d4 <= resize(shift_right(mult_d3, 12), 13);
 
       -- Stage 5: aligned add with clamp
-      v_sum := to_integer(unsigned(s1_d4)) + to_integer(shift_d4);
-      if v_sum < 0 then
-        result <= (others => '0');
-      elsif v_sum > c_max then
-        result <= (others => '1');
+      if G_SIGNED then
+        v_sum := to_integer(signed(s1_d4)) + to_integer(shift_d4);
+        if v_sum < c_signed_min then
+          result <= std_logic_vector(to_signed(c_signed_min, 12));
+        elsif v_sum > c_signed_max then
+          result <= std_logic_vector(to_signed(c_signed_max, 12));
+        else
+          result <= std_logic_vector(to_signed(v_sum, 12));
+        end if;
       else
-        result <= std_logic_vector(to_unsigned(v_sum, 12));
+        v_sum := to_integer(unsigned(s1_d4)) + to_integer(shift_d4);
+        if v_sum < 0 then
+          result <= (others => '0');
+        elsif v_sum > c_max then
+          result <= (others => '1');
+        else
+          result <= std_logic_vector(to_unsigned(v_sum, 12));
+        end if;
       end if;
     end if;
   end process;

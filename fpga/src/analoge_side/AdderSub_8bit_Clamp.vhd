@@ -33,9 +33,9 @@ begin
       if Result < 0 then
         Clamped <= (others => '0');
         Overflow <= '1';
-      -- Check if result exceeds max 8-bit value (256 = 0xFF)
-      elsif Result > 2047 then
-        Clamped <= to_unsigned(2047, 8);  -- Max 8-bit value
+      -- Check if result exceeds max 8-bit unsigned value (255 = 0xFF)
+      elsif Result > 255 then
+        Clamped <= to_unsigned(255, 8);
         Overflow <= '1';
       else
         -- Result is in valid range, extract lower 8 bits (but value will be <= 256)

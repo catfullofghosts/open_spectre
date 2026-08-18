@@ -3,6 +3,8 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
+-- 12-bit signed analog mixer column. Unmuted inputs are two's-complement;
+-- muted inputs contribute 0 (centre). Sum is clamped to [-2048, 2047].
 entity mixer_11_1 is
   port (
     clk     : in  std_logic;
@@ -29,16 +31,19 @@ entity mixer_11_1 is
 end entity;
 
 architecture unpipelined of mixer_11_1 is
-  type unsigned_11_arr    is array (natural range <>) of unsigned(11 downto 0);
-  signal a         : unsigned_11_arr(15 downto 0);
-  signal total_sum : unsigned(15 downto 0);
+  type signed_12_arr    is array (natural range <>) of signed(11 downto 0);
+  signal a         : signed_12_arr(15 downto 0);
+  signal total_sum : signed(15 downto 0);
   signal mixed_reg : std_logic_vector(11 downto 0);
+
+  constant C_SIGNED_MAX : signed(15 downto 0) := to_signed(2047, 16);
+  constant C_SIGNED_MIN : signed(15 downto 0) := to_signed(-2048, 16);
 begin
 
   mixed_out <= mixed_reg;
 
   process(clk)
-    variable partial_sum : unsigned(15 downto 0);
+    variable partial_sum : signed(15 downto 0);
   begin
     if rising_edge(clk) then
 
@@ -47,22 +52,22 @@ begin
         if mutes(i) = '1' then
           a(i) <= (others => '0');
         else
-          a(i) <= unsigned(input_0) when i = 0 else
-                  unsigned(input_1) when i = 1 else
-                  unsigned(input_2) when i = 2 else
-                  unsigned(input_3) when i = 3 else
-                  unsigned(input_4) when i = 4 else
-                  unsigned(input_5) when i = 5 else
-                  unsigned(input_6) when i = 6 else
-                  unsigned(input_7) when i = 7 else
-                  unsigned(input_8) when i = 8 else
-                  unsigned(input_9) when i = 9 else
-                  unsigned(input_10) when i = 10 else
-                  unsigned(input_11) when i = 11 else
-                  unsigned(input_12) when i = 12 else
-                  unsigned(input_13) when i = 13 else
-                  unsigned(input_14) when i = 14 else
-                  unsigned(input_15);  -- i = 15
+          a(i) <= signed(input_0) when i = 0 else
+                  signed(input_1) when i = 1 else
+                  signed(input_2) when i = 2 else
+                  signed(input_3) when i = 3 else
+                  signed(input_4) when i = 4 else
+                  signed(input_5) when i = 5 else
+                  signed(input_6) when i = 6 else
+                  signed(input_7) when i = 7 else
+                  signed(input_8) when i = 8 else
+                  signed(input_9) when i = 9 else
+                  signed(input_10) when i = 10 else
+                  signed(input_11) when i = 11 else
+                  signed(input_12) when i = 12 else
+                  signed(input_13) when i = 13 else
+                  signed(input_14) when i = 14 else
+                  signed(input_15);  -- i = 15
         end if;
       end loop;
 
@@ -74,11 +79,11 @@ begin
 
       total_sum <= partial_sum;
 
-      -- Clip to 12-bit unsigned range [0, 4095]
-      if total_sum > to_unsigned(4095, 16) then
-        mixed_reg <= std_logic_vector(to_unsigned(4095, 12));
-      elsif total_sum < to_unsigned(0, 16) then
-        mixed_reg <= (others => '0');
+      -- Clip to 12-bit signed range [-2048, 2047]
+      if total_sum > C_SIGNED_MAX then
+        mixed_reg <= std_logic_vector(to_signed(2047, 12));
+      elsif total_sum < C_SIGNED_MIN then
+        mixed_reg <= std_logic_vector(to_signed(-2048, 12));
       else
         mixed_reg <= std_logic_vector(total_sum(11 downto 0));
       end if;

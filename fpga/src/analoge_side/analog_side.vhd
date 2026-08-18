@@ -147,8 +147,8 @@ entity analog_side is
 end analog_side;
 
 architecture Behavioral of analog_side is
-  signal mixer_inputs : array_12(15 downto 0) := (others => (others => '0'));
-  signal outputs      : array_12(19 downto 0); -- 12-bit wide outputs
+  signal mixer_inputs : array_12(15 downto 0) := (others => (others => '0')); -- signed, 0 = centre
+  signal outputs      : array_12(19 downto 0); -- signed 12-bit matrix columns
 
   signal out_addr_int : integer;
   signal ch_addr_int  : integer;
@@ -158,6 +158,10 @@ architecture Behavioral of analog_side is
   signal osc1_out_sin : std_logic_vector(11 downto 0);
   signal osc2_out_sq  : std_logic_vector(11 downto 0);
   signal osc2_out_sin : std_logic_vector(11 downto 0);
+  signal osc1_out_sq_s  : std_logic_vector(11 downto 0);
+  signal osc1_out_sin_s : std_logic_vector(11 downto 0);
+  signal osc2_out_sq_s  : std_logic_vector(11 downto 0);
+  signal osc2_out_sin_s : std_logic_vector(11 downto 0);
   signal noise_1      : std_logic_vector(9 downto 0);
   signal noise_2      : std_logic_vector(9 downto 0);
   -- Attenuated versions of these signals
@@ -221,6 +225,16 @@ architecture Behavioral of analog_side is
 
   type shape_shift_array is array (natural range <>) of natural;
 
+  -- Unipolar 12-bit (0..4095, mid 2048) -> two's-complement centred on 0.
+  constant C_UNIPOLAR_MID : unsigned(11 downto 0) := x"800"; -- 2048
+
+  function f_center_signed (
+    u : std_logic_vector(11 downto 0)
+  ) return std_logic_vector is
+  begin
+    return std_logic_vector(unsigned(u) - C_UNIPOLAR_MID);
+  end function f_center_signed;
+
   function f_matrix_shift (
     v     : std_logic_vector(11 downto 0);
     shift : natural
@@ -231,7 +245,7 @@ architecture Behavioral of analog_side is
     elsif shift >= 12 then
       return (others => '0');
     else
-      return std_logic_vector(shift_right(unsigned(v), shift));
+      return std_logic_vector(shift_right(signed(v), shift));
     end if;
   end function f_matrix_shift;
 
@@ -264,38 +278,46 @@ begin
 
   out_addr_int <= to_integer(unsigned(out_addr));
 
-  -- attenuators for some of the analog matrix inputs
+  -- Center unipolar sources on 0, then attenuate toward centre (signed 0).
+  osc1_out_sq_s  <= f_center_signed(osc1_out_sq);
+  osc1_out_sin_s <= f_center_signed(osc1_out_sin);
+  osc2_out_sq_s  <= f_center_signed(osc2_out_sq);
+  osc2_out_sin_s <= f_center_signed(osc2_out_sin);
 
   osc1_sq_att : entity work.AlphaBlend
+    generic map (G_SIGNED => true)
     port map
     (
       clk     => clk,
-      signal1 => osc1_out_sq,
+      signal1 => osc1_out_sq_s,
       signal2 => c_zero_12,
       alpha   => osc1_alpha,
       result  => osc1_out_sq_att);
   osc1_sin_att : entity work.AlphaBlend
+    generic map (G_SIGNED => true)
     port map
     (
       clk     => clk,
-      signal1 => osc1_out_sin,
+      signal1 => osc1_out_sin_s,
       signal2 => c_zero_12,
       alpha   => osc1_alpha,
       result  => osc1_out_sin_att);
 
   osc2_sq_att : entity work.AlphaBlend
+    generic map (G_SIGNED => true)
     port map
     (
       clk     => clk,
-      signal1 => osc2_out_sq,
+      signal1 => osc2_out_sq_s,
       signal2 => c_zero_12,
       alpha   => osc2_alpha,
       result  => osc2_out_sq_att);
   osc2_sin_att : entity work.AlphaBlend
+    generic map (G_SIGNED => true)
     port map
     (
       clk     => clk,
-      signal1 => osc2_out_sin,
+      signal1 => osc2_out_sin_s,
       signal2 => c_zero_12,
       alpha   => osc2_alpha,
       result  => osc2_out_sin_att);
@@ -311,8 +333,9 @@ begin
       noise_2_o <= not noise_2(7); -- original circuit didnt do this, but i think its more interesting
     end if;
   end process;
-  noise_1_padded <= noise_1 & "00";
+  noise_1_padded <= f_center_signed(noise_1 & "00");
   noise1_att : entity work.AlphaBlend
+    generic map (G_SIGNED => true)
     port map
     (
       clk     => clk,
@@ -322,8 +345,9 @@ begin
       result  => noise_1_att);
   mixer_inputs(4) <= noise_1_att;
 
-  noise_2_padded <= noise_2 & "00";
+  noise_2_padded <= f_center_signed(noise_2 & "00");
   noise2_att : entity work.AlphaBlend
+    generic map (G_SIGNED => true)
     port map
     (
       clk     => clk,
@@ -333,13 +357,14 @@ begin
       result  => noise_2_att);
   mixer_inputs(5) <= noise_2_att;
 
-  mixer_inputs(6) <= audio_in_t;
-  mixer_inputs(7) <= audio_in_b;
-  mixer_inputs(8) <= audio_in_sig;
+  mixer_inputs(6) <= f_center_signed(audio_in_t);
+  mixer_inputs(7) <= f_center_signed(audio_in_b);
+  mixer_inputs(8) <= f_center_signed(audio_in_sig);
 
   -- dsm_hi: matrix out 34, unfiltered. dsm_lo: matrix out 35, LPF in spector_wrapper.
-  dsm_hi_i_padded <= dsm_hi_i & "00";
+  dsm_hi_i_padded <= f_center_signed(dsm_hi_i & "00");
   dsm_hi_att : entity work.AlphaBlend
+    generic map (G_SIGNED => true)
     port map
     (
       clk     => clk,
@@ -349,9 +374,10 @@ begin
       result  => dsm_hi_i_att);
   mixer_inputs(9) <= dsm_hi_i_att;
 
-  dsm_lo_i_padded <= dsm_lo_i & "00";
+  dsm_lo_i_padded <= f_center_signed(dsm_lo_i & "00");
 
   dsm_lo_att : entity work.AlphaBlend
+    generic map (G_SIGNED => true)
     port map
     (
       clk     => clk,
@@ -361,69 +387,69 @@ begin
       result  => dsm_lo_i_att);
 
   mixer_inputs(10) <= dsm_lo_i_att;
-  -- mixers for Shape Gen1
+  -- mixers for Shape Gen1: unsigned register rest-position + signed analog
   pos_h_1_mix : entity work.AdderSub_12bit_Clamp
     port map
     (
       clk => clk,
-      A   => shape_matrix_out(0),
-      B   => pos_h_1,
+      A   => pos_h_1,
+      B   => shape_matrix_out(0),
       SUM => mixed_pos_h_1
     );
   pos_v_1_mix : entity work.AdderSub_12bit_Clamp
     port map
     (
       clk => clk,
-      A   => shape_matrix_out(1),
-      B   => pos_v_1,
+      A   => pos_v_1,
+      B   => shape_matrix_out(1),
       SUM => mixed_pos_v_1
     );
   zoom_h_1_mix : entity work.AdderSub_12bit_Clamp
     port map
     (
       clk => clk,
-      A   => shape_matrix_out(2),
-      B   => zoom_h_1,
+      A   => zoom_h_1,
+      B   => shape_matrix_out(2),
       SUM => mixed_zoom_h_1
     );
   zoom_v_1_mix : entity work.AdderSub_12bit_Clamp
     port map
     (
       clk => clk,
-      A   => shape_matrix_out(3),
-      B   => zoom_v_1,
+      A   => zoom_v_1,
+      B   => shape_matrix_out(3),
       SUM => mixed_zoom_v_1
     );
   circle_1_mix : entity work.AdderSub_12bit_Clamp
     port map
     (
       clk => clk,
-      A   => shape_matrix_out(4),
-      B   => circle_1,
+      A   => circle_1,
+      B   => shape_matrix_out(4),
       SUM => mixed_circle_1
     );
   gear_1_mix : entity work.AdderSub_12bit_Clamp
     port map
     (
       clk => clk,
-      A   => shape_matrix_out(5),
-      B   => gear_1,
+      A   => gear_1,
+      B   => shape_matrix_out(5),
       SUM => mixed_gear_1
     );
   lantern_1_mix : entity work.AdderSub_12bit_Clamp
     port map
     (
       clk => clk,
-      A   => shape_matrix_out(6),
-      B   => lantern_1,
+      A   => lantern_1,
+      B   => shape_matrix_out(6),
       SUM => mixed_lantern_1
     );
   fizz_1_mix : entity work.AdderSub_12bit_Clamp
     port map
     (
       clk => clk,
-      A   => shape_matrix_out(7),
-      B   => fizz_1,
+      A   => fizz_1,
+      B   => shape_matrix_out(7),
       SUM => mixed_fizz_1
     );
 
@@ -432,64 +458,64 @@ begin
     port map
     (
       clk => clk,
-      A   => shape_matrix_out(8),
-      B   => pos_h_2,
+      A   => pos_h_2,
+      B   => shape_matrix_out(8),
       SUM => mixed_pos_h_2
     );
   pos_v_2_mix : entity work.AdderSub_12bit_Clamp
     port map
     (
       clk => clk,
-      A   => shape_matrix_out(9),
-      B   => pos_v_2,
+      A   => pos_v_2,
+      B   => shape_matrix_out(9),
       SUM => mixed_pos_v_2
     );
   zoom_h_2_mix : entity work.AdderSub_12bit_Clamp
     port map
     (
       clk => clk,
-      A   => shape_matrix_out(10),
-      B   => zoom_h_2,
+      A   => zoom_h_2,
+      B   => shape_matrix_out(10),
       SUM => mixed_zoom_h_2
     );
   zoom_v_2_mix : entity work.AdderSub_12bit_Clamp
     port map
     (
       clk => clk,
-      A   => shape_matrix_out(11),
-      B   => zoom_v_2,
+      A   => zoom_v_2,
+      B   => shape_matrix_out(11),
       SUM => mixed_zoom_v_2
     );
   circle_2_mix : entity work.AdderSub_12bit_Clamp
     port map
     (
       clk => clk,
-      A   => shape_matrix_out(12),
-      B   => circle_2,
+      A   => circle_2,
+      B   => shape_matrix_out(12),
       SUM => mixed_circle_2
     );
   gear_2_mix : entity work.AdderSub_12bit_Clamp
     port map
     (
       clk => clk,
-      A   => shape_matrix_out(13),
-      B   => gear_2,
+      A   => gear_2,
+      B   => shape_matrix_out(13),
       SUM => mixed_gear_2
     );
   lantern_2_mix : entity work.AdderSub_12bit_Clamp
     port map
     (
       clk => clk,
-      A   => shape_matrix_out(14),
-      B   => lantern_2,
+      A   => lantern_2,
+      B   => shape_matrix_out(14),
       SUM => mixed_lantern_2
     );
   fizz_2_mix : entity work.AdderSub_12bit_Clamp
     port map
     (
       clk => clk,
-      A   => shape_matrix_out(15),
-      B   => fizz_2,
+      A   => fizz_2,
+      B   => shape_matrix_out(15),
       SUM => mixed_fizz_2
     );
   --analoge matrix outputs
@@ -512,7 +538,7 @@ begin
   y_anna           <= outputs(16);
   u_anna           <= outputs(17);
   v_anna           <= outputs(18);
-  vid_span         <= outputs(19)(11 downto 4); -- video span is only 8 bits
+  vid_span         <= outputs(19)(11 downto 4); -- signed 12-bit -> signed 8-bit
 
   not_gain_in <= not gain_in; -- flip the gain bits, which are like pins so that it makes sense that writing a 1 to a point on the mixer is like connecting that input
 
@@ -580,26 +606,27 @@ begin
       noise_2      => noise_2,
       extra_in     => vsync
     );
-  -------------Combine the YUV video form the digital matrix with the analoge matrix
+  -- Combine unsigned digital YUV with signed analog matrix (osc/noise/audio
+  -- can pull the video level both up and down). Clamp to [0, 4095], no wrap.
   Y_dig_ann_mix : entity work.Adder_12bit_NoOverflow
     port map
     (
-      A   => y_anna,
-      B   => y_digital,
+      A   => y_digital,
+      B   => y_anna,
       SUM => y_signal1
     );
   U_dig_ann_mix : entity work.Adder_12bit_NoOverflow
     port map
     (
-      A   => u_anna,
-      B   => u_digital,
+      A   => u_digital,
+      B   => u_anna,
       SUM => u_signal1
     );
   V_dig_ann_mix : entity work.Adder_12bit_NoOverflow
     port map
     (
-      A   => v_anna,
-      B   => v_digital,
+      A   => v_digital,
+      B   => v_anna,
       SUM => v_signal1
     );
 
