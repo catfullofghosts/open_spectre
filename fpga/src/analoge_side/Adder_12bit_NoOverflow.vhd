@@ -9,6 +9,7 @@
 -- Create Date: 2023
 -- Created by: Rob D Jordan
 -- Notes: Mix unsigned unipolar A with signed bipolar B, clamp to [0, 4095].
+--        14-bit acc: 4095 + 2047 = 6142, and 0 + (-2048) = -2048, both fit.
 
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
@@ -24,10 +25,14 @@ entity Adder_12bit_NoOverflow is
 end Adder_12bit_NoOverflow;
 
 architecture Behavioral of Adder_12bit_NoOverflow is
-  signal result : signed(12 downto 0);
+  signal a_ext  : signed(13 downto 0);
+  signal b_ext  : signed(13 downto 0);
+  signal result : signed(13 downto 0);
 begin
-  -- Zero-extend A so it stays non-negative, then add signed B.
-  result <= signed('0' & unsigned(A)) + resize(signed(B), 13);
+  -- Zero-extend A so values >= 2048 stay positive (Y << 4 often sets bit 11).
+  a_ext  <= signed(resize(unsigned(A), 14));
+  b_ext  <= resize(signed(B), 14);
+  result <= a_ext + b_ext;
 
   process (result)
   begin

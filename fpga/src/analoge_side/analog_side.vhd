@@ -186,6 +186,9 @@ architecture Behavioral of analog_side is
   signal y_signal1 : std_logic_vector(11 downto 0);
   signal u_signal1 : std_logic_vector(11 downto 0);
   signal v_signal1 : std_logic_vector(11 downto 0);
+  signal y_mix     : std_logic_vector(11 downto 0);
+  signal u_mix     : std_logic_vector(11 downto 0);
+  signal v_mix     : std_logic_vector(11 downto 0);
   signal y_signal2 : std_logic_vector(11 downto 0) := (others => '0');
   signal u_signal2 : std_logic_vector(11 downto 0) := (others => '0');
   signal v_signal2 : std_logic_vector(11 downto 0) := (others => '0');
@@ -265,6 +268,9 @@ architecture Behavioral of analog_side is
 
   attribute MARK_DEBUG of dsm_lo_i_padded : signal is "TRUE";
   attribute MARK_DEBUG of dsm_lo_i_att    : signal is "TRUE";
+  attribute MARK_DEBUG of y_digital       : signal is "TRUE";
+  attribute MARK_DEBUG of y_anna          : signal is "TRUE";
+  attribute MARK_DEBUG of y_signal1       : signal is "TRUE";
 begin
 
   gen_shape_matrix_shift : for i in 0 to 15 generate
@@ -606,29 +612,34 @@ begin
       noise_2      => noise_2,
       extra_in     => vsync
     );
-  -- Combine unsigned digital YUV with signed analog matrix (osc/noise/audio
-  -- can pull the video level both up and down). Clamp to [0, 4095], no wrap.
+  -- Digital YUV is the unipolar base. Analog matrix Y/U/V is a signed offset
+  -- added/subtracted from it, then clamped. Nothing patched => analog = 0
+  -- => digital passes through unchanged.
   Y_dig_ann_mix : entity work.Adder_12bit_NoOverflow
     port map
     (
       A   => y_digital,
       B   => y_anna,
-      SUM => y_signal1
+      SUM => y_mix
     );
   U_dig_ann_mix : entity work.Adder_12bit_NoOverflow
     port map
     (
       A   => u_digital,
       B   => u_anna,
-      SUM => u_signal1
+      SUM => u_mix
     );
   V_dig_ann_mix : entity work.Adder_12bit_NoOverflow
     port map
     (
       A   => v_digital,
       B   => v_anna,
-      SUM => v_signal1
+      SUM => v_mix
     );
+
+  y_signal1 <= y_digital when y_anna = c_zero_12 else y_mix;
+  u_signal1 <= u_digital when u_anna = c_zero_12 else u_mix;
+  v_signal1 <= v_digital when v_anna = c_zero_12 else v_mix;
 
   ---------YUV levels are atenuators for the video signal levels 
   YUV_out_levels : entity work.YUV_levels

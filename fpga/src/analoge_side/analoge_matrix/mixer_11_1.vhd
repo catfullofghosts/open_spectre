@@ -32,9 +32,9 @@ end entity;
 
 architecture unpipelined of mixer_11_1 is
   type signed_12_arr    is array (natural range <>) of signed(11 downto 0);
-  signal a         : signed_12_arr(15 downto 0);
-  signal total_sum : signed(15 downto 0);
-  signal mixed_reg : std_logic_vector(11 downto 0);
+  signal a         : signed_12_arr(15 downto 0) := (others => (others => '0'));
+  signal total_sum : signed(15 downto 0) := (others => '0');
+  signal mixed_reg : std_logic_vector(11 downto 0) := (others => '0');
 
   constant C_SIGNED_MAX : signed(15 downto 0) := to_signed(2047, 16);
   constant C_SIGNED_MIN : signed(15 downto 0) := to_signed(-2048, 16);

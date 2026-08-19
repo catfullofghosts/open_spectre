@@ -287,11 +287,11 @@ architecture RTL of digital_reg_file is
   signal speed1_i       : std_logic;
   signal speed2_i       : std_logic;
 
-  -- color output levels
+  -- color output levels (0 = unattenuated; digital video passes through)
   signal col_en_bypass_i   : std_logic;
-  signal y_level_i      : std_logic_vector(11 downto 0);
-  signal cr_level_i     : std_logic_vector(11 downto 0);
-  signal cb_level_i     : std_logic_vector(11 downto 0);
+  signal y_level_i      : std_logic_vector(11 downto 0) := (others => '0');
+  signal cr_level_i     : std_logic_vector(11 downto 0) := (others => '0');
+  signal cb_level_i     : std_logic_vector(11 downto 0) := (others => '0');
   signal video_active   : std_logic;
   -- Pixel clock and video input control
   signal pix_clk_div_sel_i    : std_logic;
