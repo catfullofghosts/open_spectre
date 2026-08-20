@@ -1,18 +1,29 @@
 !!! REMEMBER IF SOMETHIGN DOESNT WORK CHECK THE REST AND H/Vsync are correct poliarity!!!!
 
 todo:
+- Oscilator other waveforms seem to be lower amplitude?
+- ca div, get rid of, they are a pain----check
+- check audio cuttof of filter
+- check slowcounter speed is acurate
+- check dirt
+
+------------------------------
 
 - 720p counters now working but 640 doesnt anymore (sync poliarity probs?)
 - Shape gen not working in either 640 or 720, probs the flip in poliarity
 
-- annaloge side looks great
+!!!!! WORKING NOW BUT IT STARTS UP WITH THE INVERT BIT FLIPPED
 
-- ca div, get rid of, they are a pain
+- annaloge side looks great!!
+
+- ca div, get rid of, they are a pain----check
 - check audio cuttof of filter
 - check slowcounter speed is acurate
-- add reg to get luma input from top bit of luma out on the CA input
+- add reg to get luma input from top bit of luma out on the CA input --- done
 - check dirt
-- check that bipoler signals work on spacing, and shapes
+- check that bipoler signals work on spacing, and shapes !!!!! seems to!!!
+
+
 
 
 ------------------------------------------------------------------------------------------------
