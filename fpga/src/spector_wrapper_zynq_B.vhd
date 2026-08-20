@@ -446,6 +446,8 @@ architecture rtl of spector_wrapper_zynq is
 begin
 
   
+    -- Normalize H/V to idle-low / pulse-high (what the digital X/Y counters expect).
+    -- 640x480 is negative sync → invert=1. 1280x720 is positive sync → invert=0.
     process (h_sync, v_sync, reset, start_of_frame, sync_hv_invert)
   begin
     if sync_hv_invert = '1' then
@@ -652,7 +654,8 @@ begin
   -- Digital Side
   -------------------------------------------
 
-  ----------- Counter devider to change the perceved resolution of the digital side -----------------
+  -- Pixel divider re-phases on polarity-normalized syncs (idle-low, pulse-high)
+  -- so 640 (neg) and 720 (pos) both tick from the start of the sync pulse.
   pixel_clk_en_p : process (pix_clk)
     variable clk_div_counter : unsigned(1 downto 0) := "00";
     variable line_div_counter : unsigned(1 downto 0) := "00";
@@ -662,7 +665,7 @@ begin
   begin
     if rising_edge (pix_clk) then
       -- Re-phase pixel divider at start of each line
-      if h_sync = '1' and h_sync_d = '0' then
+      if h_sync_n = '1' and h_sync_d = '0' then
         pix_clk_en <= '0';
         clk_div_counter := "00";
       elsif div_sel_d /= pix_clk_div_sel then
@@ -686,10 +689,10 @@ begin
       end if;
 
       -- Re-phase line divider at start of each frame; step on each hsync edge
-      if v_sync = '1' and v_sync_d = '0' then
+      if v_sync_n = '1' and v_sync_d = '0' then
         line_clk_en <= '0';
         line_div_counter := "00";
-      elsif h_sync = '1' and h_sync_d = '0' then
+      elsif h_sync_n = '1' and h_sync_d = '0' then
         if pix_clk_div_sel = '0' then
           -- /2: one digital line every 2 video lines
           line_clk_en <= not line_clk_en;
@@ -711,8 +714,8 @@ begin
         end if;
       end if;
 
-      h_sync_d  := h_sync;
-      v_sync_d  := v_sync;
+      h_sync_d  := h_sync_n;
+      v_sync_d  := v_sync_n;
       div_sel_d := pix_clk_div_sel;
 
       -- Mux for ext_vid_in: select between luma calculation or y_out
@@ -1018,8 +1021,8 @@ begin
     (
       clk                   => pix_clk, --clk_148_5,
       rst                   => reset_n,
-      h_sync                => h_sync, --negated inside the module
-      v_sync                => v_sync, --negated inside the module
+      h_sync                => h_sync_n, -- same polarity as digital counters (idle-low)
+      v_sync                => v_sync_n,
       start_of_frame        => start_of_frame_n,
       start_of_active_video => '0',
       video_on              => '0',

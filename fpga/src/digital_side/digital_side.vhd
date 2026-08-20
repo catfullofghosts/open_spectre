@@ -43,7 +43,6 @@ entity digital_side is
     vid_span       : in std_logic_vector(7 downto 0);
     edge_width     : in std_logic_vector(1 downto 0); -- 00=2px, 01=4px, 10=6px, 11=8px
     ca_cfg         : in std_logic_vector(15 downto 0); -- [7:0] rule, [8] inject^luma_msb, [9] rule^Y, [10] rule^X
-                                                       -- [13:12] y_div, [15:14] x_div
 
     -- inputs form analoge side
     osc1_sqr : in std_logic :='0';
@@ -312,8 +311,6 @@ cdc_pix_100 : process(clk)
       rule         => ca_cfg(7 downto 0),
       rule_xor_y   => ca_cfg(9),
       rule_xor_x   => ca_cfg(10),
-      x_div        => ca_cfg(15 downto 14),
-      y_div        => ca_cfg(13 downto 12),
       y_line       => y_count(7 downto 0),
       x_pos        => x_count(7 downto 0),
       inject       => ca_inject,

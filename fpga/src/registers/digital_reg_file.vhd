@@ -131,8 +131,8 @@ entity digital_reg_file is
     pix_clk_div_sel     : out std_logic; -- 0 = /2, 1 = /4 for X and Y digital counters
     ext_vid_in_mux_sel  : out std_logic; -- 0 = luma calc, 1 = y_out
     edge_width_sel      : out std_logic_vector(1 downto 0); -- edge stretch: 00=2px 01=4px 10=6px 11=8px
-    sync_hv_invert      : out std_logic; -- 0=pass incoming syncs, 1=invert incoming H/V syncs
-    ca_cfg              : out std_logic_vector(15 downto 0); -- [7:0] rule, [8] inject^luma_msb, [9] rule^Y, [10] rule^X, [13:12] y_div, [15:14] x_div
+    sync_hv_invert      : out std_logic; -- 1=invert (640x480 neg sync), 0=pass (720p pos sync)
+    ca_cfg              : out std_logic_vector(15 downto 0); -- [7:0] rule, [8] inject^luma_msb, [9] rule^Y, [10] rule^X
     audio_crossover     : out std_logic_vector(7 downto 0); -- T/B split @ 0x0C[7:0]
     audio_t_thresh      : out std_logic_vector(2 downto 0); -- digital T cutoff step 0..7 @ 0x0C[13:11]
     audio_b_thresh      : out std_logic_vector(2 downto 0); -- digital B cutoff step 0..7 @ 0x0C[10:8]
@@ -298,7 +298,7 @@ architecture RTL of digital_reg_file is
   signal ext_vid_in_mux_sel_i : std_logic;
   signal edge_width_sel_i     : std_logic_vector(1 downto 0) := "00"; -- default 2px edge width
   signal sync_hv_invert_i     : std_logic := '0';
-  signal ca_cfg_i             : std_logic_vector(15 downto 0) := x"C21E"; -- Rule 30, rule_xor_y, /8 X&Y
+  signal ca_cfg_i             : std_logic_vector(15 downto 0) := x"021E"; -- Rule 30, rule_xor_y
   signal audio_crossover_i    : std_logic_vector(7 downto 0) := x"80"; -- mid crossover default
   signal audio_crossover_r    : std_logic_vector(7 downto 0) := x"80";
   signal audio_t_thresh_i     : std_logic_vector(2 downto 0) := "011"; -- ~50% default (was MSB)

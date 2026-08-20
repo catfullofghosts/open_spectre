@@ -2,6 +2,23 @@
 
 todo:
 
+- 720p counters now working but 640 doesnt anymore (sync poliarity probs?)
+- Shape gen not working in either 640 or 720, probs the flip in poliarity
+
+- annaloge side looks great
+
+- ca div, get rid of, they are a pain
+- check audio cuttof of filter
+- check slowcounter speed is acurate
+- add reg to get luma input from top bit of luma out on the CA input
+- check dirt
+- check that bipoler signals work on spacing, and shapes
+
+
+------------------------------------------------------------------------------------------------
+
+old!!!!!!!!!!!!!!!
+
 ca div, get rid of, they are a pain
 gear points not sharp enough, slider increases circle size but not gear teeth, why?
 zoom h wraps around oddly??? same for zoom V

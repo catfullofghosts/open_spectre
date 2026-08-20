@@ -329,7 +329,6 @@ OVERLAY_GLOBAL_EN_REG = 0xFC
 CA_CTRL_INJECT_XOR_LUMA = 1 << 8
 CA_CTRL_RULE_XOR_Y = 1 << 9
 CA_CTRL_RULE_XOR_X = 1 << 10
-CA_DIV_ENCODE = {1: 0, 2: 1, 4: 2, 8: 3}
 OVERLAY_BLOCK_DIV_ENCODE = {1: 0, 2: 1, 4: 2, 8: 3, 16: 4}
 _overlay_fc_state = {"enabled": False, "block_div": 1}
 
@@ -345,13 +344,9 @@ def configure_ca(
             rule_xor_y=True,
             rule_xor_x=False,
             inject_xor_luma=False,
-            x_div=8,
-            y_div=8,
     ):
             """Program 1D CA @ 0x18: rule [7:0], inject^luma_msb [8], rule_xor_y [9],
-            rule_xor_x [10], y_div [13:12], x_div [15:14]. x_div/y_div: 1, 2, 4, or 8."""
-            if x_div not in CA_DIV_ENCODE or y_div not in CA_DIV_ENCODE:
-                raise ValueError("x_div and y_div must be one of 1, 2, 4, 8")
+            rule_xor_x [10]."""
             value = int(rule) & 0xFF
             if inject_xor_luma:
                 value |= CA_CTRL_INJECT_XOR_LUMA
@@ -359,8 +354,6 @@ def configure_ca(
                 value |= CA_CTRL_RULE_XOR_Y
             if rule_xor_x:
                 value |= CA_CTRL_RULE_XOR_X
-            value |= CA_DIV_ENCODE[x_div] << 14
-            value |= CA_DIV_ENCODE[y_div] << 12
             wr_reg(CA_RULE_REG, value)
 
 

@@ -1,6 +1,6 @@
 --VHDL2008
 -- Streaming 1D elementary cellular automaton (Wolfram rule 0-255).
--- Steps on rising edges of gated step_en; h-sync line reset; optional block stride.
+-- Steps on rising edges of gated step_en; h-sync line reset.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -15,8 +15,6 @@ entity ca_1d_stream is
     rule         : in  std_logic_vector(7 downto 0);
     rule_xor_y   : in  std_logic;
     rule_xor_x   : in  std_logic;
-    x_div        : in  std_logic_vector(1 downto 0); -- 00=/1 01=/2 10=/4 11=/8
-    y_div        : in  std_logic_vector(1 downto 0);
     y_line       : in  std_logic_vector(7 downto 0);
     x_pos        : in  std_logic_vector(7 downto 0);
     inject       : in  std_logic;
@@ -36,40 +34,7 @@ architecture rtl of ca_1d_stream is
   signal ca_out_blk : std_logic := '0';
   signal rule_eff   : std_logic_vector(7 downto 0);
   signal xorY, XorX   : std_logic_vector(7 downto 0);
-  signal x_div_ok   : std_logic;
-  signal y_div_ok   : std_logic;
   signal step_en_g  : std_logic;
-
-  function f_div_ok (
-    count   : std_logic_vector(7 downto 0);
-    div_sel : std_logic_vector(1 downto 0)
-  ) return std_logic is
-    variable u : unsigned(7 downto 0);
-  begin
-    u := unsigned(count);
-    case div_sel is
-      when "00" =>
-        return '1';
-      when "01" =>
-        if u(0) /= '0' then
-          return '0';
-        else
-          return '1';
-        end if;
-      when "10" =>
-        if u(1 downto 0) /= "00" then
-          return '0';
-        else
-          return '1';
-        end if;
-      when others =>
-        if u(2 downto 0) /= "000" then
-          return '0';
-        else
-          return '1';
-        end if;
-    end case;
-  end function f_div_ok;
 
 begin
   -- Conditional assignments rewritten without when/else: Vivado 2024.2
@@ -94,12 +59,9 @@ begin
 
   rule_eff <= rule xor xorY xor xorX;
 
-  x_div_ok  <= f_div_ok(x_pos, x_div);
-  y_div_ok  <= f_div_ok(y_line, y_div);
-
-  process (step_en, frame_active, x_div_ok, y_div_ok)
+  process (step_en, frame_active)
   begin
-    if frame_active = '1' and x_div_ok = '1' and y_div_ok = '1' then
+    if frame_active = '1' then
       step_en_g <= step_en;
     else
       step_en_g <= '0';
@@ -132,7 +94,7 @@ begin
 
       if frame_active = '0' then
         ca_out_blk <= '0';
-      elsif x_div_ok = '1' and y_div_ok = '1' then
+      else
         ca_out_blk <= ca_out_r;
       end if;
     end if;
@@ -141,4 +103,3 @@ begin
   ca_out <= ca_out_blk;
 
 end architecture rtl;
-

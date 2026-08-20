@@ -56,7 +56,6 @@ if { [string first $scripts_vivado_version $current_vivado_version] == -1 } {
 
 set list_projs [get_projects -quiet]
 if { $list_projs eq "" } {
-   # Part-only fallback if sourced without an open project (no board_part required)
    create_project project_1 myproj -part xc7z020clg400-1
 }
 
@@ -253,6 +252,11 @@ proc create_root_design { parentCell } {
 
   # Create ports
   set sw0 [ create_bd_port -dir I sw0 ]
+  set pmod_i2s_sdin [ create_bd_port -dir I pmod_i2s_sdin ]
+  set pmod_i2s_mclk [ create_bd_port -dir O pmod_i2s_mclk ]
+  set pmod_i2s_lrck [ create_bd_port -dir O pmod_i2s_lrck ]
+  set pmod_i2s_bclk [ create_bd_port -dir O pmod_i2s_bclk ]
+  set pmod_i2s_sdout [ create_bd_port -dir O pmod_i2s_sdout ]
 
   # Create instance: axi_dynclk_0, and set properties
   set axi_dynclk_0 [ create_bd_cell -type ip -vlnv digilentinc.com:ip:axi_dynclk:1.2 axi_dynclk_0 ]
@@ -1057,6 +1061,8 @@ proc create_root_design { parentCell } {
   connect_bd_net -net dvi2rgb_0_pLocked  [get_bd_pins dvi2rgb_0/pLocked] \
   [get_bd_pins axi_gpio_video/gpio2_io_i] \
   [get_bd_pins proc_sys_reset_0/aux_reset_in]
+  connect_bd_net -net pmod_i2s_sdin_0_1  [get_bd_ports pmod_i2s_sdin] \
+  [get_bd_pins spector_wrapper_zynq_0/pmod_i2s_sdin]
   connect_bd_net -net proc_sys_reset_0_peripheral_aresetn  [get_bd_pins proc_sys_reset_0/peripheral_aresetn] \
   [get_bd_pins v_tc_1/resetn]
   connect_bd_net -net proc_sys_reset_0_peripheral_reset  [get_bd_pins proc_sys_reset_0/peripheral_reset] \
@@ -1122,6 +1128,14 @@ proc create_root_design { parentCell } {
   [get_bd_pins axi_mem_intercon5/ARESETN]
   connect_bd_net -net spector_wrapper_zynq_0_h_sync_o  [get_bd_pins spector_wrapper_zynq_0/h_sync_o] \
   [get_bd_pins rgb2dvi_0/vid_pHSync]
+  connect_bd_net -net spector_wrapper_zynq_0_pmod_i2s_bclk  [get_bd_pins spector_wrapper_zynq_0/pmod_i2s_bclk] \
+  [get_bd_ports pmod_i2s_bclk]
+  connect_bd_net -net spector_wrapper_zynq_0_pmod_i2s_lrck  [get_bd_pins spector_wrapper_zynq_0/pmod_i2s_lrck] \
+  [get_bd_ports pmod_i2s_lrck]
+  connect_bd_net -net spector_wrapper_zynq_0_pmod_i2s_mclk  [get_bd_pins spector_wrapper_zynq_0/pmod_i2s_mclk] \
+  [get_bd_ports pmod_i2s_mclk]
+  connect_bd_net -net spector_wrapper_zynq_0_pmod_i2s_sdout  [get_bd_pins spector_wrapper_zynq_0/pmod_i2s_sdout] \
+  [get_bd_ports pmod_i2s_sdout]
   connect_bd_net -net spector_wrapper_zynq_0_regs_rd_data  [get_bd_pins spector_wrapper_zynq_0/regs_rd_data] \
   [get_bd_pins axi_bram_ctrl_0/bram_rddata_a]
   connect_bd_net -net spector_wrapper_zynq_0_start_of_frame_o  [get_bd_pins spector_wrapper_zynq_0/start_of_frame_o] \
@@ -1163,7 +1177,6 @@ proc create_root_design { parentCell } {
   # Restore current instance
   current_bd_instance $oldCurInst
 
-  validate_bd_design
   save_bd_design
 }
 # End of create_root_design()
@@ -1175,4 +1188,6 @@ proc create_root_design { parentCell } {
 
 create_root_design ""
 
+
+common::send_gid_msg -ssname BD::TCL -id 2053 -severity "WARNING" "This Tcl script was generated from a block design that has not been validated. It is possible that design <$design_name> may result in errors during validation."
 
