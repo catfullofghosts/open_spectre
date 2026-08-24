@@ -34,6 +34,9 @@ end SinWaveGenerator;
 architecture Behavioral of SinWaveGenerator is
     constant C_DIV_FULL : natural := 65536 / C_SINE_PHASE_FULL;  -- 16
     constant C_DIV_HALF : natural := 65536 / C_SINE_PHASE_HALF;  -- 32
+    -- Full-scale unipolar peak so ramp/triangle match the sine ROM (0..4095).
+    constant C_WAVE_PEAK : natural := C_SINE_PHASE_MAX;
+    constant C_WAVEFORM_MULT_MAX : natural := C_SINE_PHASE_MAX * C_WAVE_PEAK;
 
     signal counter, counterB : STD_LOGIC_VECTOR(15 downto 0) := (others => '0');
     signal scaled_freq : STD_LOGIC_VECTOR(15 downto 0) := (others => '0');
@@ -71,12 +74,12 @@ architecture Behavioral of SinWaveGenerator is
     signal phase_le_half_reg : std_logic := '0';
     signal phase_inverted : integer range 0 to C_SINE_PHASE_MAX := 0;
     signal phase_inverted_reg : integer range 0 to C_SINE_PHASE_MAX := 0;
-    signal waveform_mult_result : integer range 0 to 8382465 := 0;
-    signal waveform_mult_result_reg : integer range 0 to 8382465 := 0;
+    signal waveform_mult_result : integer range 0 to C_WAVEFORM_MULT_MAX := 0;
+    signal waveform_mult_result_reg : integer range 0 to C_WAVEFORM_MULT_MAX := 0;
     signal div_multiplier : integer range 0 to 63 := 0;
     signal div_multiplier_reg : integer range 0 to 63 := 0;
-    signal waveform_div_mult_result : unsigned(28 downto 0) := (others => '0');
-    signal waveform_div_mult_result_reg : unsigned(28 downto 0) := (others => '0');
+    signal waveform_div_mult_result : unsigned(30 downto 0) := (others => '0');
+    signal waveform_div_mult_result_reg : unsigned(30 downto 0) := (others => '0');
     signal waveform_div_result : std_logic_vector(11 downto 0) := (others => '0');
     signal waveform_div_result_reg : std_logic_vector(11 downto 0) := (others => '0');
 
@@ -219,14 +222,14 @@ begin
 
         case wave_sel_reg is
             when "01" =>
-                waveform_mult_result <= phase_accumulator_reg * 2047;
+                waveform_mult_result <= phase_accumulator_reg * C_WAVE_PEAK;
             when "10" =>
-                waveform_mult_result <= phase_inverted_reg * 2047;
+                waveform_mult_result <= phase_inverted_reg * C_WAVE_PEAK;
             when "11" =>
                 if phase_le_half_reg = '1' then
-                    waveform_mult_result <= phase_accumulator_reg * 2047;
+                    waveform_mult_result <= phase_accumulator_reg * C_WAVE_PEAK;
                 else
-                    waveform_mult_result <= phase_inverted_reg * 2047;
+                    waveform_mult_result <= phase_inverted_reg * C_WAVE_PEAK;
                 end if;
             when others =>
                 waveform_mult_result <= 0;
@@ -246,7 +249,7 @@ begin
         end case;
         div_multiplier_reg <= div_multiplier;
 
-        waveform_div_mult_result <= to_unsigned(waveform_mult_result_reg, 23)
+        waveform_div_mult_result <= to_unsigned(waveform_mult_result_reg, 25)
                                     * to_unsigned(div_multiplier_reg, 6);
         waveform_div_mult_result_reg <= waveform_div_mult_result;
 

@@ -1,11 +1,11 @@
 !!! REMEMBER IF SOMETHIGN DOESNT WORK CHECK THE REST AND H/Vsync are correct poliarity!!!!
 
 todo:
-- Oscilator other waveforms seem to be lower amplitude?
-- ca div, get rid of, they are a pain----check
+- Oscilator other waveforms seem to be lower amplitude? -- check fix
+- ca div, get rid of, they are a pain----check done
 - check audio cuttof of filter
-- check slowcounter speed is acurate
-- check dirt
+- check slowcounter speed is acurate, needs a method for slowing these counters by x4? for some really slow stuff -- check these work
+- check dirt -- needs propper debug!!!! not working at all
 
 ------------------------------
 

@@ -42,6 +42,8 @@ MATRIX_IN_MAP = {}
 for i in range(18):
     MATRIX_IN_MAP[f"xy_inv_out_{i}"] = i
 # Individual signals
+# Hz, or frame periods 2/4/8/16/32/64 when 0x78 bit 7 (slow_cnt_frame_sel) is set
+# 0x78 bit 8 (slow_cnt_div4) divides both by 4 (frame periods become 8/16/32/64/128/256)
 MATRIX_IN_MAP["slow_cnt_6"] = 18
 MATRIX_IN_MAP["slow_cnt_3"] = 19
 MATRIX_IN_MAP["slow_cnt_1_5"] = 20

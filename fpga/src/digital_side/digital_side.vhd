@@ -43,6 +43,8 @@ entity digital_side is
     vid_span       : in std_logic_vector(7 downto 0);
     edge_width     : in std_logic_vector(1 downto 0); -- 00=2px, 01=4px, 10=6px, 11=8px
     ca_cfg         : in std_logic_vector(15 downto 0); -- [7:0] rule, [8] inject^luma_msb, [9] rule^Y, [10] rule^X
+    slow_cnt_frame_sel : in std_logic := '0'; -- 0=Hz slow counters, 1=frame 2/4/8/16/32/64
+    slow_cnt_div4      : in std_logic := '0'; -- 1=/4 on Hz and frame sources
 
     -- inputs form analoge side
     osc1_sqr : in std_logic :='0';
@@ -252,14 +254,17 @@ cdc_pix_100 : process(clk)
   slow_counter : entity work.slow_counter --running at 100mhz
     port
     map (
-    clk   => clk,
+    clk        => clk,
     frame_sync => h_sync_i,
-    hz6   => slow_cnt_6,
-    hz3   => slow_cnt_3,
-    hz1_5 => slow_cnt_1_5,
-    hz_6  => slow_cnt_0_6,
-    hz_4  => slow_cnt_0_4,
-    hz_2  => slow_cnt_0_2
+    v_sync     => v_sync_i,
+    frame_mode => slow_cnt_frame_sel,
+    div4       => slow_cnt_div4,
+    hz6        => slow_cnt_6,
+    hz3        => slow_cnt_3,
+    hz1_5      => slow_cnt_1_5,
+    hz_6       => slow_cnt_0_6,
+    hz_4       => slow_cnt_0_4,
+    hz_2       => slow_cnt_0_2
     );
 
   not_overlay_gate2 <= not overlay_gate2;

@@ -305,6 +305,8 @@ architecture rtl of spector_wrapper_zynq is
   signal ext_vid_in_mux_sel : std_logic;
   signal edge_width_sel     : std_logic_vector(1 downto 0);
   signal sync_hv_invert     : std_logic;
+  signal slow_cnt_frame_sel : std_logic;
+  signal slow_cnt_div4      : std_logic;
   signal ca_cfg            : std_logic_vector(15 downto 0);
   signal audio_crossover   : std_logic_vector(7 downto 0);
   signal audio_t_thresh    : std_logic_vector(2 downto 0);
@@ -581,6 +583,8 @@ begin
       ext_vid_in_mux_sel  => ext_vid_in_mux_sel,
       edge_width_sel      => edge_width_sel,
       sync_hv_invert      => sync_hv_invert,
+      slow_cnt_frame_sel  => slow_cnt_frame_sel,
+      slow_cnt_div4       => slow_cnt_div4,
       ca_cfg              => ca_cfg,
       audio_crossover     => audio_crossover,
       audio_t_thresh      => audio_t_thresh,
@@ -755,6 +759,8 @@ begin
       vid_span       => vid_span_mix,
       edge_width     => edge_width_sel,
       ca_cfg        => ca_cfg,
+      slow_cnt_frame_sel => slow_cnt_frame_sel,
+      slow_cnt_div4      => slow_cnt_div4,
       osc1_sqr       => osc_1_sqr_o,
       osc2_sqr       => osc_2_sqr_o,
       random1        => noise_1_o,
