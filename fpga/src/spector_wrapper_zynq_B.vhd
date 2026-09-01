@@ -290,7 +290,6 @@ architecture rtl of spector_wrapper_zynq is
   signal y_analog : std_logic_vector(7 downto 0);
   signal u_analog : std_logic_vector(7 downto 0);
   signal v_analog : std_logic_vector(7 downto 0);
-  signal noise_dirt : std_logic_vector(4 downto 0);
 
   -- Align H/V/SOF with video_pre_fx path (encoder mode):
   -- dirt(1) + color_mult(3) + encoder_out(1) + bg_regs(3) + pre_fx(1) = 9
@@ -960,7 +959,7 @@ begin
       osc_2_sqr_o      => osc_2_sqr_o,
       noise_1_o        => noise_1_o,
       noise_2_o        => noise_2_o,
-      noise_dirt_o     => noise_dirt,
+      noise_dirt_o     => open,
       noise_rst        => noise_rst_reg,
       matrix_pos_h_1   => matrix_pos_h_1,
       matrix_pos_v_1   => matrix_pos_v_1,
@@ -984,12 +983,12 @@ begin
     );
 
   -------------------------------------------
-  -- YUV dirt (bottom bits of analog YUV out)
+  -- YUV dirt (bits [4:2] of analog YUV out, per-pixel LFSR)
   -------------------------------------------
   yuv_dirt_inst : entity work.yuv_dirt
     port map (
       clk       => pix_clk,
-      noise     => noise_dirt,
+      rst       => reset_n,
       dirt_ctrl => dirt_ctrl_reg,
       y_in      => y_analog,
       u_in      => u_analog,

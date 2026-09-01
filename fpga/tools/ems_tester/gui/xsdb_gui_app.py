@@ -721,7 +721,7 @@ class RegisterControlWidget(QWidget):
             ("0xD4", "dsm_hi_alpha", "DSM High Alpha", 12, 0, 4095, 0),
             ("0xD8", "dsm_lo_alpha", "DSM Low Alpha", 12, 0, 4095, 0),
             ("0xDC", "noise_alpha", "Noise Alpha", 12, 0, 4095, 0),
-            ("0x198", "dirt_depth", "Dirt Depth (0=off, 1-3 LSB bits)", 2, 0, 3, 0),
+            ("0x198", "dirt_depth", "Dirt Depth (0=off, 1-3 bits [2]/[3:2]/[4:2])", 2, 0, 3, 0),
             ("0x198", "dirt_y_en", "Dirt Y Enable", 1, 0, 1, 2),
             ("0x198", "dirt_u_en", "Dirt U Enable", 1, 0, 1, 3),
             ("0x198", "dirt_v_en", "Dirt V Enable", 1, 0, 1, 4),

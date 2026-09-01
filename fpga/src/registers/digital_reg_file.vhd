@@ -149,7 +149,7 @@ entity digital_reg_file is
     dsm_hi_alpha   : out std_logic_vector(11 downto 0);
     dsm_lo_alpha   : out std_logic_vector(11 downto 0);
     noise_alpha    : out std_logic_vector(11 downto 0);
-    -- YUV low-bit dirt on analog output
+    -- YUV dirt on analog output bits [4:2]
     dirt_ctrl      : out std_logic_vector(4 downto 0);
     -- Shape select controls
     shape1_a_sel   : out std_logic_vector(3 downto 0);

@@ -660,7 +660,7 @@ begin
       v_result  => v_result
     );
 
-  -- Clean 8-bit YUV; wrapper applies yuv_dirt using noise_dirt_o
+  -- Clean 8-bit YUV; wrapper yuv_dirt uses a per-pixel rand_num LFSR
   y_out <= y_result(11 downto 4);
   u_out <= u_result(11 downto 4);
   v_out <= v_result(11 downto 4);

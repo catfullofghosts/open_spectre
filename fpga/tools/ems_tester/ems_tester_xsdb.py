@@ -384,7 +384,7 @@ def set_audio_digital_thresh(treble=3, bass=3):
 
 
 def set_dirt(depth=0, y_en=False, u_en=False, v_en=False):
-            """Set YUV dirt: depth 0-3 LSB bits, per-channel enables. @ 0x198."""
+            """Set YUV dirt: depth 0=off, 1-3 XOR bits [2]/[3:2]/[4:2], per-channel enables. @ 0x198."""
             value = (int(depth) & 0x3) | ((1 if y_en else 0) << 2) | ((1 if u_en else 0) << 3) | ((1 if v_en else 0) << 4)
             wr_reg(DIRT_CTRL_REG, value)
 
