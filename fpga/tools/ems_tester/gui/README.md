@@ -1,3 +1,7 @@
+# in Your vivado bin folder (windows) open a terminal and run 'xsdb' 
+# This starts a XSDB session, Now enter "xsdbserver start -port 3010"
+
+
 # Serial Communication GUI Application
 
 A cross-platform Python GUI application for serial communication with USB devices, featuring buttons, sliders, and a flexible grid interface.
