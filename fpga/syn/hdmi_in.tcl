@@ -387,7 +387,7 @@ proc create_root_design { parentCell } {
     CONFIG.PCW_EN_EMIO_TTC0 {0} \
     CONFIG.PCW_EN_EMIO_TTC1 {0} \
     CONFIG.PCW_EN_EMIO_UART0 {0} \
-    CONFIG.PCW_EN_EMIO_UART1 {0} \
+    CONFIG.PCW_EN_EMIO_UART1 {1} \
     CONFIG.PCW_EN_EMIO_WDT {0} \
     CONFIG.PCW_EN_EMIO_WP_SDIO0 {1} \
     CONFIG.PCW_EN_EMIO_WP_SDIO1 {0} \
@@ -415,7 +415,7 @@ proc create_root_design { parentCell } {
     CONFIG.PCW_EN_TTC0 {0} \
     CONFIG.PCW_EN_TTC1 {0} \
     CONFIG.PCW_EN_UART0 {1} \
-    CONFIG.PCW_EN_UART1 {0} \
+    CONFIG.PCW_EN_UART1 {1} \
     CONFIG.PCW_EN_USB0 {1} \
     CONFIG.PCW_EN_USB1 {0} \
     CONFIG.PCW_EN_WDT {0} \
@@ -751,7 +751,9 @@ proc create_root_design { parentCell } {
     CONFIG.PCW_UART0_HIGHADDR {0xE0000FFF} \
     CONFIG.PCW_UART0_PERIPHERAL_ENABLE {1} \
     CONFIG.PCW_UART0_UART0_IO {MIO 14 .. 15} \
-    CONFIG.PCW_UART1_PERIPHERAL_ENABLE {0} \
+    CONFIG.PCW_UART1_GRP_FULL_ENABLE {0} \
+    CONFIG.PCW_UART1_PERIPHERAL_ENABLE {1} \
+    CONFIG.PCW_UART1_UART1_IO {EMIO} \
     CONFIG.PCW_UART_PERIPHERAL_CLKSRC {IO PLL} \
     CONFIG.PCW_UART_PERIPHERAL_FREQMHZ {100} \
     CONFIG.PCW_UART_PERIPHERAL_VALID {1} \
@@ -1177,6 +1179,7 @@ proc create_root_design { parentCell } {
   # Restore current instance
   current_bd_instance $oldCurInst
 
+  validate_bd_design
   save_bd_design
 }
 # End of create_root_design()
@@ -1188,6 +1191,4 @@ proc create_root_design { parentCell } {
 
 create_root_design ""
 
-
-common::send_gid_msg -ssname BD::TCL -id 2053 -severity "WARNING" "This Tcl script was generated from a block design that has not been validated. It is possible that design <$design_name> may result in errors during validation."
 
