@@ -13,7 +13,10 @@
 -- Additional Comments: You can view the project here: https://github.com/cfoge/OPEN_SPECTRE-
 
 -- created by   :   RD Jordan
--- Slow counter designed for 100mhz clk
+-- Slow counters produce named square-wave rates.
+-- Clocked by the dynamic pixel clock; periods assume 720p50 = 74.25 MHz.
+-- pulse_generator toggles every toggle_period clocks, so
+--   toggle_period = clk_hz / (2 * output_hz)
 
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
@@ -37,6 +40,10 @@ end slow_counter;
 
 architecture Behavioral of slow_counter is
 
+      -- 720p50 pixel clock (same 74.25 MHz as 720p60; 1980*750*50).
+      -- toggle_period = CLK_HZ / (2 * f_hz)
+      constant CLK_HZ : natural := 74_250_000;
+
       signal hz6i,hz3i,hz1_5i,hz_6i,hz_4i,hz_2i      : std_logic;
       signal frame_sync_d                            : std_logic;
       signal v_sync_d                                : std_logic := '0';
@@ -52,7 +59,7 @@ begin
 
 hz6_counter : entity work.pulse_generator
     generic map(
-        toggle_period => 1_041_666  -- 4_166_666 / 4
+        toggle_period => CLK_HZ / 12            -- 6 Hz
     )
     port map(
         clk => clk,
@@ -62,7 +69,7 @@ hz6_counter : entity work.pulse_generator
     
 hz3_counter : entity work.pulse_generator
     generic map(
-        toggle_period => 2_083_333  -- 8_333_333 / 4
+        toggle_period => CLK_HZ / 6             -- 3 Hz
     )
     port map(
         clk => clk,
@@ -72,7 +79,7 @@ hz3_counter : entity work.pulse_generator
 
 hz1_5_counter : entity work.pulse_generator
     generic map(
-        toggle_period => 4_166_666  -- 16_666_666 / 4
+        toggle_period => CLK_HZ / 3             -- 1.5 Hz
     )
     port map(
         clk => clk,
@@ -82,7 +89,7 @@ hz1_5_counter : entity work.pulse_generator
 
 hz_6_counter : entity work.pulse_generator
     generic map(
-        toggle_period => 10_416_666  -- 41_666_666 / 4
+        toggle_period => CLK_HZ * 5 / 6         -- 0.6 Hz
     )
     port map(
         clk => clk,
@@ -92,7 +99,7 @@ hz_6_counter : entity work.pulse_generator
     
 hz_4_counter : entity work.pulse_generator
     generic map(
-        toggle_period => 15_625_000  -- 62_500_000 / 4
+        toggle_period => CLK_HZ * 5 / 4         -- 0.4 Hz
     )
     port map(
         clk => clk,
@@ -102,7 +109,7 @@ hz_4_counter : entity work.pulse_generator
 
 hz_2_counter : entity work.pulse_generator
     generic map(
-        toggle_period => 31_250_000  -- 125_000_000 / 4
+        toggle_period => CLK_HZ * 5 / 2         -- 0.2 Hz
     )
     port map(
         clk => clk,

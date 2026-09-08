@@ -20,7 +20,7 @@ use ieee.numeric_std.all;
 
 entity pulse_generator is
     generic (
-        toggle_period : natural := 156_250_000 -- Number of clock cycles for 0.4 Hz toggle frequency
+        toggle_period : natural := 92_812_500 -- half-period clocks; 0.4 Hz @ 74.25 MHz
     );
     port (
         clk : in std_logic;
@@ -30,9 +30,9 @@ entity pulse_generator is
 end entity pulse_generator;
 
 architecture Behavioral of pulse_generator is
-    signal toggle_counter : unsigned(27 downto 0) := (others => '0'); -- 28 bits for 156_250_000
+    signal toggle_counter : unsigned(31 downto 0) := (others => '0');
     signal toggle_output  : std_logic := '0';
-    constant toggle_period_c : unsigned(27 downto 0) := to_unsigned(toggle_period - 1, 28);
+    constant toggle_period_c : unsigned(31 downto 0) := to_unsigned(toggle_period - 1, 32);
 begin
     process(clk)
     begin

@@ -46,7 +46,8 @@ architecture Behavioral of random_voltage is
   signal recycle_stretched: std_logic := '0'; 
   signal lfsr: std_logic_vector(5 downto 0);
   signal cnt_enable : std_logic := '1';
-  signal slowdown_cnt : std_logic_vector(5 downto 0) := (others => '0'); -- 6 bits for 48x slowdown (0-47)
+  -- Base /256 vs pixel clock, then slowdown_sel 1x / 24x / 48x on top of that.
+  signal slowdown_cnt : unsigned(13 downto 0) := (others => '0');
 
 begin
 
@@ -129,37 +130,31 @@ begin
       
   cnt_rst <=  cnt_match or rst; -- chroma_pin_74 does it also have this pin?
   
-  -- Slowdown logic: controls counter enable to slow down pseudo-random output
-  process(clock) begin
+  -- Clock enable: /256 vs pix clk, times slowdown_sel (1 / 24 / 48).
+  process(clock)
+    variable v_div : unsigned(13 downto 0);
+  begin
     if rising_edge(clock) then
       if rst = '1' then
         slowdown_cnt <= (others => '0');
-        cnt_enable <= '1';
+        cnt_enable   <= '0';
       else
         case slowdown_sel is
-          when "00" => -- Normal speed (no slowdown)
-            cnt_enable <= '1';
-            slowdown_cnt <= (others => '0');
-          when "01" => -- 24x slower (enable every 24th clock)
-            if slowdown_cnt = "010111" then  -- 23 in binary (0-23 = 24 counts)
-              cnt_enable <= '1';
-              slowdown_cnt <= (others => '0');
-            else
-              cnt_enable <= '0';
-              slowdown_cnt <= std_logic_vector(unsigned(slowdown_cnt) + 1);
-            end if;
-          when "10" | "11" => -- 48x slower (enable every 48th clock)
-            if slowdown_cnt = "101111" then  -- 47 in binary (0-47 = 48 counts)
-              cnt_enable <= '1';
-              slowdown_cnt <= (others => '0');
-            else
-              cnt_enable <= '0';
-              slowdown_cnt <= std_logic_vector(unsigned(slowdown_cnt) + 1);
-            end if;
+          when "00" =>
+            v_div := to_unsigned(256 - 1, 14);           -- /256
+          when "01" =>
+            v_div := to_unsigned(256 * 24 - 1, 14);      -- /6144
           when others =>
-            cnt_enable <= '1';
-            slowdown_cnt <= (others => '0');
+            v_div := to_unsigned(256 * 48 - 1, 14);      -- /12288
         end case;
+
+        if slowdown_cnt = v_div then
+          cnt_enable   <= '1';
+          slowdown_cnt <= (others => '0');
+        else
+          cnt_enable   <= '0';
+          slowdown_cnt <= slowdown_cnt + 1;
+        end if;
       end if;
     end if;
   end process;
@@ -180,6 +175,7 @@ slew_output_1 : entity work.slew_wraper
   Port map(
     clk => clock,
     rst => rst,
+    ce  => cnt_enable,
     slew_sel => slew_in,
     input => noise_1_to_slew,
     output => slew_out_1
@@ -190,6 +186,7 @@ slew_output_2 : entity work.slew_wraper
   Port map(
     clk => clock,
     rst => rst,
+    ce  => cnt_enable,
     slew_sel => slew_in,
     input => noise_2_to_slew,
     output => slew_out_2

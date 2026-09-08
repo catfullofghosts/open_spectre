@@ -21,6 +21,7 @@ entity slew_wraper is
   Port (
     clk : in std_logic ;
     rst : in std_logic ;
+    ce  : in std_logic := '1'; -- slew step enable; tie high for every clock
     slew_sel : in std_logic_vector(2 downto 0);
     input: in std_logic_vector(9 downto 0);
     output: out std_logic_vector(9 downto 0)
@@ -59,7 +60,7 @@ begin
         i_clk => clk,
         i_rstb => rst,
         i_sync_reset => rst,
-        i_data_ena => '1',
+        i_data_ena => ce,
         i_data => input,
         o_data_valid => open,
         o_data => out_fast
@@ -74,7 +75,7 @@ begin
         i_clk => clk,
         i_rstb => rst,
         i_sync_reset => rst,
-        i_data_ena => '1',
+        i_data_ena => ce,
         i_data => input,
         o_data_valid => open,
         o_data => out_med
@@ -89,7 +90,7 @@ begin
         i_clk => clk,
         i_rstb => rst,
         i_sync_reset => rst,
-        i_data_ena => '1',
+        i_data_ena => ce,
         i_data => input,
         o_data_valid => open,
         o_data => out_slow
@@ -104,7 +105,7 @@ begin
         i_clk => clk,
         i_rstb => rst,
         i_sync_reset => rst,
-        i_data_ena => '1',
+        i_data_ena => ce,
         i_data => input,
         o_data_valid => open,
         o_data => out_snail

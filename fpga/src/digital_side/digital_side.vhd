@@ -251,7 +251,7 @@ cdc_pix_100 : process(clk)
     y => xy_inv_out
     );
 
-  slow_counter : entity work.slow_counter --running at 100mhz
+  slow_counter : entity work.slow_counter -- Hz rates vs 720p50 pix clk (74.25 MHz)
     port
     map (
     clk        => clk,
@@ -325,11 +325,11 @@ cdc_pix_100 : process(clk)
   delay_in_vec <= '0' & delay_in;
   delay_out       <= delay_out_vec(0);
   
-  delay_800 : entity work.delay_800us -- BRAM delay sampled at full pixel clock
+  delay_800 : entity work.delay_800us -- 10-clock matrix feedback delay
     generic
     map(
     g_WIDTH => 2,
-    g_DEPTH => 59400
+    g_DEPTH => 10
     )
     port
     map(
