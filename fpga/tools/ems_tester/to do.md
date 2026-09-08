@@ -1,5 +1,19 @@
 !!! REMEMBER IF SOMETHIGN DOESNT WORK CHECK THE REST AND H/Vsync are correct poliarity!!!!
 
+
+NEXT CHECK!::
+- slow counters should be acurate at 720p50
+- delay should match actual MESS unit
+- random voltages should be much slower
+- check DAC favors bit 0 a lot more
+
+
+
+
+
+
+
+
 todo:
 - Oscilator other waveforms seem to be lower amplitude? -- fixed all osc same amp!!!
 - ca div, get rid of, they are a pain----check done
