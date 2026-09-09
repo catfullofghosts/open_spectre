@@ -134,6 +134,7 @@ entity digital_reg_file is
     sync_hv_invert      : out std_logic; -- 1=invert (640x480 neg sync), 0=pass (720p pos sync)
     slow_cnt_frame_sel  : out std_logic; -- 0=Hz slow counters, 1=frame 2/4/8/16/32/64
     slow_cnt_div4       : out std_logic; -- 1=/4 on Hz and frame sources
+    classic_mode        : out std_logic_vector(3 downto 0); -- [0]=DAC [1]=X delay [2]=4:3 mask [3]=luma+10
     ca_cfg              : out std_logic_vector(15 downto 0); -- [7:0] rule, [8] inject^luma_msb, [9] rule^Y, [10] rule^X
     audio_crossover     : out std_logic_vector(7 downto 0); -- T/B split @ 0x0C[7:0]
     audio_t_thresh      : out std_logic_vector(2 downto 0); -- digital T cutoff step 0..7 @ 0x0C[13:11]
@@ -302,6 +303,7 @@ architecture RTL of digital_reg_file is
   signal sync_hv_invert_i     : std_logic := '0';
   signal slow_cnt_frame_sel_i : std_logic := '0';
   signal slow_cnt_div4_i      : std_logic := '0';
+  signal classic_mode_i       : std_logic_vector(3 downto 0) := "0011"; -- DAC+X delay on; 4:3 and luma+10 off
   signal ca_cfg_i             : std_logic_vector(15 downto 0) := x"021E"; -- Rule 30, rule_xor_y
   signal audio_crossover_i    : std_logic_vector(7 downto 0) := x"80"; -- mid crossover default
   signal audio_crossover_r    : std_logic_vector(7 downto 0) := x"80";
@@ -422,6 +424,8 @@ begin
   regs(ra(x"58")) <= x"0" & cr_level_i & x"0" & y_level_i;
   regs(ra(x"5C")) <= x"00000" & cb_level_i;
   regs(ra(x"78")) <= "00000000000000000000000" & slow_cnt_div4_i & slow_cnt_frame_sel_i & sync_hv_invert_i & edge_width_sel_i & ext_vid_in_mux_sel_i & pix_clk_div_sel_i & col_en_bypass_i & video_active;
+  -- Classic mode: [0]=EMS DAC [1]=X delays [2]=4:3 mask [3]=luma+10
+  regs(ra(x"7C")) <= x"000000" & "0000" & classic_mode_i;
   regs(ra(x"18")) <= x"0000" & ca_cfg_i;
   -- Luma key control
   regs(ra(x"C8")) <= luma_key_enable_i & luma_key_direction_i & "00000000000000" & luma_key_thresh_high_i & luma_key_thresh_low_i;
@@ -707,7 +711,8 @@ begin
           when x"F8" =>
             video_fx_sharpness_i <= write_reg;
           when x"7C" =>
-            Rotery_addr_mux_i <= write_reg(3 downto 0);
+            classic_mode_i <= write_reg(3 downto 0);
+            -- [0]=EMS DAC [1]=X delays [2]=4:3 mask [3]=luma+10
             -- Note the Gap in addresses for the read only Rot encoders?
           when x"94" =>
             Rotery_enc_preset_w_i <= write_reg(0);
@@ -804,6 +809,7 @@ begin
   sync_hv_invert <= sync_hv_invert_i;
   slow_cnt_frame_sel <= slow_cnt_frame_sel_i;
   slow_cnt_div4      <= slow_cnt_div4_i;
+  classic_mode   <= classic_mode_i;
   ca_cfg         <= ca_cfg_i;
   audio_crossover <= audio_crossover_r;
   audio_t_thresh  <= audio_t_thresh_r;

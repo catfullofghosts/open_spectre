@@ -117,22 +117,23 @@ MATRIX_OUT_MAP["ff_in_a"] = 32
 MATRIX_OUT_MAP["ff_in_b"] = 33
 MATRIX_OUT_MAP["acm_out1"] = 34
 MATRIX_OUT_MAP["acm_out2"] = 35
-# luma_in1 (39 downto 36)
+# luma/chroma: lowest matrix output is MSB
+# luma_in1_3 @ 36 ... luma_in1_0 @ 39
 for i in range(4):
-    MATRIX_OUT_MAP[f"luma_in1_{i}"] = 36 + i
-# chroma_mux_in1 (42 downto 40) and (45 downto 43)
+    MATRIX_OUT_MAP[f"luma_in1_{i}"] = 39 - i
+# chroma_mux_in1 U: _2 @ 40 ... _0 @ 42; V: _5 @ 43 ... _3 @ 45
 for i in range(3):
-    MATRIX_OUT_MAP[f"chroma_mux_in1_{i}"] = 40 + i
+    MATRIX_OUT_MAP[f"chroma_mux_in1_{i}"] = 42 - i
 for i in range(3):
-    MATRIX_OUT_MAP[f"chroma_mux_in1_{i+3}"] = 43 + i
-# luma_in2 (49 downto 46)
+    MATRIX_OUT_MAP[f"chroma_mux_in1_{i+3}"] = 45 - i
+# luma_in2_3 @ 46 ... luma_in2_0 @ 49
 for i in range(4):
-    MATRIX_OUT_MAP[f"luma_in2_{i}"] = 46 + i
-# chroma_mux_in2 (52 downto 50) and (55 downto 53)
+    MATRIX_OUT_MAP[f"luma_in2_{i}"] = 49 - i
+# chroma_mux_in2 U: _2 @ 50 ... _0 @ 52; V: _5 @ 53 ... _3 @ 55
 for i in range(3):
-    MATRIX_OUT_MAP[f"chroma_mux_in2_{i}"] = 50 + i
+    MATRIX_OUT_MAP[f"chroma_mux_in2_{i}"] = 52 - i
 for i in range(3):
-    MATRIX_OUT_MAP[f"chroma_mux_in2_{i+3}"] = 53 + i
+    MATRIX_OUT_MAP[f"chroma_mux_in2_{i+3}"] = 55 - i
 MATRIX_OUT_MAP["chrom_swap"] = 56
 
 def resolve_matrix_out(value):

@@ -45,6 +45,8 @@ entity digital_side is
     ca_cfg         : in std_logic_vector(15 downto 0); -- [7:0] rule, [8] inject^luma_msb, [9] rule^Y, [10] rule^X
     slow_cnt_frame_sel : in std_logic := '0'; -- 0=Hz slow counters, 1=frame 2/4/8/16/32/64
     slow_cnt_div4      : in std_logic := '0'; -- 1=/4 on Hz and frame sources
+    classic_dac        : in std_logic := '1'; -- 1=EMS fake_dac tables, 0=linear
+    classic_x_delay    : in std_logic := '0'; -- 1=X counters 1/3/4 delayed 1/2/1 clk
 
     -- inputs form analoge side
     osc1_sqr : in std_logic :='0';
@@ -101,6 +103,9 @@ architecture Behavioral of digital_side is
   signal luma_msb_d1    : std_logic := '0';
   signal luma_msb_d2    : std_logic := '0';
   signal x_count        : std_logic_vector(8 downto 0);
+  signal x_count_raw    : std_logic_vector(8 downto 0);
+  signal x_count_d1     : std_logic_vector(8 downto 0) := (others => '0');
+  signal x_count_d2     : std_logic_vector(8 downto 0) := (others => '0');
   signal y_count        : std_logic_vector(8 downto 0);
   signal x_count_low_hi : std_logic_vector(8 downto 0);
   signal y_count_low_hi : std_logic_vector(8 downto 0);
@@ -229,7 +234,23 @@ cdc_pix_100 : process(clk)
     count  => x_count_low_hi
     );
 
-  x_count <= rev_v(x_count_low_hi);
+  x_count_raw <= rev_v(x_count_low_hi);
+
+  -- Classic X delays (1-based bits of reversed X bus / xy_inv_out_0..):
+  -- counter 1 (bit 0) +1 clk, counter 3 (bit 2) +2 clk, counter 4 (bit 3) +1 clk.
+  p_classic_x_delay : process (clk)
+  begin
+    if rising_edge(clk) then
+      x_count_d1 <= x_count_raw;
+      x_count_d2 <= x_count_d1;
+    end if;
+  end process p_classic_x_delay;
+
+  x_count(0) <= x_count_d1(0) when classic_x_delay = '1' else x_count_raw(0);
+  x_count(1) <= x_count_raw(1);
+  x_count(2) <= x_count_d2(2) when classic_x_delay = '1' else x_count_raw(2);
+  x_count(3) <= x_count_d1(3) when classic_x_delay = '1' else x_count_raw(3);
+  x_count(8 downto 4) <= x_count_raw(8 downto 4);
 
   y_counter : entity work.counter_re
     port
@@ -466,12 +487,13 @@ cdc_pix_100 : process(clk)
   acm_out1_o <= acm_out1;
   acm_out2_o <= acm_out2;
 
-  luma_in1(3 downto 0)       <= matrix_out(39 downto 36);
-  chroma_mux_in1(2 downto 0) <= matrix_out(42 downto 40);
-  chroma_mux_in1(5 downto 3) <= matrix_out(45 downto 43);
-  luma_in2(3 downto 0)       <= matrix_out(49 downto 46);
-  chroma_mux_in2(2 downto 0) <= matrix_out(52 downto 50);
-  chroma_mux_in2(5 downto 3) <= matrix_out(55 downto 53);
+  -- Lowest matrix output is MSB (first luma/chroma input is the heaviest bit)
+  luma_in1(3 downto 0)       <= matrix_out(36) & matrix_out(37) & matrix_out(38) & matrix_out(39);
+  chroma_mux_in1(2 downto 0) <= matrix_out(40) & matrix_out(41) & matrix_out(42);
+  chroma_mux_in1(5 downto 3) <= matrix_out(43) & matrix_out(44) & matrix_out(45);
+  luma_in2(3 downto 0)       <= matrix_out(46) & matrix_out(47) & matrix_out(48) & matrix_out(49);
+  chroma_mux_in2(2 downto 0) <= matrix_out(50) & matrix_out(51) & matrix_out(52);
+  chroma_mux_in2(5 downto 3) <= matrix_out(53) & matrix_out(54) & matrix_out(55);
   chrom_swap                 <= matrix_out(56);
 
   -- Extra outs to analoge side
@@ -512,6 +534,7 @@ cdc_pix_100 : process(clk)
   )
   port map (
     dac_in => luma_vid_out,
+    classic => classic_dac,
     dac_out => Y
   );
 
@@ -521,6 +544,7 @@ c1_dac_inst : entity work.fake_dac
   )
   port map (
     dac_in => '0' & chroma_vid_out(5 downto 3),
+    classic => classic_dac,
     dac_out => Cr
   );
 
@@ -530,6 +554,7 @@ c2_dac_inst : entity work.fake_dac
   )
   port map (
     dac_in => '0' & chroma_vid_out(2 downto 0),
+    classic => classic_dac,
     dac_out => Cb
   );
 

@@ -306,6 +306,18 @@ architecture rtl of spector_wrapper_zynq is
   signal sync_hv_invert     : std_logic;
   signal slow_cnt_frame_sel : std_logic;
   signal slow_cnt_div4      : std_logic;
+  signal classic_mode       : std_logic_vector(3 downto 0);
+  -- 720p CEA: H back porch 220, active 1280. 4:3 of 720 = 960, so 160 px each side.
+  constant C_H_BACK_PORCH : natural := 220;
+  constant C_H_ACTIVE     : natural := 1280;
+  constant C_43_SIDE      : natural := 160; -- (1280 - 960) / 2
+  constant C_43_KEEP_LO   : natural := C_H_BACK_PORCH + C_43_SIDE;           -- 380
+  constant C_43_KEEP_HI   : natural := C_H_BACK_PORCH + C_43_SIDE + 960;     -- 1340
+  signal h_sync_n_d       : std_logic := '0';
+  signal x_line           : unsigned(11 downto 0) := (others => '0');
+  signal y_enc            : std_logic_vector(7 downto 0);
+  signal u_enc            : std_logic_vector(7 downto 0);
+  signal v_enc            : std_logic_vector(7 downto 0);
   signal ca_cfg            : std_logic_vector(15 downto 0);
   signal audio_crossover   : std_logic_vector(7 downto 0);
   signal audio_t_thresh    : std_logic_vector(2 downto 0);
@@ -584,6 +596,7 @@ begin
       sync_hv_invert      => sync_hv_invert,
       slow_cnt_frame_sel  => slow_cnt_frame_sel,
       slow_cnt_div4       => slow_cnt_div4,
+      classic_mode        => classic_mode,
       ca_cfg              => ca_cfg,
       audio_crossover     => audio_crossover,
       audio_t_thresh      => audio_t_thresh,
@@ -760,6 +773,8 @@ begin
       ca_cfg        => ca_cfg,
       slow_cnt_frame_sel => slow_cnt_frame_sel,
       slow_cnt_div4      => slow_cnt_div4,
+      classic_dac        => classic_mode(0),
+      classic_x_delay    => classic_mode(1),
       osc1_sqr       => osc_1_sqr_o,
       osc2_sqr       => osc_2_sqr_o,
       random1        => noise_1_o,
@@ -1091,14 +1106,61 @@ begin
 --    );
 
   -------------------------------------------
-  -- Video Output
+  -- Classic 4:3 mask + luma lift, then colour encoder
   -------------------------------------------
+  p_classic_out : process (pix_clk)
+    variable v_x : unsigned(11 downto 0);
+    variable v_y : unsigned(7 downto 0);
+    variable v_u : unsigned(7 downto 0);
+    variable v_v : unsigned(7 downto 0);
+    variable v_sum : unsigned(8 downto 0);
+  begin
+    if rising_edge(pix_clk) then
+      if h_sync_n = '0' then
+        if h_sync_n_d = '1' then
+          v_x := (others => '0');
+        else
+          v_x := x_line + 1;
+        end if;
+      else
+        v_x := x_line;
+      end if;
+      x_line     <= v_x;
+      h_sync_n_d <= h_sync_n;
+
+      v_y := unsigned(y_out);
+      v_u := unsigned(u_out);
+      v_v := unsigned(v_out);
+
+      -- 4:3 pillarbox: blank left/right of 720p active (off at reset)
+      if classic_mode(2) = '1' and (v_x < C_43_KEEP_LO or v_x >= C_43_KEEP_HI) then
+        v_y := (others => '0');
+        v_u := (others => '0');
+        v_v := (others => '0');
+      end if;
+
+      -- +10 luma, saturate at 255
+      if classic_mode(3) = '1' then
+        v_sum := ('0' & v_y) + 10;
+        if v_sum(8) = '1' then
+          v_y := (others => '1');
+        else
+          v_y := v_sum(7 downto 0);
+        end if;
+      end if;
+
+      y_enc <= std_logic_vector(v_y);
+      u_enc <= std_logic_vector(v_u);
+      v_enc <= std_logic_vector(v_v);
+    end if;
+  end process p_classic_out;
+
      color_encoder_inst : entity work.color_encoder
         port map (
             clk        => pix_clk,
-            y          => y_out,
-            c1         => u_out,
-            c2         => v_out,
+            y          => y_enc,
+            c1         => u_enc,
+            c2         => v_enc,
             swap_early => '0',
             red        => red,
             green      => green,
@@ -1111,7 +1173,7 @@ begin
   begin
     if rising_edge (pix_clk) then
       if col_en_bypass = '1' then
-        encoder_video := y_out & u_out & v_out;
+        encoder_video := y_enc & u_enc & v_enc;
       else
         encoder_video := blue & green & red;
       end if;
