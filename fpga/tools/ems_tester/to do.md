@@ -3,10 +3,14 @@
 
 NEXT CHECK!::
 - slow counters should be acurate at 720p50
-- delay should match actual MESS unit
-- random voltages should be much slower
-- check DAC favors bit 0 a lot more
-
+    - slow counters tear 1/4 down the frame?!
+- delay should match actual MESS unit, delay now is correxct
+- random voltages should be much slower- with the slow down reg they are clow enough now
+- check DAC favors bit 0 a lot more -- clasic mode dac works!!!
+- classic luma, should be stronger!!
+- 4:3 clasic mode works
+- classic mode x delay needs differecnt delays for each of the delayed x counts
+- noise cycle rexycle doesnt seem to loop correctly
 
 
 

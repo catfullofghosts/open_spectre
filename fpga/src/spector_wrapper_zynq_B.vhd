@@ -1139,9 +1139,9 @@ begin
         v_v := (others => '0');
       end if;
 
-      -- +10 luma, saturate at 255
+      -- +25 luma, saturate at 255
       if classic_mode(3) = '1' then
-        v_sum := ('0' & v_y) + 10;
+        v_sum := ('0' & v_y) + 25;
         if v_sum(8) = '1' then
           v_y := (others => '1');
         else

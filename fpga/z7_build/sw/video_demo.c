@@ -39,6 +39,7 @@
 #include "xil_io.h"
 #include "timer_ps/timer_ps.h"
 #include "xparameters.h"
+#include "midi_uart/midi_uart.h"
 
 /* ------------------------------------------------------------ */
 /*				Math Function Approximations					*/
@@ -425,6 +426,16 @@ void DemoInitialize()
 	 */
 	VideoSetCallback(&videoCapt, DemoISR, &fRefresh);
 
+	Status = MidiUartInit();
+	if (Status != XST_SUCCESS)
+	{
+		xil_printf("MIDI UART1 init failed %d (Pico PMOD link)\r\n", Status);
+	}
+	else
+	{
+		xil_printf("MIDI UART1 ready @ %u baud\r\n", (unsigned)MIDI_UART_BAUD);
+	}
+
 	DemoPrintTest(dispCtrl.framePtr[dispCtrl.curFrame], dispCtrl.vMode.width, dispCtrl.vMode.height, dispCtrl.stride, DEMO_PATTERN_1);
 
 	return;
@@ -448,7 +459,9 @@ void DemoRun()
 
 		/* Wait for data on UART */
 		while (!XUartPs_IsReceiveData(UART_BASEADDR) && !fRefresh)
-		{}
+		{
+			MidiUartPoll();
+		}
 
 		/* Store the first character in the UART receive FIFO and echo it */
 		if (XUartPs_IsReceiveData(UART_BASEADDR))
@@ -617,6 +630,11 @@ void DemoPrintMenu()
 	if (videoCapt.state == VIDEO_DISCONNECTED) xil_printf("*Video Capture Resolution: %22s*\n\r", "!HDMI UNPLUGGED!");
 	else xil_printf("*Video Capture Resolution: %17dx%-4d*\n\r", videoCapt.timing.HActiveVideo, videoCapt.timing.VActiveVideo);
 	xil_printf("*Video Frame Index: %29d*\n\r", videoCapt.curFrame);
+	xil_printf("*MIDI UART1 msgs:%6u last %02X %02X %02X          *\n\r",
+			(unsigned)MidiUartMsgCount(),
+			(unsigned)MidiUartLastStatus(),
+			(unsigned)MidiUartLastData1(),
+			(unsigned)MidiUartLastData2());
 	xil_printf("**************************************************\n\r");
 	xil_printf("\n\r");
 	xil_printf("1 - Change Display Resolution\n\r");
@@ -672,6 +690,7 @@ void DemoChangeRes()
 		waitCount = 0U;
 		while (!XUartPs_IsReceiveData(UART_BASEADDR))
 		{
+			MidiUartPoll();
 			waitCount++;
 			if (waitCount > 80000000U)
 			{

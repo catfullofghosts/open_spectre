@@ -46,7 +46,7 @@ entity digital_side is
     slow_cnt_frame_sel : in std_logic := '0'; -- 0=Hz slow counters, 1=frame 2/4/8/16/32/64
     slow_cnt_div4      : in std_logic := '0'; -- 1=/4 on Hz and frame sources
     classic_dac        : in std_logic := '1'; -- 1=EMS fake_dac tables, 0=linear
-    classic_x_delay    : in std_logic := '0'; -- 1=X counters 1/3/4 delayed 1/2/1 clk
+    classic_x_delay    : in std_logic := '0'; -- 1=X counters 1/3/4 delayed 1/2/3 clk
 
     -- inputs form analoge side
     osc1_sqr : in std_logic :='0';
@@ -106,6 +106,7 @@ architecture Behavioral of digital_side is
   signal x_count_raw    : std_logic_vector(8 downto 0);
   signal x_count_d1     : std_logic_vector(8 downto 0) := (others => '0');
   signal x_count_d2     : std_logic_vector(8 downto 0) := (others => '0');
+  signal x_count_d3     : std_logic_vector(8 downto 0) := (others => '0');
   signal y_count        : std_logic_vector(8 downto 0);
   signal x_count_low_hi : std_logic_vector(8 downto 0);
   signal y_count_low_hi : std_logic_vector(8 downto 0);
@@ -237,19 +238,20 @@ cdc_pix_100 : process(clk)
   x_count_raw <= rev_v(x_count_low_hi);
 
   -- Classic X delays (1-based bits of reversed X bus / xy_inv_out_0..):
-  -- counter 1 (bit 0) +1 clk, counter 3 (bit 2) +2 clk, counter 4 (bit 3) +1 clk.
+  -- counter 1 (bit 0) +1 clk, counter 3 (bit 2) +2 clk, counter 4 (bit 3) +3 clk.
   p_classic_x_delay : process (clk)
   begin
     if rising_edge(clk) then
       x_count_d1 <= x_count_raw;
       x_count_d2 <= x_count_d1;
+      x_count_d3 <= x_count_d2;
     end if;
   end process p_classic_x_delay;
 
   x_count(0) <= x_count_d1(0) when classic_x_delay = '1' else x_count_raw(0);
   x_count(1) <= x_count_raw(1);
   x_count(2) <= x_count_d2(2) when classic_x_delay = '1' else x_count_raw(2);
-  x_count(3) <= x_count_d1(3) when classic_x_delay = '1' else x_count_raw(3);
+  x_count(3) <= x_count_d3(3) when classic_x_delay = '1' else x_count_raw(3);
   x_count(8 downto 4) <= x_count_raw(8 downto 4);
 
   y_counter : entity work.counter_re
