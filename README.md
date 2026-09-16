@@ -73,16 +73,19 @@ Creative Commons CC BY-NC
 ## Contributors
 - Remi Freer
 - Jacob Stoker
-- Robert D Jordan
 - Andrey Demenev
+- Robert D Jordan
 
 ## Donations
 We are very thankful to have received donations from the following people:
 Chris Korvin,
 Jay Hotchin,
-Milton Grimshaw, and more amazing anonymous people.
+Milton Grimshaw, 
+and more amazing anonymous people.
 
 ## Thank yous
-- Violet Shylet
 - MESS Melbourne
+  - Sam Galyer
+  - Robin Fox
 - Flo Kaufmann
+- Violet Shylet
