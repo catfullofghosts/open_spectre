@@ -37,6 +37,7 @@ HW interface  [░░░░░░░░░░]
 ## Aim
 
 Recreate the SPECTRE in HDL so it can still make the pictures it was meant to make. Then keep going in the same spirit, not as a museum copy.
+The idea is preservation, but not at the cost of 
 
 More on that: [Cloning Hardware Ethos](documentation/Cloning%20a%20process%20not%20a%20device.md)
 
@@ -45,7 +46,7 @@ More on that: [Cloning Hardware Ethos](documentation/Cloning%20a%20process%20not
 
 ## Want to contribute?
 
-If you have FPGA and/or Verilog/VHDL skills, we would love to have you involved. A few things first.
+If you have FPGA and/or Verilog/VHDL skills, industrial design skills or VST building skills, I/we would love to have you involved. PLZ!!!!!. A few things first.
 
 ### What to do first
 - Look through [Spectron Resources](Spectron%20Resources/readme.md) to get an idea of what the EMS SPECTRE is and how it works
@@ -63,12 +64,13 @@ If you have FPGA and/or Verilog/VHDL skills, we would love to have you involved.
 - Contributions need to be something we can release under CC BY-NC
 
 ### How to get involved
-- Email *OPEN.SPECTRE.PROJECT@gmail.com* and see what modules we need at the moment
+- Email *OPEN.SPECTRE.PROJECT@gmail.com* and see what modules/work we need at the moment
 - Branch the repo, make a module, and submit a pull request
 - If you are not good at git/GitHub, write the module and email it to us. We will integrate it.
 
 ## License
 Creative Commons CC BY-NC
+* I want everyone to be able to experience this seminal (ewwww...) video synth and learn from its design and technical wizardry....... buuuuut, I want to make a physical product version of this one day, so hence the NC. That said if you want to do some thing commercial with this code, just email me about it and I'll most likely just say yes.
 
 ## Contributors
 - Remi Freer
@@ -89,3 +91,5 @@ and more amazing anonymous people.
   - Robin Fox
 - Flo Kaufmann
 - Violet Shylet
+
+
