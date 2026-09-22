@@ -28,6 +28,16 @@ A cross-platform Python GUI application for serial communication with USB device
    python serial_gui_app.py
    ```
 
+   MIDI panel for the Pico USB gadget (Channel 1 CCs 1–35):
+
+   ```bash
+   python midi_gui_app.py
+   ```
+
+   Connect to **OPEN SPECTRE MIDI**, then use the sliders and buttons. 14-bit
+   and 12-bit fields send adjacent MSB/LSB CCs the same way the Zynq parser
+   expects.
+
 ## Usage
 
 ### Serial Connection

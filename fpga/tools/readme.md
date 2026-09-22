@@ -4,8 +4,9 @@ Helper scripts used during development. Not part of the Vivado build.
 
 ## Folders
 - `ems_tester` — Python XSDB tools to poke EMS registers on the board
-- `ems_tester/gui` — GUI front end for that tester
+- `ems_tester/gui` — GUI front end for that tester (`midi_gui_app.py` talks to the Pico)
 - `legacy` — older tester scripts, unused
+- `pico_midi_uart` — Pico USB-MIDI gadget ↔ Zynq UART1 at 31250 baud
 - `shape_sim` — Python sim of the shape generator
 - `sim_images` — PNGs dumped from Vivado sim traces
 
