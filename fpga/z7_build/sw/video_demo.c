@@ -400,6 +400,8 @@ void DemoInitialize()
 		xil_printf("Couldn't start display during demo initialization%d\r\n", Status);
 		return;
 	}
+	/* Match resolution-menu option 3: 720p with sync invert for FPGA counters. */
+	DemoSetSyncPolarityInvert(1U);
 
 	/*
 	 * Initialize the Interrupt controller and start it.
@@ -460,21 +462,7 @@ void DemoRun()
 		/* Wait for data on UART */
 		while (!XUartPs_IsReceiveData(UART_BASEADDR) && !fRefresh)
 		{
-			static u32 midiBytesSeen;
-			u32 midiBytes;
-
 			MidiUartPoll();
-			midiBytes = MidiUartByteCount();
-			if (midiBytes != midiBytesSeen)
-			{
-				midiBytesSeen = midiBytes;
-				xil_printf("\r\n[MIDI] bytes:%u msgs:%u last %02X %02X %02X\r\n",
-						(unsigned)midiBytes,
-						(unsigned)MidiUartMsgCount(),
-						(unsigned)MidiUartLastStatus(),
-						(unsigned)MidiUartLastData1(),
-						(unsigned)MidiUartLastData2());
-			}
 		}
 
 		/* Store the first character in the UART receive FIFO and echo it */
@@ -648,12 +636,6 @@ void DemoPrintMenu()
 	if (videoCapt.state == VIDEO_DISCONNECTED) xil_printf("*Video Capture Resolution: %22s*\n\r", "!HDMI UNPLUGGED!");
 	else xil_printf("*Video Capture Resolution: %17dx%-4d*\n\r", videoCapt.timing.HActiveVideo, videoCapt.timing.VActiveVideo);
 	xil_printf("*Video Frame Index: %29d*\n\r", videoCapt.curFrame);
-	xil_printf("*MIDI UART1 bytes:%5u msgs:%5u last %02X %02X %02X*\n\r",
-			(unsigned)MidiUartByteCount(),
-			(unsigned)MidiUartMsgCount(),
-			(unsigned)MidiUartLastStatus(),
-			(unsigned)MidiUartLastData1(),
-			(unsigned)MidiUartLastData2());
 	xil_printf("**************************************************\n\r");
 	xil_printf("\n\r");
 	xil_printf("1 - Change Display Resolution\n\r");

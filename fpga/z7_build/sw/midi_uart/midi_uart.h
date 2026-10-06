@@ -45,6 +45,13 @@
  * Digital
  *  32  edge width  33  slow-cnt frame
  *  34  slow-cnt /4 35  CA rule      (0-127)
+ *
+ * Matrix SysEx (educational 0x7D, "SP"):
+ *   F0 7D 53 50 20 <mat> <out> <in> <on> F7
+ *     mat 0=digital 1=analog, on 0/1
+ *     digital out 0-56 in 0-63; analog out 0-19 in 0-15
+ *   F0 7D 53 50 21 <mat> <out> F7
+ *     clear one output; out=127 clears all
  */
 
 int MidiUartInit(void);

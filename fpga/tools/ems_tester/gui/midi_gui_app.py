@@ -1,6 +1,9 @@
 """Open Spectre MIDI panel — Channel 1 CCs 1–35 via the Pico USB gadget."""
 
+import os
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont
@@ -17,9 +20,18 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSlider,
     QSpinBox,
+    QTabWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
+)
+
+from midi_matrix_grid import (
+    MatrixGridWidget,
+    analog_in_name,
+    analog_out_name,
+    digital_in_name,
+    digital_out_name,
 )
 
 try:
@@ -31,6 +43,13 @@ except ImportError as exc:
 
 MIDI_CHANNEL = 0  # Channel 1
 PREFERRED_PORT = "OPEN SPECTRE"
+SYSEX_HDR = [0x7D, 0x53, 0x50]  # educational 0x7D, "SP"
+MAT_DIGITAL = 0
+MAT_ANALOG = 1
+DIGITAL_GRID_ROWS = 64  # matrix_in 0-63
+DIGITAL_GRID_COLS = 57  # matrix_out 0-56
+ANALOG_GRID_ROWS = 11   # analog inputs 0-10
+ANALOG_GRID_COLS = 20   # analog outputs 0-19
 
 
 def encode_u14(value):
@@ -74,7 +93,7 @@ class MidiGUIApp(QMainWindow):
 
     def init_ui(self):
         self.setWindowTitle("Open Spectre MIDI")
-        self.setGeometry(80, 80, 1100, 720)
+        self.setGeometry(80, 80, 1280, 820)
 
         main = QWidget()
         self.setCentralWidget(main)
@@ -104,6 +123,7 @@ class MidiGUIApp(QMainWindow):
         self.status_label.setStyleSheet("color: red; font-weight: bold;")
         midi_layout.addWidget(self.status_label)
         midi_layout.addWidget(QLabel("Channel 1  ·  CCs 1–35"))
+        midi_layout.addWidget(QLabel("Matrix  ·  SysEx 7D 53 50"))
 
         self.send_all_btn = QPushButton("Send all")
         self.send_all_btn.clicked.connect(self.send_all)
@@ -122,6 +142,44 @@ class MidiGUIApp(QMainWindow):
         left_layout.addWidget(log_group)
         layout.addWidget(left)
 
+        tabs = QTabWidget()
+        tabs.addTab(self._cc_panel(), "CC Controls")
+
+        self.digital_grid = MatrixGridWidget(
+            DIGITAL_GRID_ROWS,
+            DIGITAL_GRID_COLS,
+            digital_in_name,
+            digital_out_name,
+            "digital",
+        )
+        self.digital_grid.on_cell = lambda row, col, on: self.matrix_set_cell(
+            MAT_DIGITAL, col, row, on
+        )
+        self.digital_grid.on_reset_all = lambda: self.matrix_reset_all(MAT_DIGITAL)
+        tabs.addTab(self._scroll_wrap(self.digital_grid), "Digital Matrix")
+
+        self.analog_grid = MatrixGridWidget(
+            ANALOG_GRID_ROWS,
+            ANALOG_GRID_COLS,
+            analog_in_name,
+            analog_out_name,
+            "analog",
+        )
+        self.analog_grid.on_cell = lambda row, col, on: self.matrix_set_cell(
+            MAT_ANALOG, col, row, on
+        )
+        self.analog_grid.on_reset_all = lambda: self.matrix_reset_all(MAT_ANALOG)
+        tabs.addTab(self._scroll_wrap(self.analog_grid), "Analog Matrix")
+
+        layout.addWidget(tabs, 1)
+
+    def _scroll_wrap(self, widget):
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(widget)
+        return scroll
+
+    def _cc_panel(self):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         body = QWidget()
@@ -142,7 +200,7 @@ class MidiGUIApp(QMainWindow):
         body_layout.addLayout(col_a)
         body_layout.addLayout(col_b)
         scroll.setWidget(body)
-        layout.addWidget(scroll, 1)
+        return scroll
 
     def _osc_group(self, title, base_cc):
         group = QGroupBox(title)
@@ -387,6 +445,40 @@ class MidiGUIApp(QMainWindow):
         for fn in self._senders:
             fn()
         self._flush_midi()
+
+    def send_sysex(self, data):
+        if self.port is None or mido is None:
+            return False
+        self._flush_midi()
+        try:
+            self.port.send(mido.Message("sysex", data=data))
+        except Exception as exc:
+            self.log(f"SysEx error: {exc}")
+            return False
+        return True
+
+    def matrix_set_cell(self, mat, out_idx, in_idx, on):
+        name_in = digital_in_name(in_idx) if mat == MAT_DIGITAL else analog_in_name(in_idx)
+        name_out = digital_out_name(out_idx) if mat == MAT_DIGITAL else analog_out_name(out_idx)
+        status = "ON" if on else "OFF"
+        if self.port is None:
+            self.log(f"Matrix {status}: {name_in} -> {name_out} (not connected)")
+            return False
+        data = SYSEX_HDR + [0x20, mat, int(out_idx), int(in_idx), 1 if on else 0]
+        if not self.send_sysex(data):
+            return False
+        self.log(f"Matrix {status}: {name_in} -> {name_out}")
+        return True
+
+    def matrix_reset_all(self, mat):
+        kind = "digital" if mat == MAT_DIGITAL else "analog"
+        if self.port is None:
+            QMessageBox.warning(self, "Warning", "Not connected to MIDI")
+            return False
+        if not self.send_sysex(SYSEX_HDR + [0x21, mat, 127]):
+            return False
+        self.log(f"{kind.capitalize()} matrix reset")
+        return True
 
     def closeEvent(self, event):
         self.disconnect_midi()

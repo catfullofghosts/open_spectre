@@ -38,6 +38,13 @@
 #define MIDI_REGS_BASE 0x40000000U
 #endif
 
+#define REG_MX_OUT    0x04U
+#define REG_MX_LOAD   0x08U
+#define REG_MX_MASKL  0x10U
+#define REG_MX_MASKH  0x14U
+#define REG_AN_OUT    0x28U
+#define REG_AN_MASK   0x30U
+#define REG_AN_LOAD   0x34U
 #define REG_AUDIO     0x0CU
 #define REG_CA        0x18U
 #define REG_YUV_YCR   0x58U
@@ -73,9 +80,24 @@ static u8 g_y_msb, g_y_lsb;
 static u8 g_cr_msb, g_cr_lsb;
 static u8 g_cb_msb, g_cb_lsb;
 
+#define MIDI_SYSEX_MAX 24U
+#define MIDI_DIG_OUTS  57U
+#define MIDI_ANA_OUTS  20U
+
+static u8 g_sysex[MIDI_SYSEX_MAX];
+static u8 g_sysexLen;
+static u32 g_dig_lo[MIDI_DIG_OUTS];
+static u32 g_dig_hi[MIDI_DIG_OUTS];
+static u16 g_ana[MIDI_ANA_OUTS];
+
 static u32 MidiRegRd(u32 offset)
 {
 	return Xil_In32(MIDI_REGS_BASE + offset);
+}
+
+static void MidiRegWr(u32 offset, u32 value)
+{
+	Xil_Out32(MIDI_REGS_BASE + offset, value);
 }
 
 static void MidiRegFld(u32 offset, u32 mask, u32 shift, u32 value)
@@ -112,6 +134,171 @@ static void MidiSplit12(u32 value12, u8 *msb, u8 *lsb)
 static u32 MidiScale(u8 val, u32 maxv)
 {
 	return ((u32)val * maxv) / 127U;
+}
+
+static void MidiDigCommit(u8 out)
+{
+	MidiRegWr(REG_MX_OUT, (u32)out);
+	MidiRegWr(REG_MX_MASKL, g_dig_lo[out]);
+	MidiRegWr(REG_MX_MASKH, g_dig_hi[out]);
+	MidiRegWr(REG_MX_LOAD, 1U);
+	MidiRegWr(REG_MX_LOAD, 0U);
+}
+
+static void MidiAnaCommit(u8 out)
+{
+	MidiRegWr(REG_AN_OUT, (u32)out);
+	MidiRegWr(REG_AN_MASK, (u32)g_ana[out]);
+	MidiRegWr(REG_AN_LOAD, 1U);
+	MidiRegWr(REG_AN_LOAD, 0U);
+}
+
+static void MidiDigSet(u8 out, u8 inn, u8 on)
+{
+	u32 bit;
+
+	if ((out >= MIDI_DIG_OUTS) || (inn > 63U))
+	{
+		return;
+	}
+	if (inn < 32U)
+	{
+		bit = 1U << inn;
+		if (on != 0U)
+		{
+			g_dig_lo[out] |= bit;
+		}
+		else
+		{
+			g_dig_lo[out] &= ~bit;
+		}
+	}
+	else
+	{
+		bit = 1U << (inn - 32U);
+		if (on != 0U)
+		{
+			g_dig_hi[out] |= bit;
+		}
+		else
+		{
+			g_dig_hi[out] &= ~bit;
+		}
+	}
+	MidiDigCommit(out);
+}
+
+static void MidiAnaSet(u8 out, u8 inn, u8 on)
+{
+	u16 bit;
+
+	if ((out >= MIDI_ANA_OUTS) || (inn > 15U))
+	{
+		return;
+	}
+	bit = (u16)(1U << inn);
+	if (on != 0U)
+	{
+		g_ana[out] |= bit;
+	}
+	else
+	{
+		g_ana[out] &= (u16)~bit;
+	}
+	MidiAnaCommit(out);
+}
+
+static void MidiDigReset(u8 out)
+{
+	u8 i;
+
+	if (out == 127U)
+	{
+		for (i = 0U; i < MIDI_DIG_OUTS; i++)
+		{
+			g_dig_lo[i] = 0U;
+			g_dig_hi[i] = 0U;
+			MidiDigCommit(i);
+		}
+		return;
+	}
+	if (out >= MIDI_DIG_OUTS)
+	{
+		return;
+	}
+	g_dig_lo[out] = 0U;
+	g_dig_hi[out] = 0U;
+	MidiDigCommit(out);
+}
+
+static void MidiAnaReset(u8 out)
+{
+	u8 i;
+
+	if (out == 127U)
+	{
+		for (i = 0U; i < MIDI_ANA_OUTS; i++)
+		{
+			g_ana[i] = 0U;
+			MidiAnaCommit(i);
+		}
+		return;
+	}
+	if (out >= MIDI_ANA_OUTS)
+	{
+		return;
+	}
+	g_ana[out] = 0U;
+	MidiAnaCommit(out);
+}
+
+static void MidiSysexEnd(void)
+{
+	u8 cmd;
+	u8 mat;
+
+	if (g_sysexLen < 4U)
+	{
+		return;
+	}
+	if ((g_sysex[0] != 0x7DU) || (g_sysex[1] != 0x53U) || (g_sysex[2] != 0x50U))
+	{
+		return;
+	}
+
+	cmd = g_sysex[3];
+	if ((cmd == 0x20U) && (g_sysexLen >= 8U))
+	{
+		mat = g_sysex[4];
+		if (mat == 0U)
+		{
+			MidiDigSet(g_sysex[5], g_sysex[6], g_sysex[7]);
+		}
+		else if (mat == 1U)
+		{
+			MidiAnaSet(g_sysex[5], g_sysex[6], g_sysex[7]);
+		}
+		g_msgCount++;
+		g_lastStatus = 0xF0U;
+		g_lastData1 = cmd;
+		g_lastData2 = g_sysex[5];
+	}
+	else if ((cmd == 0x21U) && (g_sysexLen >= 6U))
+	{
+		mat = g_sysex[4];
+		if (mat == 0U)
+		{
+			MidiDigReset(g_sysex[5]);
+		}
+		else if (mat == 1U)
+		{
+			MidiAnaReset(g_sysex[5]);
+		}
+		g_msgCount++;
+		g_lastStatus = 0xF0U;
+		g_lastData1 = cmd;
+		g_lastData2 = g_sysex[5];
+	}
 }
 
 static void MidiMapCc(u8 cc, u8 val)
@@ -336,6 +523,7 @@ static void MidiByte(u8 byte)
 		if (byte == 0xF0U)
 		{
 			g_inSysex = 1U;
+			g_sysexLen = 0U;
 			g_runningStatus = 0U;
 			g_needed = 0U;
 			g_got = 0U;
@@ -343,7 +531,12 @@ static void MidiByte(u8 byte)
 		}
 		if (byte == 0xF7U)
 		{
+			if (g_inSysex != 0U)
+			{
+				MidiSysexEnd();
+			}
 			g_inSysex = 0U;
+			g_sysexLen = 0U;
 			return;
 		}
 		if (g_inSysex)
@@ -364,6 +557,11 @@ static void MidiByte(u8 byte)
 
 	if (g_inSysex)
 	{
+		if (g_sysexLen < MIDI_SYSEX_MAX)
+		{
+			g_sysex[g_sysexLen] = byte;
+			g_sysexLen++;
+		}
 		return;
 	}
 
