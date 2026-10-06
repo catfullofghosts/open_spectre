@@ -1,15 +1,33 @@
 #include "midi_uart.h"
 
 #include "xil_io.h"
+#include "xil_printf.h"
 #include "xparameters.h"
 #include "xuartps.h"
 
-#if defined(XPAR_XUARTPS_1_DEVICE_ID)
-#define MIDI_UART_DEVICE_ID XPAR_XUARTPS_1_DEVICE_ID
-#elif defined(XPAR_PS7_UART_1_DEVICE_ID)
-#define MIDI_UART_DEVICE_ID XPAR_PS7_UART_1_DEVICE_ID
+/* Zynq-7000 UART1 is always at this address when enabled in the PS. */
+#ifndef MIDI_UART1_BASE
+#if defined(XPAR_XUARTPS_1_BASEADDR)
+#define MIDI_UART1_BASE XPAR_XUARTPS_1_BASEADDR
+#elif defined(XPAR_PS7_UART_1_BASEADDR)
+#define MIDI_UART1_BASE XPAR_PS7_UART_1_BASEADDR
 #else
-#define MIDI_UART_DEVICE_ID 1U
+#define MIDI_UART1_BASE 0xE0001000U
+#endif
+#endif
+
+#ifndef MIDI_UART1_CLK_HZ
+#if defined(XPAR_XUARTPS_1_UART_CLK_FREQ_HZ)
+#define MIDI_UART1_CLK_HZ XPAR_XUARTPS_1_UART_CLK_FREQ_HZ
+#elif defined(XPAR_XUARTPS_1_CLOCK_FREQ)
+#define MIDI_UART1_CLK_HZ XPAR_XUARTPS_1_CLOCK_FREQ
+#elif defined(XPAR_UART1_CLOCK_FREQ)
+#define MIDI_UART1_CLK_HZ XPAR_UART1_CLOCK_FREQ
+#elif defined(XPAR_PS7_UART_1_UART_CLK_FREQ_HZ)
+#define MIDI_UART1_CLK_HZ XPAR_PS7_UART_1_UART_CLK_FREQ_HZ
+#else
+#define MIDI_UART1_CLK_HZ 100000000U
+#endif
 #endif
 
 #if defined(XPAR_AXI_BRAM_CTRL_0_S_AXI_BASEADDR)
@@ -42,6 +60,7 @@ static u8 g_needed;
 static u8 g_got;
 static u8 g_data[2];
 static u8 g_inSysex;
+static u32 g_byteCount;
 static u32 g_msgCount;
 static u8 g_lastStatus;
 static u8 g_lastData1;
@@ -377,21 +396,86 @@ static void MidiByte(u8 byte)
 	}
 }
 
+static XUartPs_Config *MidiLookupUart1(void)
+{
+	XUartPs_Config *cfg;
+
+#ifdef SDT
+	cfg = XUartPs_LookupConfig(MIDI_UART1_BASE);
+	if (cfg != NULL)
+	{
+		return cfg;
+	}
+#else
+	{
+		u16 id;
+
+		for (id = 0U; id < 8U; id++)
+		{
+			cfg = XUartPs_LookupConfig(id);
+			if ((cfg != NULL) && (cfg->BaseAddress == MIDI_UART1_BASE))
+			{
+				return cfg;
+			}
+		}
+	}
+#endif
+
+	return NULL;
+}
+
+static void MidiForceBaud31250(u32 base, u32 clk_hz)
+{
+	u32 cd;
+	u32 bdiv;
+	u32 cr;
+
+	/* baud = clk / (CD * (BDIV + 1)); 100 MHz / 31250 = 3200 = 400 * 8 */
+	bdiv = 7U;
+	cd = clk_hz / (MIDI_UART_BAUD * (bdiv + 1U));
+	if (cd < 1U)
+	{
+		cd = 1U;
+	}
+
+	cr = XUartPs_ReadReg(base, XUARTPS_CR_OFFSET);
+	XUartPs_WriteReg(base, XUARTPS_CR_OFFSET,
+			(cr | XUARTPS_CR_TX_DIS | XUARTPS_CR_RX_DIS) &
+			~(XUARTPS_CR_TX_EN | XUARTPS_CR_RX_EN));
+	XUartPs_WriteReg(base, XUARTPS_BAUDGEN_OFFSET, cd);
+	XUartPs_WriteReg(base, XUARTPS_BAUDDIV_OFFSET, bdiv);
+	XUartPs_WriteReg(base, XUARTPS_CR_OFFSET,
+			(cr | XUARTPS_CR_TX_EN | XUARTPS_CR_RX_EN) &
+			~(XUARTPS_CR_TX_DIS | XUARTPS_CR_RX_DIS));
+}
+
 int MidiUartInit(void)
 {
 	XUartPs_Config *cfg;
+	static XUartPs_Config fallback;
 	int status;
 	u32 base;
 
-	cfg = XUartPs_LookupConfig(MIDI_UART_DEVICE_ID);
+	cfg = MidiLookupUart1();
 	if (cfg == NULL)
 	{
-		return XST_FAILURE;
+		xil_printf("MIDI UART1: not in BSP xparameters, using %08X clk %u\r\n",
+				(unsigned)MIDI_UART1_BASE, (unsigned)MIDI_UART1_CLK_HZ);
+#ifdef SDT
+		fallback.Name = "uart1";
+#else
+		fallback.DeviceId = (u16)1;
+#endif
+		fallback.BaseAddress = MIDI_UART1_BASE;
+		fallback.InputClockHz = MIDI_UART1_CLK_HZ;
+		cfg = &fallback;
 	}
 
 	status = XUartPs_CfgInitialize(&MidiUart, cfg, cfg->BaseAddress);
 	if (status != XST_SUCCESS)
 	{
+		xil_printf("MIDI UART1: CfgInitialize failed %d base %08X\r\n",
+				status, (unsigned)cfg->BaseAddress);
 		return status;
 	}
 
@@ -399,7 +483,9 @@ int MidiUartInit(void)
 	status = XUartPs_SetBaudRate(&MidiUart, MIDI_UART_BAUD);
 	if (status != XST_SUCCESS)
 	{
-		return status;
+		xil_printf("MIDI UART1: SetBaudRate(%u) failed %d, forcing divisors\r\n",
+				(unsigned)MIDI_UART_BAUD, status);
+		MidiForceBaud31250(MidiUart.Config.BaseAddress, cfg->InputClockHz);
 	}
 
 	base = MidiUart.Config.BaseAddress;
@@ -412,6 +498,7 @@ int MidiUartInit(void)
 	g_needed = 0U;
 	g_got = 0U;
 	g_inSysex = 0U;
+	g_byteCount = 0U;
 	g_msgCount = 0U;
 	g_lastStatus = 0U;
 	g_lastData1 = 0U;
@@ -422,20 +509,45 @@ int MidiUartInit(void)
 	return XST_SUCCESS;
 }
 
-void MidiUartPoll(void)
+int MidiUartTryRead(u8 *byte)
 {
 	u32 base;
+	u8 value;
 
+	if (byte == NULL)
+	{
+		return 0;
+	}
 	if (MidiUart.IsReady != XIL_COMPONENT_IS_READY)
 	{
-		return;
+		return 0;
 	}
 
 	base = MidiUart.Config.BaseAddress;
-	while (XUartPs_IsReceiveData(base) != 0)
+	if (XUartPs_IsReceiveData(base) == 0)
 	{
-		MidiByte((u8)XUartPs_ReadReg(base, XUARTPS_FIFO_OFFSET));
+		return 0;
 	}
+
+	value = (u8)XUartPs_ReadReg(base, XUARTPS_FIFO_OFFSET);
+	g_byteCount++;
+	MidiByte(value);
+	*byte = value;
+	return 1;
+}
+
+void MidiUartPoll(void)
+{
+	u8 unused;
+
+	while (MidiUartTryRead(&unused) != 0)
+	{
+	}
+}
+
+u32 MidiUartByteCount(void)
+{
+	return g_byteCount;
 }
 
 u32 MidiUartMsgCount(void)

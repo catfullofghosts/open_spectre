@@ -49,7 +49,9 @@
 
 int MidiUartInit(void);
 void MidiUartPoll(void);
+int MidiUartTryRead(u8 *byte);
 
+u32 MidiUartByteCount(void);
 u32 MidiUartMsgCount(void);
 u8 MidiUartLastStatus(void);
 u8 MidiUartLastData1(void);

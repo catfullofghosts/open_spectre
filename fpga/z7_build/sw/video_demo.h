@@ -66,6 +66,7 @@
 void DemoInitialize();
 void DemoRun();
 void DemoPrintMenu();
+void DemoMidiUartMonitor();
 void DemoChangeRes();
 void DemoCRMenu();
 void DemoEffectMenu();

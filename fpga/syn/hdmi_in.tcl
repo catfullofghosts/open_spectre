@@ -257,6 +257,8 @@ proc create_root_design { parentCell } {
   set pmod_i2s_lrck [ create_bd_port -dir O pmod_i2s_lrck ]
   set pmod_i2s_bclk [ create_bd_port -dir O pmod_i2s_bclk ]
   set pmod_i2s_sdout [ create_bd_port -dir O pmod_i2s_sdout ]
+  set UART1_TX [ create_bd_port -dir O UART1_TX ]
+  set UART1_RX [ create_bd_port -dir I UART1_RX ]
 
   # Create instance: axi_dynclk_0, and set properties
   set axi_dynclk_0 [ create_bd_cell -type ip -vlnv digilentinc.com:ip:axi_dynclk:1.2 axi_dynclk_0 ]
@@ -1030,6 +1032,8 @@ proc create_root_design { parentCell } {
   connect_bd_intf_net -intf_net v_vid_in_axi4s_0_vtiming_out [get_bd_intf_pins v_tc_1/vtiming_in] [get_bd_intf_pins v_vid_in_axi4s_0/vtiming_out]
 
   # Create port connections
+  connect_bd_net -net UART1_RX_0_1  [get_bd_ports UART1_RX] \
+  [get_bd_pins processing_system7_0/UART1_RX]
   connect_bd_net -net axi_bram_ctrl_0_bram_addr_a  [get_bd_pins axi_bram_ctrl_0/bram_addr_a] \
   [get_bd_pins spector_wrapper_zynq_0/regs_addr]
   connect_bd_net -net axi_bram_ctrl_0_bram_clk_a  [get_bd_pins axi_bram_ctrl_0/bram_clk_a] \
@@ -1106,6 +1110,8 @@ proc create_root_design { parentCell } {
   [get_bd_pins proc_sys_reset_0/ext_reset_in] \
   [get_bd_pins rst_processing_system7_0_100M/ext_reset_in] \
   [get_bd_pins rst_processing_system7_0_150M/ext_reset_in]
+  connect_bd_net -net processing_system7_0_UART1_TX  [get_bd_pins processing_system7_0/UART1_TX] \
+  [get_bd_ports UART1_TX]
   connect_bd_net -net rst_processing_system7_0_100M_interconnect_aresetn  [get_bd_pins rst_processing_system7_0_100M/interconnect_aresetn] \
   [get_bd_pins ps7_0_axi_periph2/ARESETN]
   connect_bd_net -net rst_processing_system7_0_100M_peripheral_aresetn  [get_bd_pins rst_processing_system7_0_100M/peripheral_aresetn] \
@@ -1179,7 +1185,6 @@ proc create_root_design { parentCell } {
   # Restore current instance
   current_bd_instance $oldCurInst
 
-  validate_bd_design
   save_bd_design
 }
 # End of create_root_design()
@@ -1191,4 +1196,6 @@ proc create_root_design { parentCell } {
 
 create_root_design ""
 
+
+common::send_gid_msg -ssname BD::TCL -id 2053 -severity "WARNING" "This Tcl script was generated from a block design that has not been validated. It is possible that design <$design_name> may result in errors during validation."
 

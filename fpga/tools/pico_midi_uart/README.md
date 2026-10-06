@@ -12,17 +12,17 @@ The DAW should see a device named **OPEN SPECTRE MIDI**.
 
 This is a direct UART, not a DIN-MIDI opto / current loop.
 
-| Pico            | Arty Z7-20 JA (PMOD)      |
-|-----------------|---------------------------|
-| GP0 UART0 TX    | JA1_P **Y18** `UART1_RX`  |
-| GP1 UART0 RX    | JA1_N **Y19** `UART1_TX`  |
-| GND             | GND                       |
+| Pico            | Arty Z7-20 **JB** (not JA) |
+|-----------------|----------------------------|
+| GP0 UART0 TX    | JB pin 2 **Y14** `UART1_RX` |
+| GP1 UART0 RX    | JB pin 1 **W14** `UART1_TX` |
+| GND             | JB GND (pin 5 or 11)        |
 
-Baud on both ends is `31250` (`MIDI_UART_BAUD` in this CMakeLists and in
-`midi_uart.h`). Do not mix 115200 unless you change both.
+Baud on both ends is `31250`. Do not mix 115200 unless you change both.
 
-JA1 is also the I2S MCLK pair in `open_spec.xdc`. If I2S is still mapped to
-those pins, move this UART PMOD or drop I2S.
+JA is the I2S2 Pmod. UART1 used to be constrained there; it is now on JB.
+Flipping TX/RX on JA cannot work. After a bitstream rebuild, Pico TX must
+land on FPGA **RX** (Y14 / JB2).
 
 ## Build
 

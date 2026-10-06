@@ -460,7 +460,21 @@ void DemoRun()
 		/* Wait for data on UART */
 		while (!XUartPs_IsReceiveData(UART_BASEADDR) && !fRefresh)
 		{
+			static u32 midiBytesSeen;
+			u32 midiBytes;
+
 			MidiUartPoll();
+			midiBytes = MidiUartByteCount();
+			if (midiBytes != midiBytesSeen)
+			{
+				midiBytesSeen = midiBytes;
+				xil_printf("\r\n[MIDI] bytes:%u msgs:%u last %02X %02X %02X\r\n",
+						(unsigned)midiBytes,
+						(unsigned)MidiUartMsgCount(),
+						(unsigned)MidiUartLastStatus(),
+						(unsigned)MidiUartLastData1(),
+						(unsigned)MidiUartLastData2());
+			}
 		}
 
 		/* Store the first character in the UART receive FIFO and echo it */
@@ -604,6 +618,10 @@ void DemoRun()
 				dispCtrl.vMode.vmax - dispCtrl.vMode.vpe
 			);
 			break;
+		case 'm':
+		case 'M':
+			DemoMidiUartMonitor();
+			break;
 		case 'q':
 			break;
 		case 'r':
@@ -630,7 +648,8 @@ void DemoPrintMenu()
 	if (videoCapt.state == VIDEO_DISCONNECTED) xil_printf("*Video Capture Resolution: %22s*\n\r", "!HDMI UNPLUGGED!");
 	else xil_printf("*Video Capture Resolution: %17dx%-4d*\n\r", videoCapt.timing.HActiveVideo, videoCapt.timing.VActiveVideo);
 	xil_printf("*Video Frame Index: %29d*\n\r", videoCapt.curFrame);
-	xil_printf("*MIDI UART1 msgs:%6u last %02X %02X %02X          *\n\r",
+	xil_printf("*MIDI UART1 bytes:%5u msgs:%5u last %02X %02X %02X*\n\r",
+			(unsigned)MidiUartByteCount(),
 			(unsigned)MidiUartMsgCount(),
 			(unsigned)MidiUartLastStatus(),
 			(unsigned)MidiUartLastData1(),
@@ -658,10 +677,52 @@ void DemoPrintMenu()
 	xil_printf("I - Apply Video Effects Menu\n\r");
 	xil_printf("J - Overlay VRAM Pattern Test (with transparency)\n\r");
 	xil_printf("K - Sprite VRAM Test (random position)\n\r");
+	xil_printf("M - MIDI UART1 raw dump (any byte, q exits)\n\r");
 	xil_printf("q - Quit\n\r");
 	xil_printf("\n\r");
 	xil_printf("\n\r");
 	xil_printf("Enter a selection:");
+}
+
+void DemoMidiUartMonitor()
+{
+	u8 byte;
+	u32 col;
+	char userInput;
+
+	while (XUartPs_IsReceiveData(UART_BASEADDR))
+	{
+		(void)XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
+	}
+
+	xil_printf("\x1B[2J\x1B[H");
+	xil_printf("MIDI UART1 raw dump @ %u baud (Pico / JB)\r\n", (unsigned)MIDI_UART_BAUD);
+	xil_printf("Prints every RX byte. Press q to return.\r\n\r\n");
+
+	col = 0U;
+	while (1)
+	{
+		if (XUartPs_IsReceiveData(UART_BASEADDR))
+		{
+			userInput = (char)XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
+			if ((userInput == 'q') || (userInput == 'Q'))
+			{
+				xil_printf("\r\n");
+				return;
+			}
+		}
+
+		if (MidiUartTryRead(&byte) != 0)
+		{
+			xil_printf("%02X ", (unsigned)byte);
+			col++;
+			if (col >= 16U)
+			{
+				xil_printf("\r\n");
+				col = 0U;
+			}
+		}
+	}
 }
 
 void DemoChangeRes()
@@ -1540,6 +1601,7 @@ int DemoGetInactiveFrame(DisplayCtrl *DispCtrlPtr, VideoCapture *VideoCaptPtr)
 		}
 	}
 	xil_printf("Unreachable error state reached. All buffers are in use.\r\n");
+	return 0;
 }
 
 void DemoInvertFrame(u8 *srcFrame, u8 *destFrame, u32 width, u32 height, u32 stride)
@@ -3428,6 +3490,7 @@ void DemoShrinkRandomEffect(u8 *srcFrame, u8 *destFrame, u32 srcWidth, u32 srcHe
  */
 void DemoRunAnimated3DEffect(u8 *srcFrame, u8 **pFrames, u32 srcFrameIdx, u32 srcWidth, u32 srcHeight, u32 srcStride, u32 destWidth, u32 destHeight, char axis, float scale, DisplayCtrl *dispCtrl, VideoCapture *videoCapt)
 {
+	(void)srcStride;
 	float time = 0.0f;
 	u32 frameCount = 0;
 	u32 currentFrameIdx = dispCtrl->curFrame;

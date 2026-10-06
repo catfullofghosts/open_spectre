@@ -17,9 +17,10 @@
  * sees DIN-style bytes, not USB-MIDI 4-byte CIN packets.
  *
  * Wiring (3.3 V TTL — not a DIN current-loop):
- *   Pico GP0 / UART0 TX  ->  Arty JA1_P Y18  UART1_RX
- *   Pico GP1 / UART0 RX  <-  Arty JA1_N Y19  UART1_TX
- *   Pico GND             --  Arty GND
+ *   Pico GP0 / UART0 TX  ->  Arty JB pin 2  Y14  UART1_RX
+ *   Pico GP1 / UART0 RX  <-  Arty JB pin 1  W14  UART1_TX
+ *   Pico GND             --  Arty JB GND
+ *   JA is I2S — do not use it for MIDI.
  */
 
 #ifndef MIDI_UART_BAUD
