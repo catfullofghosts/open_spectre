@@ -33,6 +33,7 @@ end random_voltage;
 
 architecture Behavioral of random_voltage is
 
+  signal recycle_n : std_logic;
   signal spio_out_1, spio_out_2  : std_logic_vector(7 downto 0);
   signal count : std_logic_vector(13 downto 0);
   signal noise_1_to_slew, noise_2_to_slew, slew_out_1, slew_out_2 : std_logic_vector(9 downto 0);
@@ -51,9 +52,9 @@ architecture Behavioral of random_voltage is
 
 begin
 
---  mux_in <= extra_in & noise_1_to_slew(0) & noise_freq(2 downto 0) & extra_in & noise_1_to_slew(1) & '1';
-  mux_in <= lfsr(5) & noise_1_to_slew(7) & lfsr(2) & lfsr(1 downto 0) & noise_1_to_slew(7)  & noise_1_to_slew(8) & '1';
-
+    recycle_n <= not recycle;
+    mux_in <= "10011100";
+  
   
   lfsr_rnd : entity work.rand_num
     port map(
@@ -108,8 +109,8 @@ begin
         Pout => spio_out_2
         );
 
-    mux_in_des <= mux_in(7 downto 0);
-    mux_sel_in <= spio_out_2(7)&spio_out_2(5)&(recycle_stretched);
+    mux_in_des <= mux_in(7 downto 2) & (mux_in(1) xor extra_in) & mux_in(0);
+    mux_sel_in <= (recycle_stretched)& spio_out_2(5)& (spio_out_2(7) xor extra_in); -- extra in is an expantion to the original design to introduce some chaos
     
   mux_random : entity work.mux_8_to_1
       Port map( 
