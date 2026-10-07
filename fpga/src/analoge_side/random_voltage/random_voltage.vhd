@@ -69,7 +69,7 @@ begin
   process (Clock)
   begin
     if rising_edge(Clock) then
-    recycle_d <= recycle;
+    recycle_d <= recycle_n;
     recycle_re_d <= recycle_re;
     recycle_re_d2 <= recycle_re_d;
     recycle_re_d3 <= recycle_re_d2;
