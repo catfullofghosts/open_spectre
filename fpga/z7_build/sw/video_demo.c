@@ -294,6 +294,13 @@ static float fast_log2(float x)
 #define OVERLAY_REG_SPRITE_STRIDE     0x00000010U
 #define VIDEO_CTRL_REG_OFFSET         0x00000078U
 #define VIDEO_CTRL_SYNC_INV_BIT       6U
+#define VIDEO_CTRL_EXT_MUX_BIT        3U
+#define FRAME_STATS_LUMA_OFFSET       0x00000180U
+#define FRAME_STATS_R_OFFSET          0x00000184U
+#define FRAME_STATS_G_OFFSET          0x00000188U
+#define FRAME_STATS_B_OFFSET          0x0000018CU
+#define FRAME_STATS_HASH_OFFSET       0x00000190U
+#define FRAME_STATS_PIX_OFFSET        0x00000194U
 
 /* ------------------------------------------------------------ */
 /*				Global Variables								*/
@@ -400,8 +407,8 @@ void DemoInitialize()
 		xil_printf("Couldn't start display during demo initialization%d\r\n", Status);
 		return;
 	}
-	/* Match resolution-menu option 3: 720p with sync invert for FPGA counters. */
-	DemoSetSyncPolarityInvert(1U);
+	/* 720p is positive sync. invert=0 keeps idle-low so digital X/Y counters run. */
+	DemoSetSyncPolarityInvert(0U);
 
 	/*
 	 * Initialize the Interrupt controller and start it.
@@ -610,6 +617,10 @@ void DemoRun()
 		case 'M':
 			DemoMidiUartMonitor();
 			break;
+		case 'v':
+		case 'V':
+			DemoVideoInMonitor();
+			break;
 		case 'q':
 			break;
 		case 'r':
@@ -660,6 +671,7 @@ void DemoPrintMenu()
 	xil_printf("J - Overlay VRAM Pattern Test (with transparency)\n\r");
 	xil_printf("K - Sprite VRAM Test (random position)\n\r");
 	xil_printf("M - MIDI UART1 raw dump (any byte, q exits)\n\r");
+	xil_printf("V - Video in debug (HDMI lock, timing, pixels)\n\r");
 	xil_printf("q - Quit\n\r");
 	xil_printf("\n\r");
 	xil_printf("\n\r");
@@ -702,6 +714,223 @@ void DemoMidiUartMonitor()
 			{
 				xil_printf("\r\n");
 				col = 0U;
+			}
+		}
+	}
+}
+
+static void DemoVideoInSampleRgb(u8 *frame, u32 stride, u32 x, u32 y, u8 *r, u8 *b, u8 *g)
+{
+	u32 off;
+
+	off = (y * stride) + (x * 3U);
+	*r = frame[off];
+	*b = frame[off + 1U];
+	*g = frame[off + 2U];
+}
+
+void DemoVideoInMonitor()
+{
+	char userInput;
+	const char *stateName;
+	u32 locked;
+	u32 videoCtrl;
+	u32 statsLuma;
+	u32 statsR;
+	u32 statsG;
+	u32 statsB;
+	u32 statsHash;
+	u32 statsPix;
+	u32 width;
+	u32 height;
+	u32 hTotal;
+	u32 vTotal;
+	u32 cx;
+	u32 cy;
+	u8 r;
+	u8 g;
+	u8 b;
+	u8 lastCenterLuma;
+	u32 changeCount;
+	u32 firstPaint;
+
+	lastCenterLuma = 0U;
+	changeCount = 0U;
+	firstPaint = 1U;
+
+	while (XUartPs_IsReceiveData(UART_BASEADDR))
+	{
+		(void)XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
+	}
+
+	while (1)
+	{
+		if (XUartPs_IsReceiveData(UART_BASEADDR))
+		{
+			userInput = (char)XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
+			if ((userInput == 'q') || (userInput == 'Q'))
+			{
+				return;
+			}
+			if ((userInput == 's') || (userInput == 'S'))
+			{
+				if (videoCapt.state == VIDEO_STREAMING)
+				{
+					VideoStop(&videoCapt);
+				}
+				else
+				{
+					VideoStart(&videoCapt);
+				}
+			}
+			else if ((userInput == 'i') || (userInput == 'I'))
+			{
+				videoCtrl = DemoOverlayReadReg(VIDEO_CTRL_REG_OFFSET);
+				if ((videoCtrl & (1U << VIDEO_CTRL_SYNC_INV_BIT)) != 0U)
+				{
+					DemoSetSyncPolarityInvert(0U);
+				}
+				else
+				{
+					DemoSetSyncPolarityInvert(1U);
+				}
+			}
+			else if ((userInput == 'm') || (userInput == 'M'))
+			{
+				videoCtrl = DemoOverlayReadReg(VIDEO_CTRL_REG_OFFSET);
+				videoCtrl ^= (1U << VIDEO_CTRL_EXT_MUX_BIT);
+				DemoOverlayWriteReg(VIDEO_CTRL_REG_OFFSET, videoCtrl);
+			}
+		}
+
+		locked = XGpio_DiscreteRead(&videoCapt.gpio, LOCKED_CHANNEL) & LOCKED_MASK;
+		videoCtrl = DemoOverlayReadReg(VIDEO_CTRL_REG_OFFSET);
+		statsLuma = DemoOverlayReadReg(FRAME_STATS_LUMA_OFFSET);
+		statsR = DemoOverlayReadReg(FRAME_STATS_R_OFFSET);
+		statsG = DemoOverlayReadReg(FRAME_STATS_G_OFFSET);
+		statsB = DemoOverlayReadReg(FRAME_STATS_B_OFFSET);
+		statsHash = DemoOverlayReadReg(FRAME_STATS_HASH_OFFSET);
+		statsPix = DemoOverlayReadReg(FRAME_STATS_PIX_OFFSET);
+
+		if (videoCapt.state == VIDEO_DISCONNECTED)
+		{
+			stateName = "UNPLUGGED";
+		}
+		else if (videoCapt.state == VIDEO_STREAMING)
+		{
+			stateName = "STREAMING";
+		}
+		else
+		{
+			stateName = "PAUSED";
+		}
+
+		width = videoCapt.timing.HActiveVideo;
+		height = videoCapt.timing.VActiveVideo;
+		hTotal = (u32)videoCapt.timing.HActiveVideo + videoCapt.timing.HFrontPorch
+			+ videoCapt.timing.HSyncWidth + videoCapt.timing.HBackPorch;
+		vTotal = (u32)videoCapt.timing.VActiveVideo + videoCapt.timing.V0FrontPorch
+			+ videoCapt.timing.V0SyncWidth + videoCapt.timing.V0BackPorch;
+
+		xil_printf("\x1B[H");
+		if (firstPaint != 0U)
+		{
+			xil_printf("\x1B[2J");
+			firstPaint = 0U;
+		}
+		xil_printf("VIDEO IN DEBUG          q=back  s=stream  i=invert  m=ext mux\r\n");
+		xil_printf("HDMI locked=%s  capture=%s  frame=%u\r\n",
+			locked ? "YES" : "NO ",
+			stateName,
+			(unsigned)videoCapt.curFrame);
+		xil_printf("Detected %ux%u  Hpol=%s  Vpol=%s\r\n",
+			(unsigned)width,
+			(unsigned)height,
+			videoCapt.timing.HSyncPolarity ? "POS" : "NEG",
+			videoCapt.timing.VSyncPolarity ? "POS" : "NEG");
+		xil_printf("  H act=%u fp=%u sw=%u bp=%u total=%u\r\n",
+			(unsigned)videoCapt.timing.HActiveVideo,
+			(unsigned)videoCapt.timing.HFrontPorch,
+			(unsigned)videoCapt.timing.HSyncWidth,
+			(unsigned)videoCapt.timing.HBackPorch,
+			(unsigned)hTotal);
+		xil_printf("  V act=%u fp=%u sw=%u bp=%u total=%u\r\n",
+			(unsigned)videoCapt.timing.VActiveVideo,
+			(unsigned)videoCapt.timing.V0FrontPorch,
+			(unsigned)videoCapt.timing.V0SyncWidth,
+			(unsigned)videoCapt.timing.V0BackPorch,
+			(unsigned)vTotal);
+		xil_printf("Display %s  0x78=0x%08X invert=%u ext_mux=%s\r\n",
+			dispCtrl.vMode.label,
+			(unsigned)videoCtrl,
+			(unsigned)((videoCtrl >> VIDEO_CTRL_SYNC_INV_BIT) & 1U),
+			((videoCtrl >> VIDEO_CTRL_EXT_MUX_BIT) & 1U) ? "y_out " : "luma  ");
+		xil_printf("  video_act=%u  pixdiv=%s  col_bypass=%u\r\n",
+			(unsigned)(videoCtrl & 1U),
+			((videoCtrl >> 2) & 1U) ? "/4" : "/2",
+			(unsigned)((videoCtrl >> 1) & 1U));
+
+		if ((videoCapt.state != VIDEO_DISCONNECTED) && (width > 2U) && (height > 2U))
+		{
+			cx = width / 2U;
+			cy = height / 2U;
+			Xil_DCacheInvalidateRange((unsigned int)pFrames[videoCapt.curFrame], height * DEMO_STRIDE);
+			DemoVideoInSampleRgb(pFrames[videoCapt.curFrame], DEMO_STRIDE, 0U, 0U, &r, &b, &g);
+			xil_printf("Pixels RBG  TL=%02X%02X%02X", r, b, g);
+			DemoVideoInSampleRgb(pFrames[videoCapt.curFrame], DEMO_STRIDE, width - 1U, 0U, &r, &b, &g);
+			xil_printf("  TR=%02X%02X%02X", r, b, g);
+			DemoVideoInSampleRgb(pFrames[videoCapt.curFrame], DEMO_STRIDE, cx, cy, &r, &b, &g);
+			xil_printf("  C=%02X%02X%02X\r\n", r, b, g);
+			{
+				u8 centerLuma;
+				centerLuma = (u8)(((u32)r + g + b) / 3U);
+				if (centerLuma != lastCenterLuma)
+				{
+					changeCount++;
+					lastCenterLuma = centerLuma;
+				}
+			}
+			DemoVideoInSampleRgb(pFrames[videoCapt.curFrame], DEMO_STRIDE, 0U, height - 1U, &r, &b, &g);
+			xil_printf("            BL=%02X%02X%02X", r, b, g);
+			DemoVideoInSampleRgb(pFrames[videoCapt.curFrame], DEMO_STRIDE, width - 1U, height - 1U, &r, &b, &g);
+			xil_printf("  BR=%02X%02X%02X  C_luma_chg=%u\r\n", r, b, g, (unsigned)changeCount);
+		}
+		else
+		{
+			xil_printf("Pixels      (no locked HDMI frame)\r\n");
+			xil_printf("\r\n");
+		}
+
+		xil_printf("FPGA stats id=%u pix=%u hash=0x%08X\r\n",
+			(unsigned)((statsLuma >> 24) & 0xFFU),
+			(unsigned)statsPix,
+			(unsigned)statsHash);
+		xil_printf("  luma min/avg/max=%u/%u/%u  R=%u/%u/%u  G=%u/%u/%u  B=%u/%u/%u\r\n",
+			(unsigned)(statsLuma & 0xFFU),
+			(unsigned)((statsLuma >> 16) & 0xFFU),
+			(unsigned)((statsLuma >> 8) & 0xFFU),
+			(unsigned)(statsR & 0xFFU),
+			(unsigned)((statsR >> 16) & 0xFFU),
+			(unsigned)((statsR >> 8) & 0xFFU),
+			(unsigned)((statsR >> 24) & 0xFFU),
+			(unsigned)((statsG >> 8) & 0xFFU),
+			(unsigned)(statsG & 0xFFU),
+			(unsigned)((statsG >> 16) & 0xFFU),
+			(unsigned)(statsB & 0xFFU),
+			(unsigned)((statsG >> 24) & 0xFFU));
+		xil_printf("invert=1 only for 640 neg sync; 720p must be 0 or X stays reset.\r\n");
+
+		{
+			u32 spin;
+
+			for (spin = 0U; spin < 50U; spin++)
+			{
+				MidiUartPoll();
+				if (XUartPs_IsReceiveData(UART_BASEADDR))
+				{
+					break;
+				}
+				TimerDelay(5000);
 			}
 		}
 	}
@@ -769,7 +998,7 @@ void DemoChangeRes()
 			if (status == XST_SUCCESS) status = DisplayStart(&dispCtrl);
 			if (status == XST_SUCCESS)
 			{
-				DemoSetSyncPolarityInvert(0U);
+				DemoSetSyncPolarityInvert(1U);
 				fResSet = 1;
 			}
 			if (wasStreaming) VideoStart(&videoCapt);
@@ -793,7 +1022,7 @@ void DemoChangeRes()
 			if (status == XST_SUCCESS) status = DisplayStart(&dispCtrl);
 			if (status == XST_SUCCESS)
 			{
-				DemoSetSyncPolarityInvert(1U);
+				DemoSetSyncPolarityInvert(0U);
 				fResSet = 1;
 			}
 			if (wasStreaming) VideoStart(&videoCapt);
@@ -1909,6 +2138,9 @@ static u32 DemoOverlayReadReg(u32 regOffset)
 	return Xil_In32(REGS_BRAM_BASEADDR + regOffset);
 }
 
+/* 0x78 bit 6: 1 = invert 640x480 negative sync, 0 = pass 720p positive sync.
+ * Digital X is held in reset while H is high, so this must yield idle-low pulses.
+ */
 static void DemoSetSyncPolarityInvert(u32 enableInvert)
 {
 	u32 regVal;

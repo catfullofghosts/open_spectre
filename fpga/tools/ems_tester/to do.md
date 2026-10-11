@@ -1,4 +1,16 @@
+Todo
+- check midi works, DONE!!!
+- add extra midi controls, only the relevent ones
+- fix ca rules so it is always in the cool mode
+- check audio in
+- debug video in
+- propper debug of dirt
+- look at what i need to do to get the base colour of move we see on the original
+looks like all luma and the mid and top of chorma
+
 !!! REMEMBER IF SOMETHIGN DOESNT WORK CHECK THE REST AND H/Vsync are correct poliarity!!!!
+
+
 
 
 NEXT CHECK!::
