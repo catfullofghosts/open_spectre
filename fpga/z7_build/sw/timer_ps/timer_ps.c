@@ -62,19 +62,18 @@ int TimerInitialize(unsigned int TimerDeviceId)
 	XScuTimer *TimerInstancePtr = &TimerInstance;
 	XScuTimer_Config *ConfigTmrPtr;
 
-	/*
-	 * Initialize the Scu Private Timer driver.
-	 */
-	ConfigTmrPtr = TimerDeviceId;
+#ifdef SDT
+	ConfigTmrPtr = XScuTimer_LookupConfig((UINTPTR)TimerDeviceId);
+#else
+	ConfigTmrPtr = XScuTimer_LookupConfig((u16)TimerDeviceId);
+#endif
+	if (ConfigTmrPtr == NULL) {
+		return XST_FAILURE;
+	}
 
-	/*
-	 * This is where the virtual address would be used, this example
-	 * uses physical address. Note that it is not considered an error
-	 * if the timer has already been initialized.
-	 */
 	Status = XScuTimer_CfgInitialize(TimerInstancePtr, ConfigTmrPtr,
 			ConfigTmrPtr->BaseAddr);
-	if (Status != XST_SUCCESS || Status != XST_DEVICE_IS_STARTED) {
+	if ((Status != XST_SUCCESS) && (Status != XST_DEVICE_IS_STARTED)) {
 		return XST_FAILURE;
 	}
 

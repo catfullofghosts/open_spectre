@@ -104,6 +104,9 @@
 
 #include "video_capture.h"
 #include "xdebug.h"
+#include "xil_printf.h"
+
+static int VideoStartDetector(VideoCapture *videoPtr);
 
 /* ------------------------------------------------------------ */
 /*				Procedure Definitions							*/
@@ -161,11 +164,18 @@ int VideoStart(VideoCapture *videoPtr)
 	int Status;
 	int i;
 
-	//xil_printf("Video start entered\n\r");
 	if (videoPtr->state == VIDEO_DISCONNECTED)
+	{
 		return XST_NO_DATA;
+	}
 	if (videoPtr->state == VIDEO_STREAMING)
+	{
 		return XST_SUCCESS;
+	}
+	if ((videoPtr->timing.HActiveVideo < 16U) || (videoPtr->timing.VActiveVideo < 16U))
+	{
+		return XST_NO_DATA;
+	}
 
 	/*
 	 * Configure the VDMA to access a frame with the same dimensions as the
@@ -244,7 +254,7 @@ int VideoStart(VideoCapture *videoPtr)
 **		can all be called at will.
 **
 */
-int VideoInitialize(VideoCapture *videoPtr, INTC *intCtrl, XAxiVdma *vdma, u16 gpioId, u16 vtcId, u32 vtcIrptId, u8 *framePtr[VIDEO_NUM_FRAMES], u32 stride, u32 startOnDet)
+int VideoInitialize(VideoCapture *videoPtr, INTC *intCtrl, XAxiVdma *vdma, UINTPTR gpioId, UINTPTR vtcId, u32 vtcIrptId, u8 *framePtr[VIDEO_NUM_FRAMES], u32 stride, u32 startOnDet)
 {
 	int Status;
 	int i;
@@ -258,6 +268,7 @@ int VideoInitialize(VideoCapture *videoPtr, INTC *intCtrl, XAxiVdma *vdma, u16 g
 		videoPtr->framePtr[i] = framePtr[i];
 	}
 	videoPtr->state = VIDEO_DISCONNECTED;
+	videoPtr->detStarted = 0U;
 	videoPtr->stride = stride;
 
 	videoPtr->vtcId = vtcId;
@@ -393,55 +404,133 @@ void VideoSetCallback(VideoCapture *videoPtr, VideoCallBack CallBackFunc, void *
 	videoPtr->callBack = CallBackFunc;
 }
 
+static int VideoStartDetector(VideoCapture *videoPtr)
+{
+	XVtc_Config *vtcConfig;
+	int Status;
+
+	if ((XGpio_DiscreteRead(&videoPtr->gpio, LOCKED_CHANNEL) & LOCKED_MASK) == 0U)
+	{
+		return XST_NO_DATA;
+	}
+
+	if (videoPtr->vtc.IsReady != XIL_COMPONENT_IS_READY)
+	{
+		vtcConfig = XVtc_LookupConfig(videoPtr->vtcId);
+		if (vtcConfig == NULL)
+		{
+			vtcConfig = XVtc_LookupConfig(0x43C20000U);
+		}
+		if (vtcConfig == NULL)
+		{
+			xil_printf("HDMI-in VTC lookup failed (0x%08X)\r\n", (unsigned)videoPtr->vtcId);
+			return XST_FAILURE;
+		}
+
+		Status = XVtc_CfgInitialize(&(videoPtr->vtc), vtcConfig, vtcConfig->BaseAddress);
+		if (Status != XST_SUCCESS)
+		{
+			xil_printf("HDMI-in VTC init failed %d\r\n", Status);
+			return Status;
+		}
+	}
+
+	XVtc_RegUpdateEnable(&(videoPtr->vtc));
+	XVtc_IntrDisable(&(videoPtr->vtc), 0xFFFFFFFFU);
+	XVtc_Enable(&(videoPtr->vtc));
+	XVtc_EnableDetector(&(videoPtr->vtc));
+	videoPtr->detStarted = 1U;
+	return XST_SUCCESS;
+}
+
+static int VideoReadTiming(VideoCapture *videoPtr)
+{
+	u32 size;
+	u32 hActive;
+	u32 vActive;
+
+	if (videoPtr->detStarted == 0U)
+	{
+		return XST_DEVICE_BUSY;
+	}
+
+	/* DASIZE fills H first; V stays 0 until a full frame. Do not call
+	 * GetDetectorTiming or start VDMA on a partial 1280x0 reading. */
+	size = XVtc_ReadReg(videoPtr->vtc.Config.BaseAddress, 0x020U);
+	hActive = size & 0x1FFFU;
+	vActive = (size >> 16) & 0x1FFFU;
+	videoPtr->timing.HActiveVideo = (u16)hActive;
+	videoPtr->timing.VActiveVideo = (u16)vActive;
+	if ((hActive < 16U) || (vActive < 16U))
+	{
+		return XST_DEVICE_BUSY;
+	}
+
+	XVtc_GetDetectorTiming(&videoPtr->vtc, &videoPtr->timing);
+	if ((videoPtr->timing.HActiveVideo < 16U) || (videoPtr->timing.VActiveVideo < 16U))
+	{
+		return XST_DEVICE_BUSY;
+	}
+
+	if (videoPtr->state == VIDEO_DISCONNECTED)
+	{
+		videoPtr->state = VIDEO_PAUSED;
+	}
+	return XST_SUCCESS;
+}
+
+int VideoDetectLocked(VideoCapture *videoPtr)
+{
+	int Status;
+
+	if ((XGpio_DiscreteRead(&videoPtr->gpio, LOCKED_CHANNEL) & LOCKED_MASK) == 0U)
+	{
+		return XST_NO_DATA;
+	}
+
+	if (videoPtr->detStarted == 0U)
+	{
+		if (VideoStartDetector(videoPtr) != XST_SUCCESS)
+		{
+			return XST_FAILURE;
+		}
+		return XST_DEVICE_BUSY;
+	}
+
+	Status = VideoReadTiming(videoPtr);
+	if (Status != XST_SUCCESS)
+	{
+		return Status;
+	}
+
+	if ((videoPtr->startOnDetect != 0U) && (videoPtr->state == VIDEO_PAUSED))
+	{
+		(void)VideoStart(videoPtr);
+	}
+	return XST_SUCCESS;
+}
+
 void GpioIsr(void *InstancePtr)
 {
 	VideoCapture *videoPtr = (VideoCapture *)InstancePtr;
 	XGpio *GpioPtr = &videoPtr->gpio;
 	u32 locked;
-	int Status;
-	XVtc_Config *vtcConfig;
 
 	XGpio_InterruptClear(GpioPtr, XGPIO_IR_CH2_MASK);
 
 	locked = XGpio_DiscreteRead(GpioPtr, 2);
 
-	//xil_printf("~");
 	if (locked)
 	{
-		vtcConfig = XVtc_LookupConfig(videoPtr->vtcId);
-		if (NULL == vtcConfig)
-			return;
-
-		Status = XVtc_CfgInitialize(&(videoPtr->vtc), vtcConfig, vtcConfig->BaseAddress);
-		if (Status != (XST_SUCCESS))
-			return;
-
-		XVtc_SelfTest(&(videoPtr->vtc));
-
-		XVtc_RegUpdateEnable(&(videoPtr->vtc));
-		XVtc_SetCallBack(&(videoPtr->vtc), XVTC_HANDLER_LOCK, VtcIsr, videoPtr);
-		XVtc_IntrEnable(&(videoPtr->vtc), 0x100);
-		XVtc_EnableDetector(&(videoPtr->vtc));
-
-		/*
-		 * TODO: Add Preprocessor check for microblaze
-		 */
-		XScuGic_Enable(videoPtr->intc, videoPtr->vtcIrptId);
+		/* Detector start is polled from the UART video-in menu. */
 	}
 	else
 	{
 		VideoStop(videoPtr);
-		/*
-		 * TODO: Add Preprocessor check for microblaze
-		 */
-		/*
-		 * Note the VTC interrupt has to be disabled at the interrupt controller, because the
-		 * VTC cannot be accessed here since we don't know if the clock is still
-		 * stable. If you try to access any VTC registers when the clock is not
-		 * stable then the processor will throw a data abort exception. This is also why we
-		 * are disabling the interrupt in the first place, because VtcIsr accesses VTC registers.
-		 */
 		XScuGic_Disable(videoPtr->intc, videoPtr->vtcIrptId);
+		videoPtr->detStarted = 0U;
+		videoPtr->timing.HActiveVideo = 0U;
+		videoPtr->timing.VActiveVideo = 0U;
 		if (videoPtr->callBack != NULL && videoPtr->state != VIDEO_DISCONNECTED)
 			videoPtr->callBack(videoPtr->callBackRef, (void *) videoPtr);
 		videoPtr->state = VIDEO_DISCONNECTED;
@@ -452,21 +541,18 @@ void VtcIsr(void *InstancePtr, u32 pendingIrpt)
 {
 	VideoCapture *videoPtr = (VideoCapture *)InstancePtr;
 
-	//xil_printf( "$");
-	if ((XVtc_GetDetectionStatus(&videoPtr->vtc) & XVTC_STAT_LOCKED_MASK))
+	(void)pendingIrpt;
+	if (VideoReadTiming(videoPtr) == XST_SUCCESS)
 	{
-		XVtc_GetDetectorTiming(&videoPtr->vtc,&videoPtr->timing);
-		videoPtr->state = VIDEO_PAUSED;
 		if (videoPtr->startOnDetect)
 		{
-			VideoStart(videoPtr);
+			(void)VideoStart(videoPtr);
 		}
 		if (videoPtr->callBack != NULL)
+		{
 			videoPtr->callBack(videoPtr->callBackRef, (void *) videoPtr);
-		XVtc_IntrDisable(&(videoPtr->vtc), 0x100);
-		XVtc_IntrClear(&(videoPtr->vtc), 0x100);
+		}
 	}
-
 }
 
 /************************************************************************/
