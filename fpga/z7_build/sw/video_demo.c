@@ -34,6 +34,7 @@
 #include "math.h"
 #include <ctype.h>
 #include <stdlib.h>
+#include <string.h>
 #include "xil_types.h"
 #include "xil_cache.h"
 #include "xil_io.h"
@@ -333,12 +334,19 @@ static void DemoOverlayDisableAllSprites(void);
 static void DemoOverlayPatternTest(void);
 static void DemoSpriteRandomTest(u32 displayWidth, u32 displayHeight, u32 activeStartX, u32 activeStartY);
 static void DemoSetSyncPolarityInvert(u32 enableInvert);
+static char g_liveEffectCmd = 0;
+static int g_liveEffectClear = 1;
+static int g_liveEffectNeedClear = 0;
+static void DemoInvalidateVideoSrc(u8 *frame, u32 height);
+static int DemoApplySelectedEffect(char cmd, u8 *src, u8 *dst, u32 width, u32 height, int clearFrame);
+static int DemoApplyLiveEffectFrame(void);
 
 /*
  * Framebuffers for video data
  */
 u8 frameBuf[DISPLAY_NUM_FRAMES][DEMO_MAX_FRAME] __attribute__((aligned(0x20)));
 u8 *pFrames[DISPLAY_NUM_FRAMES]; //array of pointers to the frame buffers
+static u8 g_halfSrc[DEMO_MAX_FRAME / 2U] __attribute__((aligned(0x20)));
 
 /*
  * Interrupt vector table
@@ -479,6 +487,7 @@ void DemoRun()
 		while (!XUartPs_IsReceiveData(UART_BASEADDR) && !fRefresh)
 		{
 			MidiUartPoll();
+			(void)DemoApplyLiveEffectFrame();
 			/* Recover after unplug/replug without entering V. Do not
 			 * touch VTC while pLocked is low (AXI hang). */
 			if ((XGpio_DiscreteRead(&videoCapt.gpio, LOCKED_CHANNEL) & LOCKED_MASK) != 0U)
@@ -487,7 +496,7 @@ void DemoRun()
 				{
 					if (VideoDetectLocked(&videoCapt) == XST_SUCCESS)
 					{
-						if (videoCapt.state == VIDEO_STREAMING)
+						if ((videoCapt.state == VIDEO_STREAMING) && (g_liveEffectCmd == 0))
 						{
 							DisplayChangeFrame(&dispCtrl, videoCapt.curFrame);
 						}
@@ -559,28 +568,24 @@ void DemoRun()
 			DemoPrintTest(pFrames[dispCtrl.curFrame], dispCtrl.vMode.width, dispCtrl.vMode.height, DEMO_STRIDE, DEMO_PATTERN_GRID);
 			break;
 		case '5':
-			if (videoCapt.state == VIDEO_STREAMING)
-			{
-				VideoStop(&videoCapt);
-				xil_printf("\n\rHDMI-in stream stopped\n\r");
-			}
-			else
+			if (videoCapt.state != VIDEO_STREAMING)
 			{
 				if ((XGpio_DiscreteRead(&videoCapt.gpio, LOCKED_CHANNEL) & LOCKED_MASK) != 0U)
 				{
 					(void)VideoDetectLocked(&videoCapt);
 				}
-				if (VideoStart(&videoCapt) == XST_SUCCESS)
-				{
-					DisplayChangeFrame(&dispCtrl, videoCapt.curFrame);
-					xil_printf("\n\rHDMI-in live on display frame %u\n\r",
-						(unsigned)videoCapt.curFrame);
-				}
-				else
+				if (VideoStart(&videoCapt) != XST_SUCCESS)
 				{
 					xil_printf("\n\rHDMI-in start failed (need lock+timing, use V)\n\r");
+					break;
 				}
 			}
+			if (DemoApplyLiveEffectFrame() == 0)
+			{
+				DisplayChangeFrame(&dispCtrl, videoCapt.curFrame);
+			}
+			xil_printf("\n\rHDMI-in streaming on display frame %u\n\r",
+				(unsigned)dispCtrl.curFrame);
 			break;
 		case '6':
 			nextFrame = videoCapt.curFrame + 1;
@@ -705,7 +710,7 @@ void DemoPrintMenu()
 	xil_printf("3 - Print Blended Test Pattern to Display Framebuffer\n\r");
 	xil_printf("4 - Print Color Bar Test Pattern to Display Framebuffer\n\r");
 	xil_printf("0 - Print Grid Test Pattern (for 3D testing)\n\r");
-	xil_printf("5 - Start/Stop HDMI-in on the HDMI-out monitor\n\r");
+	xil_printf("5 - Start HDMI-in and show it on the HDMI-out monitor\n\r");
 	xil_printf("6 - Change Video Framebuffer Index\n\r");
 	xil_printf("7 - Grab Video Frame and invert colors\n\r");
 	xil_printf("8 - Grab Video Frame and scale to Display resolution\n\r");
@@ -1086,33 +1091,319 @@ void DemoCRMenu()
 	xil_printf("Select a new resolution:");
 }
 
+#define DEMO_IN_DECIM 2U
+
+static int DemoEffectDestFrame(void)
+{
+	int i;
+
+	/* Write the half-res + 2x result into a buffer the HDMI-out VDMA is
+	 * not scanning, then flip. Otherwise the monitor sees 640x360 then 1280x720. */
+	for (i = 0; i < DISPLAY_NUM_FRAMES; i++)
+	{
+		if ((i != (int)videoCapt.curFrame) && (i != (int)dispCtrl.curFrame))
+		{
+			return i;
+		}
+	}
+	return ((int)videoCapt.curFrame + 1) % DISPLAY_NUM_FRAMES;
+}
+
+static void DemoDecimateSkip2(const u8 *src, u8 *dst, u32 width, u32 height, u32 stride)
+{
+	u32 x;
+	u32 y;
+	u32 dw = width / DEMO_IN_DECIM;
+	u32 dh = height / DEMO_IN_DECIM;
+
+	for (y = 0U; y < dh; y++)
+	{
+		const u8 *s = src + ((y * DEMO_IN_DECIM) * stride);
+		u8 *d = dst + (y * stride);
+
+		for (x = 0U; x < dw; x++)
+		{
+			d[0] = s[0];
+			d[1] = s[1];
+			d[2] = s[2];
+			d += 3;
+			s += (3U * DEMO_IN_DECIM);
+		}
+	}
+}
+
+static void DemoPixelDoubleInPlace(u8 *frame, u32 halfW, u32 halfH, u32 stride)
+{
+	int y;
+	int x;
+
+	for (y = (int)halfH - 1; y >= 0; y--)
+	{
+		u8 *srcRow = frame + ((u32)y * stride);
+		u8 *dstRow = frame + ((u32)y * 2U * stride);
+
+		for (x = (int)halfW - 1; x >= 0; x--)
+		{
+			u8 *s = srcRow + ((u32)x * 3U);
+			u8 *d = dstRow + ((u32)x * 6U);
+
+			d[0] = s[0];
+			d[1] = s[1];
+			d[2] = s[2];
+			d[3] = s[0];
+			d[4] = s[1];
+			d[5] = s[2];
+		}
+		memcpy(dstRow + stride, dstRow, halfW * 6U);
+	}
+}
+
+static int DemoApplyLiveEffectFrame(void)
+{
+	int dest;
+	u8 *src;
+	u32 width;
+	u32 height;
+	u32 halfW;
+	u32 halfH;
+	int clearNow;
+
+	if ((g_liveEffectCmd == 0) || (videoCapt.state != VIDEO_STREAMING))
+	{
+		return 0;
+	}
+
+	src = pFrames[videoCapt.curFrame];
+	width = videoCapt.timing.HActiveVideo;
+	height = videoCapt.timing.VActiveVideo;
+	if ((width < (16U * DEMO_IN_DECIM)) || (height < (16U * DEMO_IN_DECIM)))
+	{
+		return 0;
+	}
+
+	halfW = width / DEMO_IN_DECIM;
+	halfH = height / DEMO_IN_DECIM;
+	if ((halfH * DEMO_STRIDE) > sizeof(g_halfSrc))
+	{
+		return 0;
+	}
+
+	dest = DemoEffectDestFrame();
+	DemoInvalidateVideoSrc(src, height);
+	DemoDecimateSkip2(src, g_halfSrc, width, height, DEMO_STRIDE);
+	clearNow = g_liveEffectNeedClear;
+	g_liveEffectNeedClear = 0;
+	if (DemoApplySelectedEffect(g_liveEffectCmd, g_halfSrc, pFrames[dest], halfW, halfH, clearNow) != 0)
+	{
+		return 0;
+	}
+	DemoPixelDoubleInPlace(pFrames[dest], halfW, halfH, DEMO_STRIDE);
+	Xil_DCacheFlushRange((unsigned int)pFrames[dest], height * DEMO_STRIDE);
+	DisplayChangeFrame(&dispCtrl, dest);
+	return 1;
+}
+
+static void DemoInvalidateVideoSrc(u8 *frame, u32 height)
+{
+	if ((frame != NULL) && (height > 0U))
+	{
+		Xil_DCacheInvalidateRange((unsigned int)frame, height * DEMO_STRIDE);
+	}
+}
+
+static int DemoApplySelectedEffect(char cmd, u8 *src, u8 *dst, u32 width, u32 height, int clearFrame)
+{
+	const float PI = 3.14159265359f;
+
+	if (clearFrame)
+	{
+		DemoClearFrame(dst, width, height, DEMO_STRIDE);
+	}
+
+	switch (cmd)
+	{
+	case '1':
+		DemoMirrorEffect(src, dst, width, height, DEMO_STRIDE, DEMO_MIRROR_HORIZONTAL);
+		return 0;
+	case '2':
+		DemoMirrorEffect(src, dst, width, height, DEMO_STRIDE, DEMO_MIRROR_VERTICAL);
+		return 0;
+	case '3':
+		DemoMirrorEffect(src, dst, width, height, DEMO_STRIDE, DEMO_MIRROR_BOTH);
+		return 0;
+	case '4':
+		DemoMirrorEffect(src, dst, width, height, DEMO_STRIDE, DEMO_MIRROR_CENTER_X);
+		return 0;
+	case '5':
+		DemoMirrorEffect(src, dst, width, height, DEMO_STRIDE, DEMO_MIRROR_CENTER_Y);
+		return 0;
+	case '6':
+		DemoMirrorEffect(src, dst, width, height, DEMO_STRIDE, DEMO_MIRROR_CENTER_XY);
+		return 0;
+	case '7':
+		DemoTileEffect(src, dst, width, height, width, height, DEMO_STRIDE, 2, 2);
+		return 0;
+	case '8':
+		DemoTileEffect(src, dst, width, height, width, height, DEMO_STRIDE, 3, 3);
+		return 0;
+	case '9':
+		DemoTileEffect(src, dst, width, height, width, height, DEMO_STRIDE, 4, 4);
+		return 0;
+	case 'a':
+	case 'A':
+		DemoZoomEffect(src, dst, width, height, DEMO_STRIDE, 2.0f, 0.5f, 0.5f);
+		return 0;
+	case 'b':
+	case 'B':
+		DemoZoomEffect(src, dst, width, height, DEMO_STRIDE, 0.5f, 0.5f, 0.5f);
+		return 0;
+	case 'c':
+	case 'C':
+		DemoMosaicEffect(src, dst, width, height, DEMO_STRIDE, 8);
+		return 0;
+	case 'd':
+	case 'D':
+		DemoMosaicEffect(src, dst, width, height, DEMO_STRIDE, 16);
+		return 0;
+	case 'e':
+	case 'E':
+		DemoMosaicEffect(src, dst, width, height, DEMO_STRIDE, 32);
+		return 0;
+	case 'f':
+	case 'F':
+		Demo3DPlaneEffect(src, dst, width, height, DEMO_STRIDE, 0.0f, 0.0f, PI / 4.0f, 1.0f, 0.0f, 0.0f);
+		return 0;
+	case 'g':
+	case 'G':
+		Demo3DPlaneEffect(src, dst, width, height, DEMO_STRIDE, 0.0f, 0.0f, PI / 2.0f, 1.0f, 0.0f, 0.0f);
+		return 0;
+	case 'h':
+	case 'H':
+		Demo3DPlaneEffect(src, dst, width, height, DEMO_STRIDE, PI / 3.0f, 0.0f, 0.0f, 0.7f, 0.0f, 0.0f);
+		return 0;
+	case 'i':
+	case 'I':
+		Demo3DPlaneEffect(src, dst, width, height, DEMO_STRIDE, 0.0f, PI / 3.0f, 0.0f, 0.7f, 0.0f, 0.0f);
+		return 0;
+	case 'j':
+	case 'J':
+		Demo3DPlaneEffect(src, dst, width, height, DEMO_STRIDE, PI / 4.0f, PI / 4.0f, PI / 4.0f, 0.7f, 0.0f, 0.0f);
+		return 0;
+	case 'k':
+	case 'K':
+		Demo3DPlaneEffect(src, dst, width, height, DEMO_STRIDE, 0.0f, 0.0f, PI / 6.0f, 1.5f, 0.0f, 0.0f);
+		return 0;
+	case 'l':
+	case 'L':
+		DemoShrinkRandomEffect(src, dst, width, height, width, height, DEMO_STRIDE);
+		return 0;
+	default:
+		return -1;
+	}
+}
+
+static char DemoReadMenuKey(void)
+{
+	char userInput;
+	char rxChar;
+
+	userInput = (char)XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
+	while (XUartPs_IsReceiveData(UART_BASEADDR))
+	{
+		rxChar = (char)XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
+		if ((rxChar != '\r') && (rxChar != '\n'))
+		{
+			userInput = rxChar;
+		}
+	}
+	return userInput;
+}
+
+static int DemoRunEffectUntilKey(char cmd, int clearFrame, u8 *staticSrc, u32 staticWidth, u32 staticHeight)
+{
+	int dest;
+	char key;
+
+	if (videoCapt.state == VIDEO_PAUSED)
+	{
+		(void)VideoStart(&videoCapt);
+	}
+
+	if (videoCapt.state == VIDEO_STREAMING)
+	{
+		g_liveEffectCmd = cmd;
+		g_liveEffectClear = clearFrame;
+		g_liveEffectNeedClear = clearFrame;
+		if (DemoApplyLiveEffectFrame() == 0)
+		{
+			g_liveEffectCmd = 0;
+			return -1;
+		}
+		xil_printf("\n\rHDMI-out now shows effected video-in on frame %d.\r\n",
+			dispCtrl.curFrame);
+		return 0;
+	}
+
+	dest = DemoEffectDestFrame();
+	if (DemoApplySelectedEffect(cmd, staticSrc, pFrames[dest], staticWidth, staticHeight, clearFrame) != 0)
+	{
+		return -1;
+	}
+	DisplayChangeFrame(&dispCtrl, dest);
+	xil_printf("\n\rPress any key to continue, q to quit...\r\n");
+	while (XUartPs_IsReceiveData(UART_BASEADDR))
+	{
+		(void)XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
+	}
+	while (!XUartPs_IsReceiveData(UART_BASEADDR))
+	{
+		MidiUartPoll();
+	}
+	key = DemoReadMenuKey();
+	if ((key == 'q') || (key == 'Q'))
+	{
+		return 1;
+	}
+	return 0;
+}
+
 void DemoEffectMenu()
 {
 	int fEffectSet = 0;
 	char userInput = 0;
-	char rxChar;
-	int nextFrame;
-	u32 width, height;
-	u8 *srcFrame;
-	u8 *originalSrcFrame; // Store original source frame
-	u32 originalWidth, originalHeight; // Store original dimensions
-	int clearFrame = 1; // Default to clearing frame before effects (important for zoom/rotate)
-	int originalFrameStored = 0; // Track if we've stored the original frame
+	u8 *originalSrcFrame;
+	u32 originalWidth;
+	u32 originalHeight;
+	int clearFrame = 1;
+	int originalFrameStored = 0;
+	u32 srcFrameIdx;
+	u32 i;
 
-	/* Flush UART FIFO */
 	while (XUartPs_IsReceiveData(UART_BASEADDR))
 	{
-		XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
+		(void)XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
 	}
+
+	originalSrcFrame = pFrames[dispCtrl.curFrame];
+	originalWidth = dispCtrl.vMode.width;
+	originalHeight = dispCtrl.vMode.height;
 
 	while (!fEffectSet)
 	{
-		xil_printf("\x1B[H"); //Set cursor to top left of terminal
-		xil_printf("\x1B[2J"); //Clear terminal
+		xil_printf("\x1B[H");
+		xil_printf("\x1B[2J");
 		xil_printf("**************************************************\n\r");
 		xil_printf("*            Video Effects Menu                   *\n\r");
 		xil_printf("**************************************************\n\r");
+		xil_printf("HDMI-in: %s\n\r",
+			(videoCapt.state == VIDEO_STREAMING) ? "LIVE (effects keep updating)" : "static frame");
+		if (g_liveEffectCmd != 0)
+		{
+			xil_printf("Active effect: %c  display frame %d\n\r",
+				g_liveEffectCmd, dispCtrl.curFrame);
+		}
 		xil_printf("\n\r");
+		xil_printf("0 - Clear live effect (show raw HDMI-in)\n\r");
 		xil_printf("1 - Mirror Horizontal (flip)\n\r");
 		xil_printf("2 - Mirror Vertical (flip)\n\r");
 		xil_printf("3 - Mirror Both (flip)\n\r");
@@ -1140,652 +1431,103 @@ void DemoEffectMenu()
 		xil_printf("P - Animated 3D Rotate XYZ\n\r");
 		xil_printf("T - Toggle Frame Clear (Current: %s)\n\r", clearFrame ? "ON" : "OFF");
 		xil_printf("q - Quit (back to main menu)\n\r");
-			xil_printf("\n\r");
+		xil_printf("\n\r");
 		xil_printf("Select an effect:");
 
-		/* Wait for and decode a non-CR/LF command character. */
 		do
 		{
 			while (!XUartPs_IsReceiveData(UART_BASEADDR))
-			{}
-			userInput = XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-			while (XUartPs_IsReceiveData(UART_BASEADDR))
 			{
-				rxChar = (char)XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-				if (rxChar != '\r' && rxChar != '\n')
-				{
-					userInput = rxChar;
-				}
+				MidiUartPoll();
+				(void)DemoApplyLiveEffectFrame();
 			}
-		} while (userInput == '\r' || userInput == '\n');
+			userInput = DemoReadMenuKey();
+		} while ((userInput == '\r') || (userInput == '\n'));
 
 		xil_printf("%c", userInput);
-		
-		// Check for quit first
-		if (userInput == 'q' || userInput == 'Q')
+
+		if ((userInput == 'q') || (userInput == 'Q'))
 		{
 			fEffectSet = 1;
 			break;
 		}
-		
-		// Store original source frame on first effect (always use original, never chain)
-		if (!originalFrameStored)
+
+		if (userInput == '0')
 		{
-			// Determine original source frame
+			g_liveEffectCmd = 0;
 			if (videoCapt.state == VIDEO_STREAMING)
 			{
-				// Use video frame as original
-				originalSrcFrame = pFrames[videoCapt.curFrame];
-				originalWidth = videoCapt.timing.HActiveVideo;
-				originalHeight = videoCapt.timing.VActiveVideo;
-				xil_printf("\n\rOriginal source: video frame (%dx%d)\n\r", originalWidth, originalHeight);
+				DisplayChangeFrame(&dispCtrl, videoCapt.curFrame);
 			}
-			else
-			{
-				// Use display frame as original
-				originalSrcFrame = pFrames[dispCtrl.curFrame];
-				originalWidth = dispCtrl.vMode.width;
-				originalHeight = dispCtrl.vMode.height;
-				xil_printf("\n\rOriginal source: display frame (%dx%d)\n\r", originalWidth, originalHeight);
-			}
-			originalFrameStored = 1;
+			xil_printf("\n\rLive effect cleared, showing raw HDMI-in\n\r");
+			continue;
 		}
-		
-		// Always use the original source frame for effects
-		srcFrame = originalSrcFrame;
-		width = originalWidth;
-		height = originalHeight;
-		
-		// Get next frame for output
-		nextFrame = dispCtrl.curFrame + 1;
-		if (nextFrame >= DISPLAY_NUM_FRAMES)
+
+		if ((userInput == 't') || (userInput == 'T'))
 		{
-			nextFrame = 0;
-		}
-		// Make sure we don't overwrite the original source frame
-		if (nextFrame == videoCapt.curFrame && videoCapt.state == VIDEO_STREAMING)
-		{
-			nextFrame = (nextFrame + 1) % DISPLAY_NUM_FRAMES;
-		}
-		// Also avoid overwriting if nextFrame is the same as original source
-		if (pFrames[nextFrame] == originalSrcFrame)
-		{
-			nextFrame = (nextFrame + 1) % DISPLAY_NUM_FRAMES;
-			if (pFrames[nextFrame] == originalSrcFrame)
-			{
-				nextFrame = (nextFrame + 1) % DISPLAY_NUM_FRAMES;
-			}
-		}
-		
-		// Clear frame if requested (important for zoom/rotate to avoid artifacts)
-		if (clearFrame)
-		{
-			DemoClearFrame(pFrames[nextFrame], dispCtrl.vMode.width, dispCtrl.vMode.height, DEMO_STRIDE);
-		}
-		
-		switch (userInput)
-		{
-		case '1':
-			DemoMirrorEffect(srcFrame, pFrames[nextFrame], width, height, DEMO_STRIDE, DEMO_MIRROR_HORIZONTAL);
-			DisplayChangeFrame(&dispCtrl, nextFrame);
-			xil_printf("\n\rApplied: Mirror Horizontal\n\r");
-			xil_printf("Press any key to continue, 'q' to quit...\n\r");
-			// Flush UART and wait for any key
-			while (XUartPs_IsReceiveData(UART_BASEADDR))
-			{
-				XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-			}
-			// Wait for keypress
-			while (!XUartPs_IsReceiveData(UART_BASEADDR))
-			{}
-			// Check if 'q' was pressed to quit
-			userInput = XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-			if (userInput == 'q' || userInput == 'Q')
-			{
-				fEffectSet = 1;
-				break;
-			}
-			break;
-		case '2':
-			DemoMirrorEffect(srcFrame, pFrames[nextFrame], width, height, DEMO_STRIDE, DEMO_MIRROR_VERTICAL);
-			DisplayChangeFrame(&dispCtrl, nextFrame);
-			xil_printf("\n\rApplied: Mirror Vertical\n\r");
-			xil_printf("Press any key to continue, 'q' to quit...\n\r");
-			while (XUartPs_IsReceiveData(UART_BASEADDR))
-			{
-				XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-			}
-			while (!XUartPs_IsReceiveData(UART_BASEADDR))
-			{}
-			userInput = XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-			if (userInput == 'q' || userInput == 'Q')
-			{
-				fEffectSet = 1;
-				break;
-			}
-			break;
-		case '3':
-			DemoMirrorEffect(srcFrame, pFrames[nextFrame], width, height, DEMO_STRIDE, DEMO_MIRROR_BOTH);
-			DisplayChangeFrame(&dispCtrl, nextFrame);
-			xil_printf("\n\rApplied: Mirror Both\n\r");
-			xil_printf("Press any key to continue, 'q' to quit...\n\r");
-			while (XUartPs_IsReceiveData(UART_BASEADDR))
-			{
-				XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-			}
-			while (!XUartPs_IsReceiveData(UART_BASEADDR))
-			{}
-			userInput = XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-			if (userInput == 'q' || userInput == 'Q')
-			{
-				fEffectSet = 1;
-				break;
-			}
-			break;
-		case '4':
-			DemoMirrorEffect(srcFrame, pFrames[nextFrame], width, height, DEMO_STRIDE, DEMO_MIRROR_CENTER_X);
-			DisplayChangeFrame(&dispCtrl, nextFrame);
-			xil_printf("\n\rApplied: Center Mirror X\n\r");
-			xil_printf("Press any key to continue, 'q' to quit...\n\r");
-			while (XUartPs_IsReceiveData(UART_BASEADDR))
-			{
-				XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-			}
-			while (!XUartPs_IsReceiveData(UART_BASEADDR))
-			{}
-			userInput = XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-			if (userInput == 'q' || userInput == 'Q')
-			{
-				fEffectSet = 1;
-				break;
-			}
-			break;
-		case '5':
-			DemoMirrorEffect(srcFrame, pFrames[nextFrame], width, height, DEMO_STRIDE, DEMO_MIRROR_CENTER_Y);
-			DisplayChangeFrame(&dispCtrl, nextFrame);
-			xil_printf("\n\rApplied: Center Mirror Y\n\r");
-			xil_printf("Press any key to continue, 'q' to quit...\n\r");
-			while (XUartPs_IsReceiveData(UART_BASEADDR))
-			{
-				XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-			}
-			while (!XUartPs_IsReceiveData(UART_BASEADDR))
-			{}
-			userInput = XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-			if (userInput == 'q' || userInput == 'Q')
-			{
-				fEffectSet = 1;
-				break;
-			}
-			break;
-		case '6':
-			DemoMirrorEffect(srcFrame, pFrames[nextFrame], width, height, DEMO_STRIDE, DEMO_MIRROR_CENTER_XY);
-			DisplayChangeFrame(&dispCtrl, nextFrame);
-			xil_printf("\n\rApplied: Center Mirror XY\n\r");
-			xil_printf("Press any key to continue, 'q' to quit...\n\r");
-			while (XUartPs_IsReceiveData(UART_BASEADDR))
-			{
-				XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-			}
-			while (!XUartPs_IsReceiveData(UART_BASEADDR))
-			{}
-			userInput = XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-			if (userInput == 'q' || userInput == 'Q')
-			{
-				fEffectSet = 1;
-				break;
-			}
-			break;
-		case '7':
-			DemoTileEffect(srcFrame, pFrames[nextFrame], width, height, dispCtrl.vMode.width, dispCtrl.vMode.height, DEMO_STRIDE, 2, 2);
-			DisplayChangeFrame(&dispCtrl, nextFrame);
-			xil_printf("\n\rApplied: Tile 2x2\n\r");
-			xil_printf("Press any key to continue, 'q' to quit...\n\r");
-			while (XUartPs_IsReceiveData(UART_BASEADDR))
-			{
-				XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-			}
-			while (!XUartPs_IsReceiveData(UART_BASEADDR))
-			{}
-			userInput = XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-			if (userInput == 'q' || userInput == 'Q')
-			{
-				fEffectSet = 1;
-				break;
-			}
-			break;
-		case '8':
-			DemoTileEffect(srcFrame, pFrames[nextFrame], width, height, dispCtrl.vMode.width, dispCtrl.vMode.height, DEMO_STRIDE, 3, 3);
-			DisplayChangeFrame(&dispCtrl, nextFrame);
-			xil_printf("\n\rApplied: Tile 3x3\n\r");
-			xil_printf("Press any key to continue, 'q' to quit...\n\r");
-			while (XUartPs_IsReceiveData(UART_BASEADDR))
-			{
-				XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-			}
-			while (!XUartPs_IsReceiveData(UART_BASEADDR))
-			{}
-			userInput = XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-			if (userInput == 'q' || userInput == 'Q')
-			{
-				fEffectSet = 1;
-				break;
-			}
-			break;
-		case '9':
-			DemoTileEffect(srcFrame, pFrames[nextFrame], width, height, dispCtrl.vMode.width, dispCtrl.vMode.height, DEMO_STRIDE, 4, 4);
-			DisplayChangeFrame(&dispCtrl, nextFrame);
-			xil_printf("\n\rApplied: Tile 4x4\n\r");
-			xil_printf("Press any key to continue, 'q' to quit...\n\r");
-			while (XUartPs_IsReceiveData(UART_BASEADDR))
-			{
-				XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-			}
-			while (!XUartPs_IsReceiveData(UART_BASEADDR))
-			{}
-			userInput = XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-			if (userInput == 'q' || userInput == 'Q')
-			{
-				fEffectSet = 1;
-				break;
-			}
-			break;
-		case 'a':
-		case 'A':
-			DemoZoomEffect(srcFrame, pFrames[nextFrame], width, height, DEMO_STRIDE, 2.0f, 0.5f, 0.5f);
-			DisplayChangeFrame(&dispCtrl, nextFrame);
-			xil_printf("\n\rApplied: Zoom In 2x\n\r");
-			xil_printf("Press any key to continue, 'q' to quit...\n\r");
-			while (XUartPs_IsReceiveData(UART_BASEADDR))
-			{
-				XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-			}
-			while (!XUartPs_IsReceiveData(UART_BASEADDR))
-			{}
-			userInput = XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-			if (userInput == 'q' || userInput == 'Q')
-			{
-				fEffectSet = 1;
-				break;
-			}
-			break;
-		case 'b':
-		case 'B':
-			DemoZoomEffect(srcFrame, pFrames[nextFrame], width, height, DEMO_STRIDE, 0.5f, 0.5f, 0.5f);
-			DisplayChangeFrame(&dispCtrl, nextFrame);
-			xil_printf("\n\rApplied: Zoom Out 0.5x\n\r");
-			xil_printf("Press any key to continue, 'q' to quit...\n\r");
-			while (XUartPs_IsReceiveData(UART_BASEADDR))
-			{
-				XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-			}
-			while (!XUartPs_IsReceiveData(UART_BASEADDR))
-			{}
-			userInput = XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-			if (userInput == 'q' || userInput == 'Q')
-			{
-				fEffectSet = 1;
-				break;
-			}
-			break;
-		case 'c':
-		case 'C':
-			DemoMosaicEffect(srcFrame, pFrames[nextFrame], width, height, DEMO_STRIDE, 8);
-			DisplayChangeFrame(&dispCtrl, nextFrame);
-			xil_printf("\n\rApplied: Mosaic 8x8\n\r");
-			xil_printf("Press any key to continue, 'q' to quit...\n\r");
-			while (XUartPs_IsReceiveData(UART_BASEADDR))
-			{
-				XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-			}
-			while (!XUartPs_IsReceiveData(UART_BASEADDR))
-			{}
-			userInput = XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-			if (userInput == 'q' || userInput == 'Q')
-			{
-				fEffectSet = 1;
-				break;
-			}
-			break;
-		case 'd':
-		case 'D':
-			DemoMosaicEffect(srcFrame, pFrames[nextFrame], width, height, DEMO_STRIDE, 16);
-			DisplayChangeFrame(&dispCtrl, nextFrame);
-			xil_printf("\n\rApplied: Mosaic 16x16\n\r");
-			xil_printf("Press any key to continue, 'q' to quit...\n\r");
-			while (XUartPs_IsReceiveData(UART_BASEADDR))
-			{
-				XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-			}
-			while (!XUartPs_IsReceiveData(UART_BASEADDR))
-			{}
-			userInput = XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-			if (userInput == 'q' || userInput == 'Q')
-			{
-				fEffectSet = 1;
-				break;
-			}
-			break;
-		case 'e':
-		case 'E':
-			DemoMosaicEffect(srcFrame, pFrames[nextFrame], width, height, DEMO_STRIDE, 32);
-			DisplayChangeFrame(&dispCtrl, nextFrame);
-			xil_printf("\n\rApplied: Mosaic 32x32\n\r");
-			xil_printf("Press any key to continue, 'q' to quit...\n\r");
-			while (XUartPs_IsReceiveData(UART_BASEADDR))
-			{
-				XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-			}
-			while (!XUartPs_IsReceiveData(UART_BASEADDR))
-			{}
-			userInput = XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-			if (userInput == 'q' || userInput == 'Q')
-			{
-				fEffectSet = 1;
-				break;
-			}
-			break;
-		case 'f':
-		case 'F':
-			{
-				const float PI = 3.14159265359f;
-				Demo3DPlaneEffect(srcFrame, pFrames[nextFrame], width, height, DEMO_STRIDE, 0.0f, 0.0f, PI/4.0f, 1.0f, 0.0f, 0.0f);
-				DisplayChangeFrame(&dispCtrl, nextFrame);
-				xil_printf("\n\rApplied: 3D Rotate Z (45 degrees)\n\r");
-				xil_printf("Press any key to continue, 'q' to quit...\n\r");
-				while (XUartPs_IsReceiveData(UART_BASEADDR))
-				{
-					XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-				}
-				while (!XUartPs_IsReceiveData(UART_BASEADDR))
-				{}
-				userInput = XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-				if (userInput == 'q' || userInput == 'Q')
-				{
-					fEffectSet = 1;
-					break;
-				}
-			}
-			break;
-		case 'g':
-		case 'G':
-			{
-				const float PI = 3.14159265359f;
-				Demo3DPlaneEffect(srcFrame, pFrames[nextFrame], width, height, DEMO_STRIDE, 0.0f, 0.0f, PI/2.0f, 1.0f, 0.0f, 0.0f);
-				DisplayChangeFrame(&dispCtrl, nextFrame);
-				xil_printf("\n\rApplied: 3D Rotate Z (90 degrees)\n\r");
-				xil_printf("Press any key to continue, 'q' to quit...\n\r");
-				while (XUartPs_IsReceiveData(UART_BASEADDR))
-				{
-					XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-				}
-				while (!XUartPs_IsReceiveData(UART_BASEADDR))
-				{}
-				userInput = XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-				if (userInput == 'q' || userInput == 'Q')
-				{
-					fEffectSet = 1;
-					break;
-				}
-			}
-			break;
-		case 'h':
-		case 'H':
-			{
-				const float PI = 3.14159265359f;
-				// Scale down to 70% and rotate X axis 60 degrees
-				Demo3DPlaneEffect(srcFrame, pFrames[nextFrame], width, height, DEMO_STRIDE, PI/3.0f, 0.0f, 0.0f, 0.7f, 0.0f, 0.0f);
-				DisplayChangeFrame(&dispCtrl, nextFrame);
-				xil_printf("\n\rApplied: 3D Rotate X (60 deg, scaled 70%%)\n\r");
-				xil_printf("Press any key to continue, 'q' to quit...\n\r");
-				while (XUartPs_IsReceiveData(UART_BASEADDR))
-				{
-					XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-				}
-				while (!XUartPs_IsReceiveData(UART_BASEADDR))
-				{}
-				userInput = XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-				if (userInput == 'q' || userInput == 'Q')
-				{
-					fEffectSet = 1;
-					break;
-				}
-			}
-			break;
-		case 'i':
-		case 'I':
-			{
-				const float PI = 3.14159265359f;
-				// Scale down to 70% and rotate Y axis 60 degrees
-				Demo3DPlaneEffect(srcFrame, pFrames[nextFrame], width, height, DEMO_STRIDE, 0.0f, PI/3.0f, 0.0f, 0.7f, 0.0f, 0.0f);
-				DisplayChangeFrame(&dispCtrl, nextFrame);
-				xil_printf("\n\rApplied: 3D Rotate Y (60 deg, scaled 70%%)\n\r");
-				xil_printf("Press any key to continue, 'q' to quit...\n\r");
-				while (XUartPs_IsReceiveData(UART_BASEADDR))
-				{
-					XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-				}
-				while (!XUartPs_IsReceiveData(UART_BASEADDR))
-				{}
-				userInput = XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-				if (userInput == 'q' || userInput == 'Q')
-				{
-					fEffectSet = 1;
-					break;
-				}
-			}
-			break;
-		case 'j':
-		case 'J':
-			{
-				const float PI = 3.14159265359f;
-				// Scale down to 70% and rotate on all axes
-				Demo3DPlaneEffect(srcFrame, pFrames[nextFrame], width, height, DEMO_STRIDE, PI/4.0f, PI/4.0f, PI/4.0f, 0.7f, 0.0f, 0.0f);
-				DisplayChangeFrame(&dispCtrl, nextFrame);
-				xil_printf("\n\rApplied: 3D Rotate XYZ (45 deg each, scaled 70%%)\n\r");
-				xil_printf("Press any key to continue, 'q' to quit...\n\r");
-				while (XUartPs_IsReceiveData(UART_BASEADDR))
-				{
-					XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-				}
-				while (!XUartPs_IsReceiveData(UART_BASEADDR))
-				{}
-				userInput = XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-				if (userInput == 'q' || userInput == 'Q')
-				{
-					fEffectSet = 1;
-					break;
-				}
-			}
-			break;
-		case 'k':
-		case 'K':
-			{
-				const float PI = 3.14159265359f;
-				Demo3DPlaneEffect(srcFrame, pFrames[nextFrame], width, height, DEMO_STRIDE, 0.0f, 0.0f, PI/6.0f, 1.5f, 0.0f, 0.0f);
-				DisplayChangeFrame(&dispCtrl, nextFrame);
-				xil_printf("\n\rApplied: 3D Scale + Rotate\n\r");
-				xil_printf("Press any key to continue, 'q' to quit...\n\r");
-				while (XUartPs_IsReceiveData(UART_BASEADDR))
-				{
-					XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-				}
-				while (!XUartPs_IsReceiveData(UART_BASEADDR))
-				{}
-				userInput = XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-				if (userInput == 'q' || userInput == 'Q')
-				{
-					fEffectSet = 1;
-					break;
-				}
-			}
-			break;
-		case 'l':
-		case 'L':
-			DemoShrinkRandomEffect(srcFrame, pFrames[nextFrame], width, height, dispCtrl.vMode.width, dispCtrl.vMode.height, DEMO_STRIDE);
-			DisplayChangeFrame(&dispCtrl, nextFrame);
-			xil_printf("\n\rApplied: Shrink 25%% and Random Position\n\r");
-			xil_printf("Press any key to continue, 'q' to quit...\n\r");
-			while (XUartPs_IsReceiveData(UART_BASEADDR))
-			{
-				XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-			}
-			while (!XUartPs_IsReceiveData(UART_BASEADDR))
-			{}
-			userInput = XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-			if (userInput == 'q' || userInput == 'Q')
-			{
-				fEffectSet = 1;
-				break;
-			}
-			break;
-		case 'm':
-		case 'M':
-			{
-				// Animated 3D Rotate X
-				// Find which frame index contains the source frame
-				u32 srcFrameIdx = 0;
-				for (u32 i = 0; i < DISPLAY_NUM_FRAMES; i++)
-				{
-					if (pFrames[i] == srcFrame)
-					{
-						srcFrameIdx = i;
-						break;
-					}
-				}
-				xil_printf("\n\rStarting animated 3D Rotate X... Press any key to stop\n\r");
-				DemoRunAnimated3DEffect(srcFrame, pFrames, srcFrameIdx, width, height, DEMO_STRIDE, dispCtrl.vMode.width, dispCtrl.vMode.height, 
-				                        'X', 0.7f, &dispCtrl, &videoCapt);
-				xil_printf("Press any key to continue, 'q' to quit...\n\r");
-				while (XUartPs_IsReceiveData(UART_BASEADDR))
-				{
-					XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-				}
-				while (!XUartPs_IsReceiveData(UART_BASEADDR))
-				{}
-				userInput = XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-				if (userInput == 'q' || userInput == 'Q')
-				{
-					fEffectSet = 1;
-					break;
-				}
-			}
-			break;
-		case 'n':
-		case 'N':
-			{
-				// Animated 3D Rotate Y
-				// Find which frame index contains the source frame
-				u32 srcFrameIdx = 0;
-				for (u32 i = 0; i < DISPLAY_NUM_FRAMES; i++)
-				{
-					if (pFrames[i] == srcFrame)
-					{
-						srcFrameIdx = i;
-						break;
-					}
-				}
-				xil_printf("\n\rStarting animated 3D Rotate Y... Press any key to stop\n\r");
-				DemoRunAnimated3DEffect(srcFrame, pFrames, srcFrameIdx, width, height, DEMO_STRIDE, dispCtrl.vMode.width, dispCtrl.vMode.height, 
-				                        'Y', 0.7f, &dispCtrl, &videoCapt);
-				xil_printf("Press any key to continue, 'q' to quit...\n\r");
-				while (XUartPs_IsReceiveData(UART_BASEADDR))
-				{
-					XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-				}
-				while (!XUartPs_IsReceiveData(UART_BASEADDR))
-				{}
-				userInput = XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-				if (userInput == 'q' || userInput == 'Q')
-				{
-					fEffectSet = 1;
-					break;
-				}
-			}
-			break;
-		case 'o':
-		case 'O':
-			{
-				// Animated 3D Rotate Z
-				// Find which frame index contains the source frame
-				u32 srcFrameIdx = 0;
-				for (u32 i = 0; i < DISPLAY_NUM_FRAMES; i++)
-				{
-					if (pFrames[i] == srcFrame)
-					{
-						srcFrameIdx = i;
-						break;
-					}
-				}
-				xil_printf("\n\rStarting animated 3D Rotate Z... Press any key to stop\n\r");
-				DemoRunAnimated3DEffect(srcFrame, pFrames, srcFrameIdx, width, height, DEMO_STRIDE, dispCtrl.vMode.width, dispCtrl.vMode.height, 
-				                        'Z', 0.7f, &dispCtrl, &videoCapt);
-				xil_printf("Press any key to continue, 'q' to quit...\n\r");
-				while (XUartPs_IsReceiveData(UART_BASEADDR))
-				{
-					XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-				}
-				while (!XUartPs_IsReceiveData(UART_BASEADDR))
-				{}
-				userInput = XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-				if (userInput == 'q' || userInput == 'Q')
-				{
-					fEffectSet = 1;
-					break;
-				}
-			}
-			break;
-		case 'p':
-		case 'P':
-			{
-				// Animated 3D Rotate XYZ
-				// Find which frame index contains the source frame
-				u32 srcFrameIdx = 0;
-				for (u32 i = 0; i < DISPLAY_NUM_FRAMES; i++)
-				{
-					if (pFrames[i] == srcFrame)
-					{
-						srcFrameIdx = i;
-						break;
-					}
-				}
-				xil_printf("\n\rStarting animated 3D Rotate XYZ... Press any key to stop\n\r");
-				DemoRunAnimated3DEffect(srcFrame, pFrames, srcFrameIdx, width, height, DEMO_STRIDE, dispCtrl.vMode.width, dispCtrl.vMode.height, 
-				                        'A', 0.7f, &dispCtrl, &videoCapt);
-				xil_printf("Press any key to continue, 'q' to quit...\n\r");
-				while (XUartPs_IsReceiveData(UART_BASEADDR))
-				{
-					XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-				}
-				while (!XUartPs_IsReceiveData(UART_BASEADDR))
-				{}
-				userInput = XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-				if (userInput == 'q' || userInput == 'Q')
-				{
-					fEffectSet = 1;
-					break;
-				}
-			}
-			break;
-		case 't':
-		case 'T':
 			clearFrame = !clearFrame;
 			xil_printf("\n\rFrame Clear: %s\n\r", clearFrame ? "ON" : "OFF");
-			xil_printf("Press any key to continue...\n\r");
-			while (XUartPs_IsReceiveData(UART_BASEADDR))
+			continue;
+		}
+
+		if (videoCapt.state == VIDEO_STREAMING)
+		{
+			originalSrcFrame = pFrames[videoCapt.curFrame];
+			originalWidth = videoCapt.timing.HActiveVideo;
+			originalHeight = videoCapt.timing.VActiveVideo;
+			originalFrameStored = 1;
+		}
+		else if (!originalFrameStored)
+		{
+			originalSrcFrame = pFrames[dispCtrl.curFrame];
+			originalWidth = dispCtrl.vMode.width;
+			originalHeight = dispCtrl.vMode.height;
+			originalFrameStored = 1;
+		}
+
+		if ((userInput == 'm') || (userInput == 'M') ||
+			(userInput == 'n') || (userInput == 'N') ||
+			(userInput == 'o') || (userInput == 'O') ||
+			(userInput == 'p') || (userInput == 'P'))
+		{
+			srcFrameIdx = 0U;
+			for (i = 0U; i < DISPLAY_NUM_FRAMES; i++)
 			{
-				XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
+				if (pFrames[i] == originalSrcFrame)
+				{
+					srcFrameIdx = i;
+					break;
+				}
 			}
-			while (!XUartPs_IsReceiveData(UART_BASEADDR))
-			{}
-			XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-			break;
-		default:
-			xil_printf("\n\rInvalid Selection");
-			TimerDelay(500000);
+			xil_printf("\n\rAnimated 3D effect. Any key stops.\r\n");
+			DemoRunAnimated3DEffect(originalSrcFrame, pFrames, srcFrameIdx,
+				originalWidth, originalHeight, DEMO_STRIDE,
+				dispCtrl.vMode.width, dispCtrl.vMode.height,
+				(char)((userInput == 'p' || userInput == 'P') ? 'A' :
+					(userInput == 'n' || userInput == 'N') ? 'Y' :
+					(userInput == 'o' || userInput == 'O') ? 'Z' : 'X'),
+				0.7f, &dispCtrl, &videoCapt);
+			continue;
+		}
+
+		{
+			int effectRc;
+
+			effectRc = DemoRunEffectUntilKey(userInput, clearFrame, originalSrcFrame, originalWidth, originalHeight);
+			if (effectRc > 0)
+			{
+				fEffectSet = 1;
+			}
+			else if (effectRc < 0)
+			{
+				xil_printf("\n\rInvalid Selection");
+				TimerDelay(500000);
+			}
 		}
 	}
+
 }
+
 
 int DemoGetInactiveFrame(DisplayCtrl *DispCtrlPtr, VideoCapture *VideoCaptPtr)
 {
@@ -3143,116 +2885,71 @@ void DemoRunAnimatedPattern(u8 *frame, u32 width, u32 height, u32 stride, int pa
  * Mirror Effect - Flip image horizontally, vertically, or both
  * Works on RGB frames (both animations and video)
  */
+static void DemoReverseRgbRow(u8 *dst, const u8 *src, u32 width)
+{
+	const u8 *s = src + (width - 1U) * 3U;
+	u32 x;
+
+	for (x = 0U; x < width; x++)
+	{
+		dst[0] = s[0];
+		dst[1] = s[1];
+		dst[2] = s[2];
+		dst += 3;
+		s -= 3;
+	}
+}
+
 void DemoMirrorEffect(u8 *srcFrame, u8 *destFrame, u32 width, u32 height, u32 stride, int mirrorType)
 {
-	u32 xcoi, ycoi;
-	u32 srcAddr, destAddr;
-	u32 srcX, srcY;
-	u32 centerX = width / 2;
-	u32 centerY = height / 2;
-	
-	for(ycoi = 0; ycoi < height; ycoi++)
+	u32 y;
+	u32 centerX = width / 2U;
+	u32 centerY = height / 2U;
+	u32 rowBytes = width * 3U;
+	u32 leftBytes = centerX * 3U;
+	u32 rightWidth = width - centerX;
+
+	for (y = 0U; y < height; y++)
 	{
-		destAddr = ycoi * stride;
-		
-		for(xcoi = 0; xcoi < width; xcoi++)
+		u8 *dstRow = destFrame + (y * stride);
+		const u8 *srcRow;
+		u32 srcY;
+
+		switch (mirrorType)
 		{
-			// Handle different mirror types
-			if (mirrorType == DEMO_MIRROR_HORIZONTAL)
-			{
-				// Flip entire image horizontally
-				srcX = width - 1 - xcoi;
-				srcY = ycoi;
-			}
-			else if (mirrorType == DEMO_MIRROR_VERTICAL)
-			{
-				// Flip entire image vertically
-				srcX = xcoi;
-				srcY = height - 1 - ycoi;
-			}
-			else if (mirrorType == DEMO_MIRROR_BOTH)
-			{
-				// Flip both axes
-				srcX = width - 1 - xcoi;
-				srcY = height - 1 - ycoi;
-			}
-			else if (mirrorType == DEMO_MIRROR_CENTER_X)
-			{
-				// Center X-axis mirror: left side original, right side mirrors left
-				if (xcoi < centerX)
-				{
-					// Left side: use original
-					srcX = xcoi;
-				}
-				else
-				{
-					// Right side: mirror from left side
-					srcX = width - 1 - xcoi;
-				}
-				srcY = ycoi;
-			}
-			else if (mirrorType == DEMO_MIRROR_CENTER_Y)
-			{
-				// Center Y-axis mirror: top original, bottom mirrors top
-				srcX = xcoi;
-				if (ycoi < centerY)
-				{
-					// Top half: use original
-					srcY = ycoi;
-				}
-				else
-				{
-					// Bottom half: mirror from top
-					srcY = height - 1 - ycoi;
-				}
-			}
-			else if (mirrorType == DEMO_MIRROR_CENTER_XY)
-			{
-				// Center XY mirror: top-left quadrant original, others mirror it
-				if (xcoi < centerX && ycoi < centerY)
-				{
-					// Top-left quadrant: original
-					srcX = xcoi;
-					srcY = ycoi;
-				}
-				else if (xcoi >= centerX && ycoi < centerY)
-				{
-					// Top-right quadrant: mirror X from top-left
-					srcX = width - 1 - xcoi;
-					srcY = ycoi;
-				}
-				else if (xcoi < centerX && ycoi >= centerY)
-				{
-					// Bottom-left quadrant: mirror Y from top-left
-					srcX = xcoi;
-					srcY = height - 1 - ycoi;
-				}
-				else
-				{
-					// Bottom-right quadrant: mirror both from top-left
-					srcX = width - 1 - xcoi;
-					srcY = height - 1 - ycoi;
-				}
-			}
-			else
-			{
-				// No mirror (DEMO_MIRROR_NONE)
-				srcX = xcoi;
-				srcY = ycoi;
-			}
-			
-			srcAddr = srcY * stride + srcX * 3;
-			
-			// Copy RGB pixel
-			destFrame[destAddr] = srcFrame[srcAddr];
-			destFrame[destAddr + 1] = srcFrame[srcAddr + 1];
-			destFrame[destAddr + 2] = srcFrame[srcAddr + 2];
-			
-			destAddr += 3;
+		case DEMO_MIRROR_VERTICAL:
+			srcY = height - 1U - y;
+			memcpy(dstRow, srcFrame + (srcY * stride), rowBytes);
+			break;
+		case DEMO_MIRROR_HORIZONTAL:
+			DemoReverseRgbRow(dstRow, srcFrame + (y * stride), width);
+			break;
+		case DEMO_MIRROR_BOTH:
+			srcY = height - 1U - y;
+			DemoReverseRgbRow(dstRow, srcFrame + (srcY * stride), width);
+			break;
+		case DEMO_MIRROR_CENTER_X:
+			srcRow = srcFrame + (y * stride);
+			memcpy(dstRow, srcRow, leftBytes);
+			DemoReverseRgbRow(dstRow + leftBytes, srcRow, rightWidth);
+			break;
+		case DEMO_MIRROR_CENTER_Y:
+			srcY = (y < centerY) ? y : (height - 1U - y);
+			memcpy(dstRow, srcFrame + (srcY * stride), rowBytes);
+			break;
+		case DEMO_MIRROR_CENTER_XY:
+			srcY = (y < centerY) ? y : (height - 1U - y);
+			srcRow = srcFrame + (srcY * stride);
+			memcpy(dstRow, srcRow, leftBytes);
+			DemoReverseRgbRow(dstRow + leftBytes, srcRow, rightWidth);
+			break;
+		default:
+			memcpy(dstRow, srcFrame + (y * stride), rowBytes);
+			break;
 		}
 	}
-	
-	Xil_DCacheFlushRange((unsigned int) destFrame, height * stride);
+
+	Xil_DCacheFlushRange((unsigned int)destFrame, height * stride);
 }
 
 /*
@@ -3445,16 +3142,22 @@ void DemoMosaicEffect(u8 *srcFrame, u8 *destFrame, u32 width, u32 height, u32 st
 			gAvg = (u8)(gSum / pixelCount);
 			bAvg = (u8)(bSum / pixelCount);
 			
-			// Fill block with average color
-			for(ycoi = blockY; ycoi < blockEndY; ycoi++)
+			/* Write one block row, then replicate it with stride. */
+			destAddr = blockY * stride + blockX * 3U;
+			for (xcoi = blockX; xcoi < blockEndX; xcoi++)
 			{
-				destAddr = ycoi * stride + blockX * 3;
-				for(xcoi = blockX; xcoi < blockEndX; xcoi++)
+				destFrame[destAddr] = rAvg;
+				destFrame[destAddr + 1] = gAvg;
+				destFrame[destAddr + 2] = bAvg;
+				destAddr += 3U;
+			}
+			{
+				u32 rowSlice = (blockEndX - blockX) * 3U;
+				u8 *firstRow = destFrame + (blockY * stride) + (blockX * 3U);
+
+				for (ycoi = blockY + 1U; ycoi < blockEndY; ycoi++)
 				{
-					destFrame[destAddr] = rAvg;
-					destFrame[destAddr + 1] = gAvg;
-					destFrame[destAddr + 2] = bAvg;
-					destAddr += 3;
+					memcpy(destFrame + (ycoi * stride) + (blockX * 3U), firstRow, rowSlice);
 				}
 			}
 		}
@@ -3722,6 +3425,15 @@ void DemoRunAnimated3DEffect(u8 *srcFrame, u8 **pFrames, u32 srcFrameIdx, u32 sr
 		{
 			shouldExit = 1;
 			break;
+		}
+
+		if (videoCapt->state == VIDEO_STREAMING)
+		{
+			srcFrame = pFrames[videoCapt->curFrame];
+			srcFrameIdx = videoCapt->curFrame;
+			srcWidth = videoCapt->timing.HActiveVideo;
+			srcHeight = videoCapt->timing.VActiveVideo;
+			Xil_DCacheInvalidateRange((unsigned int)srcFrame, srcHeight * DEMO_STRIDE);
 		}
 		
 		// Get next available frame buffer for triple buffering
