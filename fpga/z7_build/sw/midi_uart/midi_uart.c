@@ -56,9 +56,20 @@
 #define REG_OSC1_PWM  0x70U
 #define REG_OSC2_PWM  0x74U
 #define REG_VIDEO     0x78U
+#define REG_CLASSIC   0x7CU
+#define REG_POS_H     0x38U
+#define REG_POS_V     0x3CU
+#define REG_ZOOM_H    0x40U
+#define REG_ZOOM_V    0x44U
+#define REG_CIRCLE    0x48U
+#define REG_GEAR      0x4CU
+#define REG_LANTERN   0x50U
+#define REG_FIZZ      0x54U
+#define REG_SHAPE_SEL 0xE0U
 #define REG_OSC1_A    0xCCU
 #define REG_OSC2_A    0xD0U
 #define REG_NOISE_A   0xDCU
+#define SHAPE_SLIDER_MAX 1000U
 
 static XUartPs MidiUart;
 
@@ -134,6 +145,16 @@ static void MidiSplit12(u32 value12, u8 *msb, u8 *lsb)
 static u32 MidiScale(u8 val, u32 maxv)
 {
 	return ((u32)val * maxv) / 127U;
+}
+
+static void MidiShapeSlider(u32 offset, u32 shift, u8 val)
+{
+	MidiRegFld(offset, 0xFFFU, shift, MidiScale(val, SHAPE_SLIDER_MAX));
+}
+
+static void MidiShapeSel(u32 shift, u8 val)
+{
+	MidiRegFld(REG_SHAPE_SEL, 0xFU, shift, MidiScale(val, 15U));
 }
 
 static void MidiDigCommit(u8 out)
@@ -428,6 +449,75 @@ static void MidiMapCc(u8 cc, u8 val)
 		break;
 	case 35:
 		MidiRegFld(REG_CA, 0xFFU, 0U, val);
+		break;
+
+	case 36:
+		MidiRegFld(REG_CLASSIC, 0xFU, 0U, (val >= 64U) ? 0xFU : 0U);
+		break;
+	case 37:
+		MidiRegFld(REG_NOISE_CTL, 0x1U, 1U, (val >= 64U) ? 1U : 0U);
+		break;
+
+	case 38:
+		MidiShapeSlider(REG_POS_H, 0U, val);
+		break;
+	case 39:
+		MidiShapeSlider(REG_POS_V, 0U, val);
+		break;
+	case 40:
+		MidiShapeSlider(REG_ZOOM_H, 0U, val);
+		break;
+	case 41:
+		MidiShapeSlider(REG_ZOOM_V, 0U, val);
+		break;
+	case 42:
+		MidiShapeSlider(REG_CIRCLE, 0U, val);
+		break;
+	case 43:
+		MidiShapeSlider(REG_GEAR, 0U, val);
+		break;
+	case 44:
+		MidiShapeSlider(REG_LANTERN, 0U, val);
+		break;
+	case 45:
+		MidiShapeSlider(REG_FIZZ, 0U, val);
+		break;
+	case 46:
+		MidiShapeSel(0U, val);
+		break;
+	case 47:
+		MidiShapeSel(4U, val);
+		break;
+
+	case 48:
+		MidiShapeSlider(REG_POS_H, 16U, val);
+		break;
+	case 49:
+		MidiShapeSlider(REG_POS_V, 16U, val);
+		break;
+	case 50:
+		MidiShapeSlider(REG_ZOOM_H, 16U, val);
+		break;
+	case 51:
+		MidiShapeSlider(REG_ZOOM_V, 16U, val);
+		break;
+	case 52:
+		MidiShapeSlider(REG_CIRCLE, 16U, val);
+		break;
+	case 53:
+		MidiShapeSlider(REG_GEAR, 16U, val);
+		break;
+	case 54:
+		MidiShapeSlider(REG_LANTERN, 16U, val);
+		break;
+	case 55:
+		MidiShapeSlider(REG_FIZZ, 16U, val);
+		break;
+	case 56:
+		MidiShapeSel(8U, val);
+		break;
+	case 57:
+		MidiShapeSel(12U, val);
 		break;
 
 	default:

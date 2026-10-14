@@ -46,6 +46,20 @@
  *  32  edge width  33  slow-cnt frame
  *  34  slow-cnt /4 35  CA rule      (0-127)
  *
+ * Classic / noise extra
+ *  36  classic all  (DAC + X delay + 4:3 + luma lift)
+ *  37  noise reset
+ *
+ * Shape gen 1 (0-127 → 0-1000, selects 0-15)
+ *  38  pos H       39  pos V       40  zoom H      41  zoom V
+ *  42  circle      43  gear        44  lantern     45  fizz
+ *  46  shape A     47  shape B
+ *
+ * Shape gen 2 (same layout)
+ *  48  pos H       49  pos V       50  zoom H      51  zoom V
+ *  52  circle      53  gear        54  lantern     55  fizz
+ *  56  shape A     57  shape B
+ *
  * Matrix SysEx (educational 0x7D, "SP"):
  *   F0 7D 53 50 20 <mat> <out> <in> <on> F7
  *     mat 0=digital 1=analog, on 0/1

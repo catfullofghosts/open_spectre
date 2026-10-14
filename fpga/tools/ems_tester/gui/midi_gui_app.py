@@ -1,4 +1,4 @@
-"""Open Spectre MIDI panel — Channel 1 CCs 1–35 via the Pico USB gadget."""
+"""Open Spectre MIDI panel — Channel 1 CCs 1–57 via the Pico USB gadget."""
 
 import os
 import sys
@@ -93,7 +93,7 @@ class MidiGUIApp(QMainWindow):
 
     def init_ui(self):
         self.setWindowTitle("Open Spectre MIDI")
-        self.setGeometry(80, 80, 1280, 820)
+        self.setGeometry(80, 80, 1560, 860)
 
         main = QWidget()
         self.setCentralWidget(main)
@@ -122,7 +122,7 @@ class MidiGUIApp(QMainWindow):
         self.status_label = QLabel("Not connected")
         self.status_label.setStyleSheet("color: red; font-weight: bold;")
         midi_layout.addWidget(self.status_label)
-        midi_layout.addWidget(QLabel("Channel 1  ·  CCs 1–35"))
+        midi_layout.addWidget(QLabel("Channel 1  ·  CCs 1–57"))
         midi_layout.addWidget(QLabel("Matrix  ·  SysEx 7D 53 50"))
 
         self.send_all_btn = QPushButton("Send all")
@@ -186,6 +186,7 @@ class MidiGUIApp(QMainWindow):
         body_layout = QHBoxLayout(body)
         col_a = QVBoxLayout()
         col_b = QVBoxLayout()
+        col_c = QVBoxLayout()
 
         col_a.addWidget(self._osc_group("Osc 1", 1))
         col_a.addWidget(self._osc_group("Osc 2", 9))
@@ -197,8 +198,13 @@ class MidiGUIApp(QMainWindow):
         col_b.addWidget(self._digital_group())
         col_b.addStretch()
 
+        col_c.addWidget(self._shape_group("Shape Gen 1", 38))
+        col_c.addWidget(self._shape_group("Shape Gen 2", 48))
+        col_c.addStretch()
+
         body_layout.addLayout(col_a)
         body_layout.addLayout(col_b)
+        body_layout.addLayout(col_c)
         scroll.setWidget(body)
         return scroll
 
@@ -224,6 +230,7 @@ class MidiGUIApp(QMainWindow):
         self._add_slider(layout, "Slowdown", 0, 3, 0, lambda v: self.queue_cc(20, enum_to_cc(v, 2)))
         self._add_toggle(layout, "Recycle", False, lambda on: self.queue_cc(21, gate_to_cc(on)))
         self._add_slider(layout, "Alpha", 0, 4095, 0, lambda v: self.queue_cc(22, scale_to_cc(v, 4095)))
+        self._add_toggle(layout, "Reset", False, lambda on: self.queue_cc(37, gate_to_cc(on)))
         return group
 
     def _audio_group(self):
@@ -250,6 +257,47 @@ class MidiGUIApp(QMainWindow):
         self._add_toggle(layout, "Slow-cnt frame", False, lambda on: self.queue_cc(33, gate_to_cc(on)))
         self._add_toggle(layout, "Slow-cnt /4", False, lambda on: self.queue_cc(34, gate_to_cc(on)))
         self._add_slider(layout, "CA rule", 0, 127, 30, lambda v: self.queue_cc(35, v))
+        self._add_toggle(layout, "Classic mode", False, lambda on: self.queue_cc(36, gate_to_cc(on)))
+        return group
+
+    def _shape_group(self, title, base_cc):
+        group = QGroupBox(title)
+        layout = QVBoxLayout(group)
+        names = (
+            "Position H",
+            "Position V",
+            "Zoom H",
+            "Zoom V",
+            "Circle",
+            "Gear",
+            "Lantern",
+            "Fizz",
+        )
+        for i, name in enumerate(names):
+            self._add_slider(
+                layout,
+                name,
+                0,
+                1000,
+                0,
+                lambda v, cc=base_cc + i: self.queue_cc(cc, scale_to_cc(v, 1000)),
+            )
+        self._add_slider(
+            layout,
+            "Shape A",
+            0,
+            15,
+            0,
+            lambda v, cc=base_cc + 8: self.queue_cc(cc, scale_to_cc(v, 15)),
+        )
+        self._add_slider(
+            layout,
+            "Shape B",
+            0,
+            15,
+            0,
+            lambda v, cc=base_cc + 9: self.queue_cc(cc, scale_to_cc(v, 15)),
+        )
         return group
 
     def _add_slider(self, parent, label, lo, hi, initial, on_value):
