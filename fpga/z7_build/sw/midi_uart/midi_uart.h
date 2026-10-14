@@ -60,6 +60,9 @@
  *  52  circle      53  gear        54  lantern     55  fizz
  *  56  shape A     57  shape B
  *
+ * Video
+ *  58  vid span     (0-127 → 0-255)
+ *
  * Matrix SysEx (educational 0x7D, "SP"):
  *   F0 7D 53 50 20 <mat> <out> <in> <on> F7
  *     mat 0=digital 1=analog, on 0/1

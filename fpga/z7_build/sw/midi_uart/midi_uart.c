@@ -47,6 +47,7 @@
 #define REG_AN_LOAD   0x34U
 #define REG_AUDIO     0x0CU
 #define REG_CA        0x18U
+#define REG_VID_SPAN  0x24U
 #define REG_YUV_YCR   0x58U
 #define REG_YUV_CB    0x5CU
 #define REG_NOISE     0x60U
@@ -518,6 +519,9 @@ static void MidiMapCc(u8 cc, u8 val)
 		break;
 	case 57:
 		MidiShapeSel(12U, val);
+		break;
+	case 58:
+		MidiRegFld(REG_VID_SPAN, 0xFFU, 0U, MidiScale(val, 255U));
 		break;
 
 	default:

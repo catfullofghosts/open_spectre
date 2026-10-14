@@ -1,4 +1,4 @@
-"""Open Spectre MIDI panel — Channel 1 CCs 1–57 via the Pico USB gadget."""
+"""Open Spectre MIDI panel — Channel 1 CCs 1–58 via the Pico USB gadget."""
 
 import os
 import sys
@@ -122,7 +122,7 @@ class MidiGUIApp(QMainWindow):
         self.status_label = QLabel("Not connected")
         self.status_label.setStyleSheet("color: red; font-weight: bold;")
         midi_layout.addWidget(self.status_label)
-        midi_layout.addWidget(QLabel("Channel 1  ·  CCs 1–57"))
+        midi_layout.addWidget(QLabel("Channel 1  ·  CCs 1–58"))
         midi_layout.addWidget(QLabel("Matrix  ·  SysEx 7D 53 50"))
 
         self.send_all_btn = QPushButton("Send all")
@@ -247,6 +247,7 @@ class MidiGUIApp(QMainWindow):
         self._add_slider(layout, "Y", 0, 4095, 0, lambda v: self.send_u12(26, 27, v))
         self._add_slider(layout, "Cr", 0, 4095, 0, lambda v: self.send_u12(28, 29, v))
         self._add_slider(layout, "Cb", 0, 4095, 0, lambda v: self.send_u12(30, 31, v))
+        self._add_slider(layout, "Span", 0, 255, 0, lambda v: self.queue_cc(58, scale_to_cc(v, 255)))
         return group
 
     def _digital_group(self):
