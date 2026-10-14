@@ -340,6 +340,10 @@ static int g_liveEffectNeedClear = 0;
 static void DemoInvalidateVideoSrc(u8 *frame, u32 height);
 static int DemoApplySelectedEffect(char cmd, u8 *src, u8 *dst, u32 width, u32 height, int clearFrame);
 static int DemoApplyLiveEffectFrame(void);
+static int DemoApplyDdrEffect(u8 *dest, int destIdx, u32 halfW, u32 halfH, u32 fullHeight);
+static int DemoApplySlitEffect(const u8 *src, u32 width, u32 height);
+static int DemoApplySpeckleEffect(const u8 *src, u32 width, u32 height);
+static int DemoApplyRandomTileEffect(const u8 *src, u32 width, u32 height);
 
 /*
  * Framebuffers for video data
@@ -347,6 +351,28 @@ static int DemoApplyLiveEffectFrame(void);
 u8 frameBuf[DISPLAY_NUM_FRAMES][DEMO_MAX_FRAME] __attribute__((aligned(0x20)));
 u8 *pFrames[DISPLAY_NUM_FRAMES]; //array of pointers to the frame buffers
 static u8 g_halfSrc[DEMO_MAX_FRAME / 2U] __attribute__((aligned(0x20)));
+#define DEMO_STRIP_SLOTS 8U
+#define DEMO_FILM_SLOTS 4U
+#define DEMO_SHUFFLE_SLOTS 8U
+static u8 g_delayPlane[DEMO_MAX_FRAME / 2U] __attribute__((aligned(0x20)));
+static u8 g_stripRing[DEMO_STRIP_SLOTS][DEMO_MAX_FRAME / 2U] __attribute__((aligned(0x20)));
+static u32 g_ddrFrameCount = 0U;
+static u32 g_strobeInterval = 4U;
+static u32 g_feedbackAmt = 160U;
+static u32 g_stripInterval = 8U;
+static u32 g_stripWrite = 0U;
+static int g_ddrInited = 0;
+static u32 g_slitChunk = 20U;
+static u32 g_slitIndex = 0U;
+static int g_slitDestIdx = 0;
+static u32 g_specklePct = 30U;
+static u32 g_speckleRng = 1U;
+static u32 g_tileSize = 16U;
+static u32 g_shuffleHold = 1U;
+static u32 g_diffMode = 0U;
+static u32 g_tunnelZoomQ8 = 269U;
+static u32 g_tunnelMix = 200U;
+static u32 g_ddrRng = 1U;
 
 /*
  * Interrupt vector table
@@ -1093,6 +1119,8 @@ void DemoCRMenu()
 
 #define DEMO_IN_DECIM 2U
 
+static void DemoPixelDoubleInPlace(u8 *frame, u32 halfW, u32 halfH, u32 stride);
+
 static int DemoEffectDestFrame(void)
 {
 	int i;
@@ -1130,6 +1158,714 @@ static void DemoDecimateSkip2(const u8 *src, u8 *dst, u32 width, u32 height, u32
 			s += (3U * DEMO_IN_DECIM);
 		}
 	}
+}
+
+static int DemoIsDdrEffect(char cmd)
+{
+	return ((cmd == 'r') || (cmd == 'R') ||
+		(cmd == 's') || (cmd == 'S') ||
+		(cmd == 'u') || (cmd == 'U') ||
+		(cmd == 'w') || (cmd == 'W') ||
+		(cmd == 'x') || (cmd == 'X') ||
+		(cmd == 'y') || (cmd == 'Y') ||
+		(cmd == 'z') || (cmd == 'Z') ||
+		(cmd == 'v') || (cmd == 'V') ||
+		(cmd == ',') ||
+		(cmd == '-') ||
+		(cmd == '/'));
+}
+
+static int DemoIsSlitEffect(char cmd)
+{
+	return ((cmd == 'w') || (cmd == 'W') ||
+		(cmd == 'x') || (cmd == 'X') ||
+		(cmd == 'y') || (cmd == 'Y'));
+}
+
+static int DemoIsParkedDdrEffect(char cmd)
+{
+	return (DemoIsSlitEffect(cmd) ||
+		(cmd == 'z') || (cmd == 'Z') ||
+		(cmd == 'v') || (cmd == 'V'));
+}
+
+static void DemoResetDdrEffectState(void)
+{
+	g_ddrFrameCount = 0U;
+	g_stripWrite = 0U;
+	g_ddrInited = 0;
+	g_slitIndex = 0U;
+	g_slitDestIdx = 0;
+	g_speckleRng = 1U;
+	g_ddrRng = 1U;
+	memset(g_delayPlane, 0, sizeof(g_delayPlane));
+}
+
+static void DemoCopyHalfPlane(u8 *dst, const u8 *src, u32 halfW, u32 halfH, u32 stride)
+{
+	u32 y;
+	u32 rowBytes = halfW * 3U;
+
+	for (y = 0U; y < halfH; y++)
+	{
+		memcpy(dst + (y * stride), src + (y * stride), rowBytes);
+	}
+}
+
+static void DemoBlendHalfPlane(u8 *dst, const u8 *live, const u8 *prev, u32 halfW, u32 halfH, u32 stride, u32 feedback)
+{
+	u32 liveAmt = 256U - feedback;
+	u32 y;
+	u32 n;
+	u32 count = halfW * 3U;
+
+	for (y = 0U; y < halfH; y++)
+	{
+		const u8 *l = live + (y * stride);
+		const u8 *p = prev + (y * stride);
+		u8 *d = dst + (y * stride);
+
+		for (n = 0U; n < count; n++)
+		{
+			d[n] = (u8)((((u32)l[n] * liveAmt) + ((u32)p[n] * feedback)) >> 8);
+		}
+	}
+}
+
+static void DemoBlitHalfToQuad(u8 *dest, const u8 *src, u32 halfW, u32 halfH, u32 stride, u32 qx, u32 qy)
+{
+	u32 y;
+	u32 rowBytes = halfW * 3U;
+	u8 *d = dest + ((qy * halfH) * stride) + (qx * halfW * 3U);
+
+	for (y = 0U; y < halfH; y++)
+	{
+		memcpy(d + (y * stride), src + (y * stride), rowBytes);
+	}
+}
+
+static void DemoCycleDdrEffectParam(char cmd)
+{
+	if ((cmd == 'r') || (cmd == 'R'))
+	{
+		if (g_strobeInterval <= 2U)
+		{
+			g_strobeInterval = 4U;
+		}
+		else if (g_strobeInterval <= 4U)
+		{
+			g_strobeInterval = 8U;
+		}
+		else if (g_strobeInterval <= 8U)
+		{
+			g_strobeInterval = 16U;
+		}
+		else
+		{
+			g_strobeInterval = 2U;
+		}
+		xil_printf("\n\rStrobe interval = %u frames\r\n", (unsigned)g_strobeInterval);
+	}
+	else if ((cmd == 's') || (cmd == 'S'))
+	{
+		if (g_feedbackAmt <= 64U)
+		{
+			g_feedbackAmt = 128U;
+		}
+		else if (g_feedbackAmt <= 128U)
+		{
+			g_feedbackAmt = 160U;
+		}
+		else if (g_feedbackAmt <= 160U)
+		{
+			g_feedbackAmt = 208U;
+		}
+		else
+		{
+			g_feedbackAmt = 64U;
+		}
+		xil_printf("\n\rFeedback mix = %u/256\r\n", (unsigned)g_feedbackAmt);
+	}
+	else if ((cmd == 'u') || (cmd == 'U'))
+	{
+		if (g_stripInterval <= 3U)
+		{
+			g_stripInterval = 8U;
+		}
+		else if (g_stripInterval <= 8U)
+		{
+			g_stripInterval = 16U;
+		}
+		else if (g_stripInterval <= 16U)
+		{
+			g_stripInterval = 30U;
+		}
+		else
+		{
+			g_stripInterval = 3U;
+		}
+		xil_printf("\n\rFilm-strip grab = every %u frames\r\n", (unsigned)g_stripInterval);
+	}
+	else if (DemoIsSlitEffect(cmd))
+	{
+		if (g_slitChunk <= 10U)
+		{
+			g_slitChunk = 20U;
+		}
+		else if (g_slitChunk <= 20U)
+		{
+			g_slitChunk = 40U;
+		}
+		else
+		{
+			g_slitChunk = 10U;
+		}
+		g_slitIndex = 0U;
+		xil_printf("\n\rSlit chunk = %u pixels\r\n", (unsigned)g_slitChunk);
+	}
+	else if ((cmd == 'z') || (cmd == 'Z'))
+	{
+		if (g_specklePct <= 15U)
+		{
+			g_specklePct = 30U;
+		}
+		else if (g_specklePct <= 30U)
+		{
+			g_specklePct = 50U;
+		}
+		else if (g_specklePct <= 50U)
+		{
+			g_specklePct = 80U;
+		}
+		else
+		{
+			g_specklePct = 15U;
+		}
+		xil_printf("\n\rSpeckle update = %u%%\r\n", (unsigned)g_specklePct);
+	}
+	else if ((cmd == 'v') || (cmd == 'V'))
+	{
+		if (g_tileSize <= 8U)
+		{
+			g_tileSize = 16U;
+		}
+		else if (g_tileSize <= 16U)
+		{
+			g_tileSize = 32U;
+		}
+		else if (g_tileSize <= 32U)
+		{
+			g_tileSize = 64U;
+		}
+		else
+		{
+			g_tileSize = 8U;
+		}
+		xil_printf("\n\rRandom tile size = %u px\r\n", (unsigned)g_tileSize);
+	}
+	else if (cmd == ',')
+	{
+		if (g_shuffleHold <= 1U)
+		{
+			g_shuffleHold = 3U;
+		}
+		else if (g_shuffleHold <= 3U)
+		{
+			g_shuffleHold = 8U;
+		}
+		else if (g_shuffleHold <= 8U)
+		{
+			g_shuffleHold = 16U;
+		}
+		else
+		{
+			g_shuffleHold = 1U;
+		}
+		xil_printf("\n\rShuffle hold = %u frames\r\n", (unsigned)g_shuffleHold);
+	}
+	else if (cmd == '-')
+	{
+		g_diffMode = (g_diffMode + 1U) & 3U;
+		g_ddrInited = 0;
+		if (g_diffMode == 0U)
+		{
+			xil_printf("\n\rDifference = abs vs freeze\r\n");
+		}
+		else if (g_diffMode == 1U)
+		{
+			xil_printf("\n\rDifference = XOR vs freeze\r\n");
+		}
+		else if (g_diffMode == 2U)
+		{
+			xil_printf("\n\rDifference = abs vs previous\r\n");
+		}
+		else
+		{
+			xil_printf("\n\rDifference = XOR vs previous\r\n");
+		}
+	}
+	else if (cmd == '/')
+	{
+		if (g_tunnelZoomQ8 <= 243U)
+		{
+			g_tunnelZoomQ8 = 269U;
+		}
+		else if (g_tunnelZoomQ8 <= 269U)
+		{
+			g_tunnelZoomQ8 = 284U;
+		}
+		else if (g_tunnelZoomQ8 <= 284U)
+		{
+			g_tunnelZoomQ8 = 320U;
+		}
+		else
+		{
+			g_tunnelZoomQ8 = 243U;
+		}
+		xil_printf("\n\rTunnel zoom = %u%%\r\n",
+			(unsigned)((256U * 100U) / g_tunnelZoomQ8));
+	}
+}
+
+static int DemoApplyDdrEffect(u8 *dest, int destIdx, u32 halfW, u32 halfH, u32 fullHeight)
+{
+	u32 i;
+	char cmd = g_liveEffectCmd;
+
+	if ((cmd == 'r') || (cmd == 'R'))
+	{
+		g_ddrFrameCount++;
+		if ((g_ddrInited == 0) || (g_ddrFrameCount >= g_strobeInterval))
+		{
+			DemoCopyHalfPlane(g_delayPlane, g_halfSrc, halfW, halfH, DEMO_STRIDE);
+			DemoCopyHalfPlane(dest, g_delayPlane, halfW, halfH, DEMO_STRIDE);
+			DemoPixelDoubleInPlace(dest, halfW, halfH, DEMO_STRIDE);
+			Xil_DCacheFlushRange((unsigned int)dest, fullHeight * DEMO_STRIDE);
+			DisplayChangeFrame(&dispCtrl, destIdx);
+			g_ddrFrameCount = 0U;
+			g_ddrInited = 1;
+		}
+		return 1;
+	}
+
+	if ((cmd == 's') || (cmd == 'S'))
+	{
+		if (g_ddrInited == 0)
+		{
+			DemoCopyHalfPlane(g_delayPlane, g_halfSrc, halfW, halfH, DEMO_STRIDE);
+			g_ddrInited = 1;
+		}
+		DemoBlendHalfPlane(dest, g_halfSrc, g_delayPlane, halfW, halfH, DEMO_STRIDE, g_feedbackAmt);
+		DemoCopyHalfPlane(g_delayPlane, dest, halfW, halfH, DEMO_STRIDE);
+		DemoPixelDoubleInPlace(dest, halfW, halfH, DEMO_STRIDE);
+		Xil_DCacheFlushRange((unsigned int)dest, fullHeight * DEMO_STRIDE);
+		DisplayChangeFrame(&dispCtrl, destIdx);
+		return 1;
+	}
+
+	if ((cmd == 'u') || (cmd == 'U'))
+	{
+		if (g_ddrInited == 0)
+		{
+			for (i = 0U; i < DEMO_FILM_SLOTS; i++)
+			{
+				DemoCopyHalfPlane(g_stripRing[i], g_halfSrc, halfW, halfH, DEMO_STRIDE);
+			}
+			g_stripWrite = 0U;
+			g_ddrInited = 1;
+			g_ddrFrameCount = 0U;
+		}
+		else
+		{
+			g_ddrFrameCount++;
+			if (g_ddrFrameCount >= g_stripInterval)
+			{
+				DemoCopyHalfPlane(g_stripRing[g_stripWrite], g_halfSrc, halfW, halfH, DEMO_STRIDE);
+				g_stripWrite = (g_stripWrite + 1U) % DEMO_FILM_SLOTS;
+				g_ddrFrameCount = 0U;
+			}
+		}
+
+		DemoBlitHalfToQuad(dest, g_stripRing[0], halfW, halfH, DEMO_STRIDE, 0U, 0U);
+		DemoBlitHalfToQuad(dest, g_stripRing[1], halfW, halfH, DEMO_STRIDE, 1U, 0U);
+		DemoBlitHalfToQuad(dest, g_stripRing[2], halfW, halfH, DEMO_STRIDE, 0U, 1U);
+		DemoBlitHalfToQuad(dest, g_stripRing[3], halfW, halfH, DEMO_STRIDE, 1U, 1U);
+		Xil_DCacheFlushRange((unsigned int)dest, fullHeight * DEMO_STRIDE);
+		DisplayChangeFrame(&dispCtrl, destIdx);
+		return 1;
+	}
+
+	if (cmd == ',')
+	{
+		if (g_ddrInited == 0)
+		{
+			for (i = 0U; i < DEMO_SHUFFLE_SLOTS; i++)
+			{
+				DemoCopyHalfPlane(g_stripRing[i], g_halfSrc, halfW, halfH, DEMO_STRIDE);
+			}
+			g_stripWrite = 0U;
+			g_ddrFrameCount = 0U;
+			g_ddrInited = 1;
+			DemoCopyHalfPlane(dest, g_stripRing[0], halfW, halfH, DEMO_STRIDE);
+			DemoPixelDoubleInPlace(dest, halfW, halfH, DEMO_STRIDE);
+			Xil_DCacheFlushRange((unsigned int)dest, fullHeight * DEMO_STRIDE);
+			DisplayChangeFrame(&dispCtrl, destIdx);
+			return 1;
+		}
+
+		DemoCopyHalfPlane(g_stripRing[g_stripWrite], g_halfSrc, halfW, halfH, DEMO_STRIDE);
+		g_stripWrite = (g_stripWrite + 1U) % DEMO_SHUFFLE_SLOTS;
+		g_ddrFrameCount++;
+		if (g_ddrFrameCount >= g_shuffleHold)
+		{
+			g_ddrRng = (g_ddrRng * 1664525U) + 1013904223U;
+			i = g_ddrRng % DEMO_SHUFFLE_SLOTS;
+			DemoCopyHalfPlane(dest, g_stripRing[i], halfW, halfH, DEMO_STRIDE);
+			DemoPixelDoubleInPlace(dest, halfW, halfH, DEMO_STRIDE);
+			Xil_DCacheFlushRange((unsigned int)dest, fullHeight * DEMO_STRIDE);
+			DisplayChangeFrame(&dispCtrl, destIdx);
+			g_ddrFrameCount = 0U;
+		}
+		return 1;
+	}
+
+	if (cmd == '-')
+	{
+		u32 y;
+		u32 n;
+		u32 count = halfW * 3U;
+		int useXor = ((g_diffMode & 1U) != 0U);
+		int vsPrev = (g_diffMode >= 2U);
+
+		if (g_ddrInited == 0)
+		{
+			DemoCopyHalfPlane(g_delayPlane, g_halfSrc, halfW, halfH, DEMO_STRIDE);
+			g_ddrInited = 1;
+		}
+
+		for (y = 0U; y < halfH; y++)
+		{
+			const u8 *l = g_halfSrc + (y * DEMO_STRIDE);
+			const u8 *p = g_delayPlane + (y * DEMO_STRIDE);
+			u8 *d = dest + (y * DEMO_STRIDE);
+
+			for (n = 0U; n < count; n++)
+			{
+				if (useXor != 0)
+				{
+					d[n] = (u8)(l[n] ^ p[n]);
+				}
+				else
+				{
+					int v = (int)l[n] - (int)p[n];
+					d[n] = (u8)((v < 0) ? -v : v);
+				}
+			}
+		}
+
+		if (vsPrev != 0)
+		{
+			DemoCopyHalfPlane(g_delayPlane, g_halfSrc, halfW, halfH, DEMO_STRIDE);
+		}
+
+		DemoPixelDoubleInPlace(dest, halfW, halfH, DEMO_STRIDE);
+		Xil_DCacheFlushRange((unsigned int)dest, fullHeight * DEMO_STRIDE);
+		DisplayChangeFrame(&dispCtrl, destIdx);
+		return 1;
+	}
+
+	if (cmd == '/')
+	{
+		u32 y;
+		u32 x;
+		int cx = (int)(halfW / 2U);
+		int cy = (int)(halfH / 2U);
+		u32 liveAmt;
+		u32 fbAmt = g_tunnelMix;
+
+		if (fbAmt > 256U)
+		{
+			fbAmt = 256U;
+		}
+		liveAmt = 256U - fbAmt;
+
+		if (g_ddrInited == 0)
+		{
+			DemoCopyHalfPlane(g_delayPlane, g_halfSrc, halfW, halfH, DEMO_STRIDE);
+			g_ddrInited = 1;
+		}
+
+		for (y = 0U; y < halfH; y++)
+		{
+			u8 *d = dest + (y * DEMO_STRIDE);
+			const u8 *l = g_halfSrc + (y * DEMO_STRIDE);
+
+			for (x = 0U; x < halfW; x++)
+			{
+				int sx = (((((int)x - cx) * (int)g_tunnelZoomQ8) >> 8) + cx);
+				int sy = (((((int)y - cy) * (int)g_tunnelZoomQ8) >> 8) + cy);
+				u8 fb0 = 0U;
+				u8 fb1 = 0U;
+				u8 fb2 = 0U;
+
+				if ((sx >= 0) && (sy >= 0) && ((u32)sx < halfW) && ((u32)sy < halfH))
+				{
+					const u8 *fb = g_delayPlane + ((u32)sy * DEMO_STRIDE) + ((u32)sx * 3U);
+					fb0 = fb[0];
+					fb1 = fb[1];
+					fb2 = fb[2];
+				}
+
+				d[0] = (u8)((((u32)l[0] * liveAmt) + ((u32)fb0 * fbAmt)) >> 8);
+				d[1] = (u8)((((u32)l[1] * liveAmt) + ((u32)fb1 * fbAmt)) >> 8);
+				d[2] = (u8)((((u32)l[2] * liveAmt) + ((u32)fb2 * fbAmt)) >> 8);
+				d += 3;
+				l += 3;
+			}
+		}
+
+		DemoCopyHalfPlane(g_delayPlane, dest, halfW, halfH, DEMO_STRIDE);
+		DemoPixelDoubleInPlace(dest, halfW, halfH, DEMO_STRIDE);
+		Xil_DCacheFlushRange((unsigned int)dest, fullHeight * DEMO_STRIDE);
+		DisplayChangeFrame(&dispCtrl, destIdx);
+		return 1;
+	}
+
+	return 0;
+}
+
+static int DemoApplySlitEffect(const u8 *src, u32 width, u32 height)
+{
+	u8 *dest;
+	u32 chunk;
+	u32 maxSlots;
+	u32 slot;
+	u32 copyW;
+	u32 copyH;
+	u32 y;
+	u32 row;
+	u32 srcY0;
+	char cmd = g_liveEffectCmd;
+
+	chunk = g_slitChunk;
+	if (chunk == 0U)
+	{
+		chunk = 20U;
+	}
+
+	if ((g_ddrInited == 0) || (g_slitDestIdx == (int)videoCapt.curFrame))
+	{
+		g_slitDestIdx = DemoEffectDestFrame();
+		memset(pFrames[g_slitDestIdx], 0, height * DEMO_STRIDE);
+		Xil_DCacheFlushRange((unsigned int)pFrames[g_slitDestIdx], height * DEMO_STRIDE);
+		DisplayChangeFrame(&dispCtrl, g_slitDestIdx);
+		g_slitIndex = 0U;
+		g_ddrInited = 1;
+	}
+
+	dest = pFrames[g_slitDestIdx];
+
+	if ((cmd == 'w') || (cmd == 'W'))
+	{
+		maxSlots = (width + chunk - 1U) / chunk;
+		if (g_slitIndex >= maxSlots)
+		{
+			g_slitIndex = 0U;
+		}
+		slot = g_slitIndex * chunk;
+		copyW = chunk;
+		if ((slot + copyW) > width)
+		{
+			copyW = width - slot;
+		}
+		for (y = 0U; y < height; y++)
+		{
+			memcpy(dest + (y * DEMO_STRIDE) + (slot * 3U),
+				src + (y * DEMO_STRIDE) + (slot * 3U),
+				copyW * 3U);
+		}
+		g_slitIndex++;
+	}
+	else if ((cmd == 'x') || (cmd == 'X'))
+	{
+		maxSlots = (height + chunk - 1U) / chunk;
+		if (g_slitIndex >= maxSlots)
+		{
+			g_slitIndex = 0U;
+		}
+		slot = g_slitIndex * chunk;
+		copyH = chunk;
+		if ((slot + copyH) > height)
+		{
+			copyH = height - slot;
+		}
+		for (y = 0U; y < copyH; y++)
+		{
+			memcpy(dest + ((slot + y) * DEMO_STRIDE),
+				src + ((slot + y) * DEMO_STRIDE),
+				width * 3U);
+		}
+		g_slitIndex++;
+	}
+	else if ((cmd == 'y') || (cmd == 'Y'))
+	{
+		srcY0 = (height > chunk) ? ((height - chunk) / 2U) : 0U;
+		for (slot = 0U; slot < height; slot += chunk)
+		{
+			copyH = chunk;
+			if ((slot + copyH) > height)
+			{
+				copyH = height - slot;
+			}
+			for (row = 0U; row < copyH; row++)
+			{
+				memcpy(dest + ((slot + row) * DEMO_STRIDE),
+					src + ((srcY0 + row) * DEMO_STRIDE),
+					width * 3U);
+			}
+		}
+	}
+	else
+	{
+		return 0;
+	}
+
+	Xil_DCacheFlushRange((unsigned int)dest, height * DEMO_STRIDE);
+	return 1;
+}
+
+static int DemoParkDdrDest(const u8 *src, u32 width, u32 height, int copySrc)
+{
+	u32 y;
+
+	if ((g_ddrInited != 0) && (g_slitDestIdx != (int)videoCapt.curFrame))
+	{
+		return g_slitDestIdx;
+	}
+
+	g_slitDestIdx = DemoEffectDestFrame();
+	if (copySrc != 0)
+	{
+		for (y = 0U; y < height; y++)
+		{
+			memcpy(pFrames[g_slitDestIdx] + (y * DEMO_STRIDE),
+				src + (y * DEMO_STRIDE),
+				width * 3U);
+		}
+	}
+	else
+	{
+		memset(pFrames[g_slitDestIdx], 0, height * DEMO_STRIDE);
+	}
+	Xil_DCacheFlushRange((unsigned int)pFrames[g_slitDestIdx], height * DEMO_STRIDE);
+	DisplayChangeFrame(&dispCtrl, g_slitDestIdx);
+	g_slitIndex = 0U;
+	g_ddrInited = 1;
+	return g_slitDestIdx;
+}
+
+static int DemoApplySpeckleEffect(const u8 *src, u32 width, u32 height)
+{
+	u8 *dest;
+	u32 thresh;
+	u32 y;
+	u32 x;
+	u32 rng;
+
+	if (DemoParkDdrDest(src, width, height, 1) < 0)
+	{
+		return 0;
+	}
+
+	dest = pFrames[g_slitDestIdx];
+	thresh = (g_specklePct * 256U) / 100U;
+	if (thresh > 256U)
+	{
+		thresh = 256U;
+	}
+	rng = g_speckleRng;
+
+	for (y = 0U; y < height; y++)
+	{
+		const u8 *s = src + (y * DEMO_STRIDE);
+		u8 *d = dest + (y * DEMO_STRIDE);
+
+		for (x = 0U; x < width; x++)
+		{
+			rng = (rng * 1664525U) + 1013904223U;
+			if ((rng >> 24) < thresh)
+			{
+				d[0] = s[0];
+				d[1] = s[1];
+				d[2] = s[2];
+			}
+			s += 3;
+			d += 3;
+		}
+	}
+
+	g_speckleRng = rng;
+	Xil_DCacheFlushRange((unsigned int)dest, height * DEMO_STRIDE);
+	return 1;
+}
+
+static int DemoApplyRandomTileEffect(const u8 *src, u32 width, u32 height)
+{
+	u8 *dest;
+	u32 tile;
+	u32 thresh;
+	u32 tx;
+	u32 ty;
+	u32 y;
+	u32 copyW;
+	u32 copyH;
+	u32 rng;
+
+	if (DemoParkDdrDest(src, width, height, 1) < 0)
+	{
+		return 0;
+	}
+
+	dest = pFrames[g_slitDestIdx];
+	tile = g_tileSize;
+	if (tile == 0U)
+	{
+		tile = 16U;
+	}
+	thresh = (30U * 256U) / 100U;
+	rng = g_ddrRng;
+
+	for (ty = 0U; ty < height; ty += tile)
+	{
+		copyH = tile;
+		if ((ty + copyH) > height)
+		{
+			copyH = height - ty;
+		}
+		for (tx = 0U; tx < width; tx += tile)
+		{
+			rng = (rng * 1664525U) + 1013904223U;
+			if ((rng >> 24) >= thresh)
+			{
+				continue;
+			}
+			copyW = tile;
+			if ((tx + copyW) > width)
+			{
+				copyW = width - tx;
+			}
+			for (y = 0U; y < copyH; y++)
+			{
+				memcpy(dest + ((ty + y) * DEMO_STRIDE) + (tx * 3U),
+					src + ((ty + y) * DEMO_STRIDE) + (tx * 3U),
+					copyW * 3U);
+			}
+		}
+	}
+
+	g_ddrRng = rng;
+	Xil_DCacheFlushRange((unsigned int)dest, height * DEMO_STRIDE);
+	return 1;
 }
 
 static void DemoPixelDoubleInPlace(u8 *frame, u32 halfW, u32 halfH, u32 stride)
@@ -1176,6 +1912,25 @@ static int DemoApplyLiveEffectFrame(void)
 	src = pFrames[videoCapt.curFrame];
 	width = videoCapt.timing.HActiveVideo;
 	height = videoCapt.timing.VActiveVideo;
+	if ((width < 16U) || (height < 16U))
+	{
+		return 0;
+	}
+
+	if (DemoIsParkedDdrEffect(g_liveEffectCmd))
+	{
+		DemoInvalidateVideoSrc(src, height);
+		if ((g_liveEffectCmd == 'z') || (g_liveEffectCmd == 'Z'))
+		{
+			return DemoApplySpeckleEffect(src, width, height);
+		}
+		if ((g_liveEffectCmd == 'v') || (g_liveEffectCmd == 'V'))
+		{
+			return DemoApplyRandomTileEffect(src, width, height);
+		}
+		return DemoApplySlitEffect(src, width, height);
+	}
+
 	if ((width < (16U * DEMO_IN_DECIM)) || (height < (16U * DEMO_IN_DECIM)))
 	{
 		return 0;
@@ -1191,6 +1946,10 @@ static int DemoApplyLiveEffectFrame(void)
 	dest = DemoEffectDestFrame();
 	DemoInvalidateVideoSrc(src, height);
 	DemoDecimateSkip2(src, g_halfSrc, width, height, DEMO_STRIDE);
+	if (DemoIsDdrEffect(g_liveEffectCmd))
+	{
+		return DemoApplyDdrEffect(pFrames[dest], dest, halfW, halfH, height);
+	}
 	clearNow = g_liveEffectNeedClear;
 	g_liveEffectNeedClear = 0;
 	if (DemoApplySelectedEffect(g_liveEffectCmd, g_halfSrc, pFrames[dest], halfW, halfH, clearNow) != 0)
@@ -1331,9 +2090,20 @@ static int DemoRunEffectUntilKey(char cmd, int clearFrame, u8 *staticSrc, u32 st
 
 	if (videoCapt.state == VIDEO_STREAMING)
 	{
-		g_liveEffectCmd = cmd;
-		g_liveEffectClear = clearFrame;
-		g_liveEffectNeedClear = clearFrame;
+		if (DemoIsDdrEffect(cmd) && (g_liveEffectCmd == cmd))
+		{
+			DemoCycleDdrEffectParam(cmd);
+		}
+		else
+		{
+			if (DemoIsDdrEffect(cmd) || DemoIsDdrEffect(g_liveEffectCmd))
+			{
+				DemoResetDdrEffectState();
+			}
+			g_liveEffectCmd = cmd;
+			g_liveEffectClear = clearFrame;
+			g_liveEffectNeedClear = clearFrame;
+		}
 		if (DemoApplyLiveEffectFrame() == 0)
 		{
 			g_liveEffectCmd = 0;
@@ -1401,6 +2171,53 @@ void DemoEffectMenu()
 		{
 			xil_printf("Active effect: %c  display frame %d\n\r",
 				g_liveEffectCmd, dispCtrl.curFrame);
+			if ((g_liveEffectCmd == 'r') || (g_liveEffectCmd == 'R'))
+			{
+				xil_printf("  strobe every %u frames (press R again to change)\n\r",
+					(unsigned)g_strobeInterval);
+			}
+			else if ((g_liveEffectCmd == 's') || (g_liveEffectCmd == 'S'))
+			{
+				xil_printf("  feedback %u/256 (press S again to change)\n\r",
+					(unsigned)g_feedbackAmt);
+			}
+			else if ((g_liveEffectCmd == 'u') || (g_liveEffectCmd == 'U'))
+			{
+				xil_printf("  film strip grab every %u frames (press U again to change)\n\r",
+					(unsigned)g_stripInterval);
+			}
+			else if (DemoIsSlitEffect(g_liveEffectCmd))
+			{
+				xil_printf("  slit chunk %u px (press the key again to change)\n\r",
+					(unsigned)g_slitChunk);
+			}
+			else if ((g_liveEffectCmd == 'z') || (g_liveEffectCmd == 'Z'))
+			{
+				xil_printf("  speckle %u%% of pixels (press Z again to change)\n\r",
+					(unsigned)g_specklePct);
+			}
+			else if ((g_liveEffectCmd == 'v') || (g_liveEffectCmd == 'V'))
+			{
+				xil_printf("  random tiles %ux%u (press V again to change)\n\r",
+					(unsigned)g_tileSize, (unsigned)g_tileSize);
+			}
+			else if (g_liveEffectCmd == ',')
+			{
+				xil_printf("  frame shuffle hold %u (press , again to change)\n\r",
+					(unsigned)g_shuffleHold);
+			}
+			else if (g_liveEffectCmd == '-')
+			{
+				xil_printf("  difference %s (press - again to change)\n\r",
+					(g_diffMode == 0U) ? "abs vs freeze" :
+					(g_diffMode == 1U) ? "XOR vs freeze" :
+					(g_diffMode == 2U) ? "abs vs previous" : "XOR vs previous");
+			}
+			else if (g_liveEffectCmd == '/')
+			{
+				xil_printf("  tunnel zoom %u%% (press / again to change)\n\r",
+					(unsigned)((256U * 100U) / g_tunnelZoomQ8));
+			}
 		}
 		xil_printf("\n\r");
 		xil_printf("0 - Clear live effect (show raw HDMI-in)\n\r");
@@ -1425,6 +2242,17 @@ void DemoEffectMenu()
 		xil_printf("J - 3D Rotate XYZ (combined)\n\r");
 		xil_printf("K - 3D Scale + Rotate\n\r");
 		xil_printf("L - Shrink 25%% and Random Position\n\r");
+		xil_printf("R - Strobe / freeze (DDR, repeat to change interval)\n\r");
+		xil_printf("S - Feedback (DDR, repeat to change mix)\n\r");
+		xil_printf("U - Film strip 2x2 (DDR, repeat to change grab rate)\n\r");
+		xil_printf("W - Slit scan columns (20px, new frame at next X)\n\r");
+		xil_printf("X - Slit scan rows (20px, new frame at next Y)\n\r");
+		xil_printf("Y - Center band tiled vertically (same slice fills the screen)\n\r");
+		xil_printf("Z - Speckle (random 30%% of pixels from new frame)\n\r");
+		xil_printf("V - Random tiles (30%% of 16px blocks from new frame)\n\r");
+		xil_printf(", - Frame shuffle (8 stills, random slot)\n\r");
+		xil_printf("- - Difference (live minus frozen still)\n\r");
+		xil_printf("/ - Video feedback tunnel (zoom mix into history)\n\r");
 		xil_printf("M - Animated 3D Rotate X\n\r");
 		xil_printf("N - Animated 3D Rotate Y\n\r");
 		xil_printf("O - Animated 3D Rotate Z\n\r");
@@ -1455,6 +2283,7 @@ void DemoEffectMenu()
 		if (userInput == '0')
 		{
 			g_liveEffectCmd = 0;
+			DemoResetDdrEffectState();
 			if (videoCapt.state == VIDEO_STREAMING)
 			{
 				DisplayChangeFrame(&dispCtrl, videoCapt.curFrame);
