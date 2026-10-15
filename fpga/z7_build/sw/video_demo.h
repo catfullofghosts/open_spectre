@@ -48,6 +48,13 @@
 #define DEMO_PATTERN_LISSAJOUS 9
 #define DEMO_PATTERN_FLOW_FIELD 10
 #define DEMO_PATTERN_GRID 11
+#define DEMO_PATTERN_COLOR_BLOCKS 12
+#define DEMO_PATTERN_WHITE_NOISE 13
+#define DEMO_PATTERN_RANDOM_BOXES 14
+#define DEMO_PATTERN_RANDOM_LINES 15
+#define DEMO_PATTERN_COLOR_WASH 16
+#define DEMO_PATTERN_SLIDING_BARS 17
+#define DEMO_PATTERN_SNOW 18
 
 
 #define DEMO_MAX_FRAME (1920*1080*3)
@@ -71,6 +78,7 @@ void DemoVideoInMonitor();
 void DemoChangeRes();
 void DemoCRMenu();
 void DemoEffectMenu();
+void DemoPatternMenu();
 void DemoInvertFrame(u8 *srcFrame, u8 *destFrame, u32 width, u32 height, u32 stride);
 void DemoPrintTest(u8 *frame, u32 width, u32 height, u32 stride, int pattern);
 void DemoScaleFrame(u8 *srcFrame, u8 *destFrame, u32 srcWidth, u32 srcHeight, u32 destWidth, u32 destHeight, u32 stride);
@@ -86,6 +94,13 @@ void DemoMoirePattern(u8 *frame, u32 width, u32 height, u32 stride, float time);
 void DemoStandingWavePattern(u8 *frame, u32 width, u32 height, u32 stride, float time);
 void DemoLissajousPattern(u8 *frame, u32 width, u32 height, u32 stride, float time);
 void DemoFlowFieldPattern(u8 *frame, u32 width, u32 height, u32 stride, float time);
+void DemoColorBlockPattern(u8 *frame, u32 width, u32 height, u32 stride, float time);
+void DemoWhiteNoisePattern(u8 *frame, u32 width, u32 height, u32 stride, float time);
+void DemoRandomBoxPattern(u8 *frame, u32 width, u32 height, u32 stride, u32 count);
+void DemoRandomLinePattern(u8 *frame, u32 width, u32 height, u32 stride, u32 count);
+void DemoColorWashPattern(u8 *frame, u32 width, u32 height, u32 stride, float time);
+void DemoSlidingBarPattern(u8 *frame, u32 width, u32 height, u32 stride, float time);
+void DemoSnowPattern(u8 *frame, u32 width, u32 height, u32 stride, u32 count);
 
 /* Helper function to run an animated pattern for a duration */
 void DemoRunAnimatedPattern(u8 *frame, u32 width, u32 height, u32 stride, int pattern, u32 durationMs);

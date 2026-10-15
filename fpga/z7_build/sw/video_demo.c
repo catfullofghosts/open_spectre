@@ -644,39 +644,7 @@ void DemoRun()
 			DisplayChangeFrame(&dispCtrl, nextFrame);
 			break;
 		case '9':
-			DemoRunAnimatedPattern(pFrames[dispCtrl.curFrame], dispCtrl.vMode.width, dispCtrl.vMode.height, DEMO_STRIDE, DEMO_PATTERN_PLASMA, 5000);
-			break;
-		case 'a':
-		case 'A':
-			DemoRunAnimatedPattern(pFrames[dispCtrl.curFrame], dispCtrl.vMode.width, dispCtrl.vMode.height, DEMO_STRIDE, DEMO_PATTERN_SPIRAL, 5000);
-			break;
-		case 'b':
-		case 'B':
-			DemoRunAnimatedPattern(pFrames[dispCtrl.curFrame], dispCtrl.vMode.width, dispCtrl.vMode.height, DEMO_STRIDE, DEMO_PATTERN_RIPPLE, 5000);
-			break;
-		case 'c':
-		case 'C':
-			DemoRunAnimatedPattern(pFrames[dispCtrl.curFrame], dispCtrl.vMode.width, dispCtrl.vMode.height, DEMO_STRIDE, DEMO_PATTERN_WAVES, 5000);
-			break;
-		case 'd':
-		case 'D':
-			DemoRunAnimatedPattern(pFrames[dispCtrl.curFrame], dispCtrl.vMode.width, dispCtrl.vMode.height, DEMO_STRIDE, DEMO_PATTERN_GRADIENT, 5000);
-			break;
-		case 'e':
-		case 'E':
-			DemoRunAnimatedPattern(pFrames[dispCtrl.curFrame], dispCtrl.vMode.width, dispCtrl.vMode.height, DEMO_STRIDE, DEMO_PATTERN_MOIRE, 5000);
-			break;
-		case 'f':
-		case 'F':
-			DemoRunAnimatedPattern(pFrames[dispCtrl.curFrame], dispCtrl.vMode.width, dispCtrl.vMode.height, DEMO_STRIDE, DEMO_PATTERN_STANDING_WAVE, 5000);
-			break;
-		case 'g':
-		case 'G':
-			DemoRunAnimatedPattern(pFrames[dispCtrl.curFrame], dispCtrl.vMode.width, dispCtrl.vMode.height, DEMO_STRIDE, DEMO_PATTERN_LISSAJOUS, 5000);
-			break;
-		case 'h':
-		case 'H':
-			DemoRunAnimatedPattern(pFrames[dispCtrl.curFrame], dispCtrl.vMode.width, dispCtrl.vMode.height, DEMO_STRIDE, DEMO_PATTERN_FLOW_FIELD, 5000);
+			DemoPatternMenu();
 			break;
 		case 'i':
 		case 'I':
@@ -740,15 +708,7 @@ void DemoPrintMenu()
 	xil_printf("6 - Change Video Framebuffer Index\n\r");
 	xil_printf("7 - Grab Video Frame and invert colors\n\r");
 	xil_printf("8 - Grab Video Frame and scale to Display resolution\n\r");
-	xil_printf("9 - Plasma Pattern (animated)\n\r");
-	xil_printf("A - Spiral Pattern (animated)\n\r");
-	xil_printf("B - Mandelbrot Fractal (animated)\n\r");
-	xil_printf("C - Wave Interference Pattern (animated)\n\r");
-	xil_printf("D - Julia Fractal (animated)\n\r");
-	xil_printf("E - Moiré Pattern (animated)\n\r");
-	xil_printf("F - Standing Wave Pattern (animated)\n\r");
-	xil_printf("G - Lissajous Pattern (animated)\n\r");
-	xil_printf("H - Flow Field Pattern (animated)\n\r");
+	xil_printf("9 - Animated patterns menu\n\r");
 	xil_printf("I - Apply Video Effects Menu\n\r");
 	xil_printf("J - Overlay VRAM Pattern Test (with transparency)\n\r");
 	xil_printf("K - Sprite VRAM Test (random position)\n\r");
@@ -2137,6 +2097,140 @@ static int DemoRunEffectUntilKey(char cmd, int clearFrame, u8 *staticSrc, u32 st
 	return 0;
 }
 
+void DemoPatternMenu(void)
+{
+	char userInput = 0;
+	int pattern = -1;
+
+	while (XUartPs_IsReceiveData(UART_BASEADDR))
+	{
+		(void)XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
+	}
+
+	while (1)
+	{
+		xil_printf("\x1B[H");
+		xil_printf("\x1B[2J");
+		xil_printf("**************************************************\n\r");
+		xil_printf("*            Animated Patterns                    *\n\r");
+		xil_printf("**************************************************\n\r");
+		xil_printf("Any key stops a running pattern.\n\r\n\r");
+		xil_printf("Existing\n\r");
+		xil_printf("1 - Plasma\n\r");
+		xil_printf("2 - Spiral\n\r");
+		xil_printf("3 - Ripple\n\r");
+		xil_printf("4 - Waves\n\r");
+		xil_printf("5 - Gradient\n\r");
+		xil_printf("6 - Moire\n\r");
+		xil_printf("7 - Standing wave\n\r");
+		xil_printf("8 - Lissajous\n\r");
+		xil_printf("9 - Flow field\n\r");
+		xil_printf("\n\rFast / cheap\n\r");
+		xil_printf("A - Color blocks (large tiles, slow change)\n\r");
+		xil_printf("B - White noise\n\r");
+		xil_printf("C - Random boxes (accumulate)\n\r");
+		xil_printf("D - Random lines (accumulate)\n\r");
+		xil_printf("E - Color wash (full-screen hue crawl)\n\r");
+		xil_printf("F - Sliding color bars\n\r");
+		xil_printf("G - Snow (dots accumulate)\n\r");
+		xil_printf("q - Back to main menu\n\r");
+		xil_printf("\n\rSelect a pattern:");
+
+		do
+		{
+			while (!XUartPs_IsReceiveData(UART_BASEADDR))
+			{
+				MidiUartPoll();
+				(void)DemoApplyLiveEffectFrame();
+			}
+			userInput = DemoReadMenuKey();
+		} while ((userInput == '\r') || (userInput == '\n'));
+
+		xil_printf("%c", userInput);
+
+		if ((userInput == 'q') || (userInput == 'Q'))
+		{
+			return;
+		}
+
+		pattern = -1;
+		if (userInput == '1')
+		{
+			pattern = DEMO_PATTERN_PLASMA;
+		}
+		else if (userInput == '2')
+		{
+			pattern = DEMO_PATTERN_SPIRAL;
+		}
+		else if (userInput == '3')
+		{
+			pattern = DEMO_PATTERN_RIPPLE;
+		}
+		else if (userInput == '4')
+		{
+			pattern = DEMO_PATTERN_WAVES;
+		}
+		else if (userInput == '5')
+		{
+			pattern = DEMO_PATTERN_GRADIENT;
+		}
+		else if (userInput == '6')
+		{
+			pattern = DEMO_PATTERN_MOIRE;
+		}
+		else if (userInput == '7')
+		{
+			pattern = DEMO_PATTERN_STANDING_WAVE;
+		}
+		else if (userInput == '8')
+		{
+			pattern = DEMO_PATTERN_LISSAJOUS;
+		}
+		else if (userInput == '9')
+		{
+			pattern = DEMO_PATTERN_FLOW_FIELD;
+		}
+		else if ((userInput == 'a') || (userInput == 'A'))
+		{
+			pattern = DEMO_PATTERN_COLOR_BLOCKS;
+		}
+		else if ((userInput == 'b') || (userInput == 'B'))
+		{
+			pattern = DEMO_PATTERN_WHITE_NOISE;
+		}
+		else if ((userInput == 'c') || (userInput == 'C'))
+		{
+			pattern = DEMO_PATTERN_RANDOM_BOXES;
+		}
+		else if ((userInput == 'd') || (userInput == 'D'))
+		{
+			pattern = DEMO_PATTERN_RANDOM_LINES;
+		}
+		else if ((userInput == 'e') || (userInput == 'E'))
+		{
+			pattern = DEMO_PATTERN_COLOR_WASH;
+		}
+		else if ((userInput == 'f') || (userInput == 'F'))
+		{
+			pattern = DEMO_PATTERN_SLIDING_BARS;
+		}
+		else if ((userInput == 'g') || (userInput == 'G'))
+		{
+			pattern = DEMO_PATTERN_SNOW;
+		}
+
+		if (pattern < 0)
+		{
+			xil_printf("\n\rInvalid Selection");
+			TimerDelay(400000);
+			continue;
+		}
+
+		DemoRunAnimatedPattern(pFrames[dispCtrl.curFrame], dispCtrl.vMode.width,
+			dispCtrl.vMode.height, DEMO_STRIDE, pattern, 0);
+	}
+}
+
 void DemoEffectMenu()
 {
 	int fEffectSet = 0;
@@ -3501,6 +3595,364 @@ static char CheckForExit(void)
 	return 0;
 }
 
+#define DEMO_BLOCK_COLS 5
+#define DEMO_BLOCK_ROWS 3
+
+static u32 g_patRng = 0xA5A5A5A5U;
+static u8 g_blockRgb[DEMO_BLOCK_ROWS][DEMO_BLOCK_COLS][3];
+static int g_blockInited = 0;
+
+static u32 DemoPatRandom(void)
+{
+	g_patRng = (g_patRng * 1664525U) + 1013904223U;
+	return g_patRng;
+}
+
+static void DemoHueRgb(u32 t, u8 *r, u8 *g, u8 *b)
+{
+	u32 h = t % 1536U;
+	u32 seg = h / 256U;
+	u8 x = (u8)(h & 255U);
+
+	switch (seg)
+	{
+	case 0:
+		*r = 255U;
+		*g = x;
+		*b = 0U;
+		break;
+	case 1:
+		*r = (u8)(255U - x);
+		*g = 255U;
+		*b = 0U;
+		break;
+	case 2:
+		*r = 0U;
+		*g = 255U;
+		*b = x;
+		break;
+	case 3:
+		*r = 0U;
+		*g = (u8)(255U - x);
+		*b = 255U;
+		break;
+	case 4:
+		*r = x;
+		*g = 0U;
+		*b = 255U;
+		break;
+	default:
+		*r = 255U;
+		*g = 0U;
+		*b = (u8)(255U - x);
+		break;
+	}
+}
+
+static void DemoFillRgbRect(u8 *frame, u32 width, u32 height, u32 stride,
+	u32 x0, u32 y0, u32 rw, u32 rh, u8 r, u8 g, u8 b)
+{
+	u32 y;
+	u32 x;
+
+	if ((x0 >= width) || (y0 >= height))
+	{
+		return;
+	}
+	if ((x0 + rw) > width)
+	{
+		rw = width - x0;
+	}
+	if ((y0 + rh) > height)
+	{
+		rh = height - y0;
+	}
+	for (y = 0U; y < rh; y++)
+	{
+		u8 *p = frame + ((y0 + y) * stride) + (x0 * 3U);
+		for (x = 0U; x < rw; x++)
+		{
+			p[0] = r;
+			p[1] = g;
+			p[2] = b;
+			p += 3;
+		}
+	}
+}
+
+static void DemoDrawRgbLine(u8 *frame, u32 width, u32 height, u32 stride,
+	int x0, int y0, int x1, int y1, u8 r, u8 g, u8 b)
+{
+	int dx = (x1 > x0) ? (x1 - x0) : (x0 - x1);
+	int sx = (x0 < x1) ? 1 : -1;
+	int dy = (y1 > y0) ? (y0 - y1) : (y1 - y0);
+	int sy = (y0 < y1) ? 1 : -1;
+	int err = dx + dy;
+
+	for (;;)
+	{
+		if ((x0 >= 0) && (y0 >= 0) && ((u32)x0 < width) && ((u32)y0 < height))
+		{
+			u8 *p = frame + ((u32)y0 * stride) + ((u32)x0 * 3U);
+			p[0] = r;
+			p[1] = g;
+			p[2] = b;
+		}
+		if ((x0 == x1) && (y0 == y1))
+		{
+			break;
+		}
+		{
+			int e2 = err * 2;
+			if (e2 >= dy)
+			{
+				err += dy;
+				x0 += sx;
+			}
+			if (e2 <= dx)
+			{
+				err += dx;
+				y0 += sy;
+			}
+		}
+	}
+}
+
+void DemoColorBlockPattern(u8 *frame, u32 width, u32 height, u32 stride, float time)
+{
+	u32 tx;
+	u32 ty;
+	u32 tw;
+	u32 th;
+	u32 n;
+	(void)time;
+
+	if ((width < 2U) || (height < 2U))
+	{
+		return;
+	}
+	tw = width / DEMO_BLOCK_COLS;
+	th = height / DEMO_BLOCK_ROWS;
+	if (tw == 0U)
+	{
+		tw = 1U;
+	}
+	if (th == 0U)
+	{
+		th = 1U;
+	}
+
+	if (g_blockInited == 0)
+	{
+		for (ty = 0U; ty < DEMO_BLOCK_ROWS; ty++)
+		{
+			for (tx = 0U; tx < DEMO_BLOCK_COLS; tx++)
+			{
+				u32 rng = DemoPatRandom();
+				g_blockRgb[ty][tx][0] = (u8)(rng >> 24);
+				g_blockRgb[ty][tx][1] = (u8)(rng >> 16);
+				g_blockRgb[ty][tx][2] = (u8)(rng >> 8);
+			}
+		}
+		g_blockInited = 1;
+	}
+
+	for (n = 0U; n < 2U; n++)
+	{
+		u32 rng = DemoPatRandom();
+		int ch;
+		int next;
+
+		ty = (rng >> 8) % DEMO_BLOCK_ROWS;
+		tx = (rng >> 16) % DEMO_BLOCK_COLS;
+		ch = (int)((rng >> 24) % 3U);
+		next = (int)g_blockRgb[ty][tx][ch] + (int)(((rng >> 3) & 31U) - 16);
+		if (next < 0)
+		{
+			next = 0;
+		}
+		if (next > 255)
+		{
+			next = 255;
+		}
+		g_blockRgb[ty][tx][ch] = (u8)next;
+	}
+
+	for (ty = 0U; ty < DEMO_BLOCK_ROWS; ty++)
+	{
+		for (tx = 0U; tx < DEMO_BLOCK_COLS; tx++)
+		{
+			DemoFillRgbRect(frame, width, height, stride,
+				tx * tw, ty * th,
+				(tx == (DEMO_BLOCK_COLS - 1U)) ? (width - tx * tw) : tw,
+				(ty == (DEMO_BLOCK_ROWS - 1U)) ? (height - ty * th) : th,
+				g_blockRgb[ty][tx][0],
+				g_blockRgb[ty][tx][1],
+				g_blockRgb[ty][tx][2]);
+		}
+	}
+	Xil_DCacheFlushRange((unsigned int)frame, height * stride);
+}
+
+void DemoWhiteNoisePattern(u8 *frame, u32 width, u32 height, u32 stride, float time)
+{
+	u32 y;
+	u32 x;
+	u32 rng = g_patRng;
+	(void)time;
+
+	for (y = 0U; y < height; y++)
+	{
+		u8 *p = frame + (y * stride);
+		for (x = 0U; x < width; x++)
+		{
+			rng = (rng * 1664525U) + 1013904223U;
+			p[0] = (u8)(rng >> 24);
+			p[1] = p[0];
+			p[2] = p[0];
+			p += 3;
+		}
+	}
+	g_patRng = rng;
+	Xil_DCacheFlushRange((unsigned int)frame, height * stride);
+}
+
+void DemoRandomBoxPattern(u8 *frame, u32 width, u32 height, u32 stride, u32 count)
+{
+	u32 i;
+
+	if ((width < 8U) || (height < 8U) || (count == 0U))
+	{
+		return;
+	}
+	for (i = 0U; i < count; i++)
+	{
+		u32 rng = DemoPatRandom();
+		u32 rw = 16U + (rng % (width / 2U));
+		u32 rh = 16U + ((rng >> 8) % (height / 2U));
+		u32 x0 = (rng >> 16) % width;
+		u32 y0 = (DemoPatRandom() >> 16) % height;
+		u8 r = (u8)(rng >> 24);
+		u8 g = (u8)(rng >> 8);
+		u8 b = (u8)rng;
+
+		DemoFillRgbRect(frame, width, height, stride, x0, y0, rw, rh, r, g, b);
+	}
+	Xil_DCacheFlushRange((unsigned int)frame, height * stride);
+}
+
+void DemoRandomLinePattern(u8 *frame, u32 width, u32 height, u32 stride, u32 count)
+{
+	u32 i;
+
+	if ((width < 2U) || (height < 2U) || (count == 0U))
+	{
+		return;
+	}
+	for (i = 0U; i < count; i++)
+	{
+		u32 rng = DemoPatRandom();
+		int x0 = (int)(rng % width);
+		int y0 = (int)((rng >> 10) % height);
+		int x1 = (int)((rng >> 16) % width);
+		int y1 = (int)(DemoPatRandom() % height);
+		u8 r = (u8)(rng >> 24);
+		u8 g = (u8)(rng >> 8);
+		u8 b = (u8)rng;
+
+		DemoDrawRgbLine(frame, width, height, stride, x0, y0, x1, y1, r, g, b);
+		if ((y0 + 1) < (int)height)
+		{
+			DemoDrawRgbLine(frame, width, height, stride, x0, y0 + 1, x1, y1 + 1, r, g, b);
+		}
+	}
+	Xil_DCacheFlushRange((unsigned int)frame, height * stride);
+}
+
+void DemoColorWashPattern(u8 *frame, u32 width, u32 height, u32 stride, float time)
+{
+	u8 r;
+	u8 g;
+	u8 b;
+	u32 y;
+	u32 x;
+
+	DemoHueRgb((u32)(time * 8.0f), &r, &g, &b);
+	for (y = 0U; y < height; y++)
+	{
+		u8 *p = frame + (y * stride);
+		for (x = 0U; x < width; x++)
+		{
+			p[0] = r;
+			p[1] = g;
+			p[2] = b;
+			p += 3;
+		}
+	}
+	Xil_DCacheFlushRange((unsigned int)frame, height * stride);
+}
+
+void DemoSlidingBarPattern(u8 *frame, u32 width, u32 height, u32 stride, float time)
+{
+	u32 y;
+	u32 x;
+	u32 bandH;
+	u32 shift;
+
+	bandH = height / 8U;
+	if (bandH < 4U)
+	{
+		bandH = 4U;
+	}
+	shift = ((u32)time * 3U);
+
+	for (y = 0U; y < height; y++)
+	{
+		u8 r;
+		u8 g;
+		u8 b;
+		u8 *p = frame + (y * stride);
+
+		DemoHueRgb(((y + shift) / bandH) * 180U, &r, &g, &b);
+		for (x = 0U; x < width; x++)
+		{
+			p[0] = r;
+			p[1] = g;
+			p[2] = b;
+			p += 3;
+		}
+	}
+	Xil_DCacheFlushRange((unsigned int)frame, height * stride);
+}
+
+void DemoSnowPattern(u8 *frame, u32 width, u32 height, u32 stride, u32 count)
+{
+	u32 i;
+
+	if ((width == 0U) || (height == 0U))
+	{
+		return;
+	}
+	for (i = 0U; i < count; i++)
+	{
+		u32 rng = DemoPatRandom();
+		u32 x = rng % width;
+		u32 y = (rng >> 16) % height;
+		u8 *p = frame + (y * stride) + (x * 3U);
+		p[0] = 255U;
+		p[1] = 255U;
+		p[2] = 255U;
+	}
+	Xil_DCacheFlushRange((unsigned int)frame, height * stride);
+}
+
+static int DemoIsPersistPattern(int pattern)
+{
+	return ((pattern == DEMO_PATTERN_RANDOM_BOXES) ||
+		(pattern == DEMO_PATTERN_RANDOM_LINES) ||
+		(pattern == DEMO_PATTERN_SNOW));
+}
+
 /*
  * Fast nearest-neighbor upscaling from low-res to high-res
  * Much faster than bilinear interpolation
@@ -3555,44 +4007,89 @@ void DemoRunAnimatedPattern(u8 *frame, u32 width, u32 height, u32 stride, int pa
 	u32 currentFrameIdx = dispCtrl.curFrame;
 	u32 nextFrameIdx;
 	char shouldExit = 0;
-	u32 maxFrames = 200; // Maximum number of frames to draw
-	
-	// Calculate lower resolution for faster rendering
-	// Use 1/2 resolution for good speed/quality balance
-	// For very large displays, could use 1/4 resolution
-	u32 scaleFactor = 4; // Render at 1/8 resolution
-	u32 lowWidth = (width + scaleFactor - 1) / scaleFactor;  // Round up
-	u32 lowHeight = (height + scaleFactor - 1) / scaleFactor;
-	u32 lowStride = lowWidth * 3;
-	
-	// Allocate temporary low-resolution buffer (on stack, but limited size)
-	// For safety, limit to reasonable size
-	if(lowWidth > 960 || lowHeight > 540)
+	u32 scaleFactor = 4;
+	u32 lowWidth;
+	u32 lowHeight;
+	u32 lowStride;
+	static u8 lowResBuffer[960 * 540 * 3] __attribute__((aligned(0x20)));
+	(void)frame;
+	(void)durationMs;
+
+	while (XUartPs_IsReceiveData(UART_BASEADDR))
 	{
-		// Fall back to 1/4 scale if too large
+		XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
+	}
+	g_shouldExitPattern = 0;
+
+	if (DemoIsPersistPattern(pattern))
+	{
+		int destIdx = DemoEffectDestFrame();
+		u8 *dest = pFrames[destIdx];
+
+		memset(dest, 0, height * stride);
+		Xil_DCacheFlushRange((unsigned int)dest, height * stride);
+		DisplayChangeFrame(&dispCtrl, destIdx);
+		xil_printf("\n\rRunning accumulating pattern. Press any key to stop\n\r");
+
+		while (!shouldExit)
+		{
+			MidiUartPoll();
+			if (CheckForExit() || g_shouldExitPattern)
+			{
+				shouldExit = 1;
+				break;
+			}
+			if (pattern == DEMO_PATTERN_RANDOM_BOXES)
+			{
+				DemoRandomBoxPattern(dest, width, height, stride, 2U);
+			}
+			else if (pattern == DEMO_PATTERN_RANDOM_LINES)
+			{
+				DemoRandomLinePattern(dest, width, height, stride, 3U);
+			}
+			else
+			{
+				DemoSnowPattern(dest, width, height, stride, 180U);
+			}
+			if (XUartPs_IsReceiveData(UART_BASEADDR))
+			{
+				shouldExit = 1;
+				g_shouldExitPattern = 1;
+			}
+		}
+		g_shouldExitPattern = 0;
+		while (XUartPs_IsReceiveData(UART_BASEADDR))
+		{
+			XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
+		}
+		xil_printf("\n\rAnimation stopped by user\n\r");
+		return;
+	}
+
+	if (pattern == DEMO_PATTERN_COLOR_BLOCKS)
+	{
+		scaleFactor = 16;
+	}
+	else if (pattern == DEMO_PATTERN_WHITE_NOISE)
+	{
+		scaleFactor = 2;
+	}
+
+	lowWidth = (width + scaleFactor - 1) / scaleFactor;
+	lowHeight = (height + scaleFactor - 1) / scaleFactor;
+	lowStride = lowWidth * 3;
+	if ((lowWidth > 960U) || (lowHeight > 540U))
+	{
 		scaleFactor = 4;
 		lowWidth = (width + scaleFactor - 1) / scaleFactor;
 		lowHeight = (height + scaleFactor - 1) / scaleFactor;
 		lowStride = lowWidth * 3;
 	}
-	
-	// Use a static buffer for low-res rendering (max 960x540 = ~1.5MB)
-	// This is safe since it's much smaller than DEMO_MAX_FRAME
-	static u8 lowResBuffer[960 * 540 * 3] __attribute__((aligned(0x20)));
-	
-	xil_printf("\n\rRunning animated pattern at %dx%d (scaled from %dx%d)... Press any key to stop\n\r", 
-	           width, height, lowWidth, lowHeight);
-	
-	// Flush UART FIFO
-	while (XUartPs_IsReceiveData(UART_BASEADDR))
-	{
-		XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
-	}
-	
-	g_shouldExitPattern = 0;
-	
-	// Main animation loop
-	while(frameCount < maxFrames && !shouldExit)
+
+	xil_printf("\n\rRunning animated pattern at %dx%d (scaled from %dx%d)... Press any key to stop\n\r",
+		width, height, lowWidth, lowHeight);
+
+	while (!shouldExit)
 	{
 		// Check for exit before starting
 		if (CheckForExit())
@@ -3638,6 +4135,18 @@ void DemoRunAnimatedPattern(u8 *frame, u32 width, u32 height, u32 stride, int pa
 		case DEMO_PATTERN_FLOW_FIELD:
 			DemoFlowFieldPattern(lowResBuffer, lowWidth, lowHeight, lowStride, time);
 			break;
+		case DEMO_PATTERN_COLOR_BLOCKS:
+			DemoColorBlockPattern(lowResBuffer, lowWidth, lowHeight, lowStride, time);
+			break;
+		case DEMO_PATTERN_WHITE_NOISE:
+			DemoWhiteNoisePattern(lowResBuffer, lowWidth, lowHeight, lowStride, time);
+			break;
+		case DEMO_PATTERN_COLOR_WASH:
+			DemoColorWashPattern(lowResBuffer, lowWidth, lowHeight, lowStride, time);
+			break;
+		case DEMO_PATTERN_SLIDING_BARS:
+			DemoSlidingBarPattern(lowResBuffer, lowWidth, lowHeight, lowStride, time);
+			break;
 		default:
 			xil_printf("\n\rInvalid pattern type\n\r");
 			return;
@@ -3665,23 +4174,36 @@ void DemoRunAnimatedPattern(u8 *frame, u32 width, u32 height, u32 stride, int pa
 		DisplayChangeFrame(&dispCtrl, nextFrameIdx);
 		currentFrameIdx = nextFrameIdx;
 		frameCount++;
-		
-		// Increment time for next frame - larger increment for visible changes
-		time += 5.0f; // Increase time significantly for visible animation
-		if(time > 1000.0f) time = 0.0f; // Wrap time to prevent overflow
-		
-		// Very short delay - just enough to let frame be visible
-		// Check for exit very frequently
-		u32 i;
-		for (i = 0; i < 20; i++)
+		MidiUartPoll();
+
+		if ((pattern == DEMO_PATTERN_COLOR_BLOCKS) ||
+			(pattern == DEMO_PATTERN_COLOR_WASH) ||
+			(pattern == DEMO_PATTERN_SLIDING_BARS))
 		{
-			// TimerDelay(2500); // 2.5ms chunks = 50ms total delay per frame
-			// Check for exit very frequently during delay
-			if (XUartPs_IsReceiveData(UART_BASEADDR))
+			time += 1.0f;
+		}
+		else
+		{
+			time += 5.0f;
+		}
+		if (time > 10000.0f)
+		{
+			time = 0.0f;
+		}
+
+		{
+			u32 i;
+			u32 wait = ((pattern == DEMO_PATTERN_COLOR_BLOCKS) ||
+				(pattern == DEMO_PATTERN_COLOR_WASH)) ? 80U : 20U;
+
+			for (i = 0U; i < wait; i++)
 			{
-				shouldExit = 1;
-				g_shouldExitPattern = 1;
-				break;
+				if (XUartPs_IsReceiveData(UART_BASEADDR))
+				{
+					shouldExit = 1;
+					g_shouldExitPattern = 1;
+					break;
+				}
 			}
 		}
 	}
