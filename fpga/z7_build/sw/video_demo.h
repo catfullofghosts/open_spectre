@@ -116,6 +116,7 @@ void DemoZoomEffect(u8 *srcFrame, u8 *destFrame, u32 width, u32 height, u32 stri
 void DemoMosaicEffect(u8 *srcFrame, u8 *destFrame, u32 width, u32 height, u32 stride, u32 blockSize);
 void Demo3DPlaneEffect(u8 *srcFrame, u8 *destFrame, u32 width, u32 height, u32 stride, float rotX, float rotY, float rotZ, float scale, float offsetX, float offsetY);
 void DemoClearFrame(u8 *frame, u32 width, u32 height, u32 stride);
+void DemoBlitSplash(u8 *frame, u32 width, u32 height, u32 stride);
 void DemoShrinkRandomEffect(u8 *srcFrame, u8 *destFrame, u32 srcWidth, u32 srcHeight, u32 destWidth, u32 destHeight, u32 stride);
 void DemoRunAnimated3DEffect(u8 *srcFrame, u8 **pFrames, u32 srcFrameIdx, u32 srcWidth, u32 srcHeight, u32 srcStride, u32 destWidth, u32 destHeight, char axis, float scale, DisplayCtrl *dispCtrl, VideoCapture *videoCapt);
 

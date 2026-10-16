@@ -41,6 +41,7 @@
 #include "timer_ps/timer_ps.h"
 #include "xparameters.h"
 #include "midi_uart/midi_uart.h"
+#include "splash.h"
 
 /* ------------------------------------------------------------ */
 /*				Math Function Approximations					*/
@@ -441,6 +442,12 @@ void DemoInitialize()
 		xil_printf("Display Ctrl initialization failed during demo initialization%d\r\n", Status);
 		return;
 	}
+	for (i = 0; i < DISPLAY_NUM_FRAMES; i++)
+	{
+		DemoBlitSplash(pFrames[i], dispCtrl.vMode.width, dispCtrl.vMode.height, dispCtrl.stride);
+	}
+	xil_printf("Startup splash %ux%u 1-bit, centred\r\n",
+		(unsigned)SPLASH_WIDTH, (unsigned)SPLASH_HEIGHT);
 	Status = DisplayStart(&dispCtrl);
 	if (Status != XST_SUCCESS)
 	{
@@ -483,11 +490,6 @@ void DemoInitialize()
 	else
 	{
 		xil_printf("MIDI UART1 ready @ %u baud\r\n", (unsigned)MIDI_UART_BAUD);
-	}
-
-	for (i = 0; i < DISPLAY_NUM_FRAMES; i++)
-	{
-		DemoPrintTest(pFrames[i], dispCtrl.vMode.width, dispCtrl.vMode.height, dispCtrl.stride, DEMO_PATTERN_1);
 	}
 
 	return;
@@ -1097,17 +1099,23 @@ static int DemoEffectDestFrame(void)
 	return ((int)videoCapt.curFrame + 1) % DISPLAY_NUM_FRAMES;
 }
 
-static void DemoDecimateSkip2(const u8 *src, u8 *dst, u32 width, u32 height, u32 stride)
+static u32 DemoPackedStride(u32 width)
+{
+	return width * 3U;
+}
+
+static void DemoDecimateSkip2(const u8 *src, u8 *dst, u32 width, u32 height, u32 srcStride)
 {
 	u32 x;
 	u32 y;
 	u32 dw = width / DEMO_IN_DECIM;
 	u32 dh = height / DEMO_IN_DECIM;
+	u32 dstStride = DemoPackedStride(dw);
 
 	for (y = 0U; y < dh; y++)
 	{
-		const u8 *s = src + ((y * DEMO_IN_DECIM) * stride);
-		u8 *d = dst + (y * stride);
+		const u8 *s = src + ((y * DEMO_IN_DECIM) * srcStride);
+		u8 *d = dst + (y * dstStride);
 
 		for (x = 0U; x < dw; x++)
 		{
@@ -1161,18 +1169,25 @@ static void DemoResetDdrEffectState(void)
 	memset(g_delayPlane, 0, sizeof(g_delayPlane));
 }
 
-static void DemoCopyHalfPlane(u8 *dst, const u8 *src, u32 halfW, u32 halfH, u32 stride)
+static void DemoCopyPlane(u8 *dst, u32 dstStride, const u8 *src, u32 srcStride, u32 width, u32 height)
 {
 	u32 y;
-	u32 rowBytes = halfW * 3U;
+	u32 rowBytes = width * 3U;
 
-	for (y = 0U; y < halfH; y++)
+	if ((dstStride == srcStride) && (srcStride == rowBytes))
 	{
-		memcpy(dst + (y * stride), src + (y * stride), rowBytes);
+		memcpy(dst, src, rowBytes * height);
+		return;
+	}
+
+	for (y = 0U; y < height; y++)
+	{
+		memcpy(dst + (y * dstStride), src + (y * srcStride), rowBytes);
 	}
 }
 
-static void DemoBlendHalfPlane(u8 *dst, const u8 *live, const u8 *prev, u32 halfW, u32 halfH, u32 stride, u32 feedback)
+static void DemoBlendHalfPlane(u8 *dst, u32 dstStride, const u8 *live, const u8 *prev,
+	u32 packedStride, u32 halfW, u32 halfH, u32 feedback)
 {
 	u32 liveAmt = 256U - feedback;
 	u32 y;
@@ -1181,9 +1196,9 @@ static void DemoBlendHalfPlane(u8 *dst, const u8 *live, const u8 *prev, u32 half
 
 	for (y = 0U; y < halfH; y++)
 	{
-		const u8 *l = live + (y * stride);
-		const u8 *p = prev + (y * stride);
-		u8 *d = dst + (y * stride);
+		const u8 *l = live + (y * packedStride);
+		const u8 *p = prev + (y * packedStride);
+		u8 *d = dst + (y * dstStride);
 
 		for (n = 0U; n < count; n++)
 		{
@@ -1192,15 +1207,16 @@ static void DemoBlendHalfPlane(u8 *dst, const u8 *live, const u8 *prev, u32 half
 	}
 }
 
-static void DemoBlitHalfToQuad(u8 *dest, const u8 *src, u32 halfW, u32 halfH, u32 stride, u32 qx, u32 qy)
+static void DemoBlitHalfToQuad(u8 *dest, u32 destStride, const u8 *src, u32 srcStride,
+	u32 halfW, u32 halfH, u32 qx, u32 qy)
 {
 	u32 y;
 	u32 rowBytes = halfW * 3U;
-	u8 *d = dest + ((qy * halfH) * stride) + (qx * halfW * 3U);
+	u8 *d = dest + ((qy * halfH) * destStride) + (qx * halfW * 3U);
 
 	for (y = 0U; y < halfH; y++)
 	{
-		memcpy(d + (y * stride), src + (y * stride), rowBytes);
+		memcpy(d + (y * destStride), src + (y * srcStride), rowBytes);
 	}
 }
 
@@ -1390,6 +1406,7 @@ static void DemoCycleDdrEffectParam(char cmd)
 static int DemoApplyDdrEffect(u8 *dest, int destIdx, u32 halfW, u32 halfH, u32 fullHeight)
 {
 	u32 i;
+	u32 packed = DemoPackedStride(halfW);
 	char cmd = g_liveEffectCmd;
 
 	if ((cmd == 'r') || (cmd == 'R'))
@@ -1397,8 +1414,8 @@ static int DemoApplyDdrEffect(u8 *dest, int destIdx, u32 halfW, u32 halfH, u32 f
 		g_ddrFrameCount++;
 		if ((g_ddrInited == 0) || (g_ddrFrameCount >= g_strobeInterval))
 		{
-			DemoCopyHalfPlane(g_delayPlane, g_halfSrc, halfW, halfH, DEMO_STRIDE);
-			DemoCopyHalfPlane(dest, g_delayPlane, halfW, halfH, DEMO_STRIDE);
+			DemoCopyPlane(g_delayPlane, packed, g_halfSrc, packed, halfW, halfH);
+			DemoCopyPlane(dest, DEMO_STRIDE, g_delayPlane, packed, halfW, halfH);
 			DemoPixelDoubleInPlace(dest, halfW, halfH, DEMO_STRIDE);
 			Xil_DCacheFlushRange((unsigned int)dest, fullHeight * DEMO_STRIDE);
 			DisplayChangeFrame(&dispCtrl, destIdx);
@@ -1412,11 +1429,11 @@ static int DemoApplyDdrEffect(u8 *dest, int destIdx, u32 halfW, u32 halfH, u32 f
 	{
 		if (g_ddrInited == 0)
 		{
-			DemoCopyHalfPlane(g_delayPlane, g_halfSrc, halfW, halfH, DEMO_STRIDE);
+			DemoCopyPlane(g_delayPlane, packed, g_halfSrc, packed, halfW, halfH);
 			g_ddrInited = 1;
 		}
-		DemoBlendHalfPlane(dest, g_halfSrc, g_delayPlane, halfW, halfH, DEMO_STRIDE, g_feedbackAmt);
-		DemoCopyHalfPlane(g_delayPlane, dest, halfW, halfH, DEMO_STRIDE);
+		DemoBlendHalfPlane(dest, DEMO_STRIDE, g_halfSrc, g_delayPlane, packed, halfW, halfH, g_feedbackAmt);
+		DemoCopyPlane(g_delayPlane, packed, dest, DEMO_STRIDE, halfW, halfH);
 		DemoPixelDoubleInPlace(dest, halfW, halfH, DEMO_STRIDE);
 		Xil_DCacheFlushRange((unsigned int)dest, fullHeight * DEMO_STRIDE);
 		DisplayChangeFrame(&dispCtrl, destIdx);
@@ -1429,7 +1446,7 @@ static int DemoApplyDdrEffect(u8 *dest, int destIdx, u32 halfW, u32 halfH, u32 f
 		{
 			for (i = 0U; i < DEMO_FILM_SLOTS; i++)
 			{
-				DemoCopyHalfPlane(g_stripRing[i], g_halfSrc, halfW, halfH, DEMO_STRIDE);
+				DemoCopyPlane(g_stripRing[i], packed, g_halfSrc, packed, halfW, halfH);
 			}
 			g_stripWrite = 0U;
 			g_ddrInited = 1;
@@ -1440,16 +1457,16 @@ static int DemoApplyDdrEffect(u8 *dest, int destIdx, u32 halfW, u32 halfH, u32 f
 			g_ddrFrameCount++;
 			if (g_ddrFrameCount >= g_stripInterval)
 			{
-				DemoCopyHalfPlane(g_stripRing[g_stripWrite], g_halfSrc, halfW, halfH, DEMO_STRIDE);
+				DemoCopyPlane(g_stripRing[g_stripWrite], packed, g_halfSrc, packed, halfW, halfH);
 				g_stripWrite = (g_stripWrite + 1U) % DEMO_FILM_SLOTS;
 				g_ddrFrameCount = 0U;
 			}
 		}
 
-		DemoBlitHalfToQuad(dest, g_stripRing[0], halfW, halfH, DEMO_STRIDE, 0U, 0U);
-		DemoBlitHalfToQuad(dest, g_stripRing[1], halfW, halfH, DEMO_STRIDE, 1U, 0U);
-		DemoBlitHalfToQuad(dest, g_stripRing[2], halfW, halfH, DEMO_STRIDE, 0U, 1U);
-		DemoBlitHalfToQuad(dest, g_stripRing[3], halfW, halfH, DEMO_STRIDE, 1U, 1U);
+		DemoBlitHalfToQuad(dest, DEMO_STRIDE, g_stripRing[0], packed, halfW, halfH, 0U, 0U);
+		DemoBlitHalfToQuad(dest, DEMO_STRIDE, g_stripRing[1], packed, halfW, halfH, 1U, 0U);
+		DemoBlitHalfToQuad(dest, DEMO_STRIDE, g_stripRing[2], packed, halfW, halfH, 0U, 1U);
+		DemoBlitHalfToQuad(dest, DEMO_STRIDE, g_stripRing[3], packed, halfW, halfH, 1U, 1U);
 		Xil_DCacheFlushRange((unsigned int)dest, fullHeight * DEMO_STRIDE);
 		DisplayChangeFrame(&dispCtrl, destIdx);
 		return 1;
@@ -1461,26 +1478,26 @@ static int DemoApplyDdrEffect(u8 *dest, int destIdx, u32 halfW, u32 halfH, u32 f
 		{
 			for (i = 0U; i < DEMO_SHUFFLE_SLOTS; i++)
 			{
-				DemoCopyHalfPlane(g_stripRing[i], g_halfSrc, halfW, halfH, DEMO_STRIDE);
+				DemoCopyPlane(g_stripRing[i], packed, g_halfSrc, packed, halfW, halfH);
 			}
 			g_stripWrite = 0U;
 			g_ddrFrameCount = 0U;
 			g_ddrInited = 1;
-			DemoCopyHalfPlane(dest, g_stripRing[0], halfW, halfH, DEMO_STRIDE);
+			DemoCopyPlane(dest, DEMO_STRIDE, g_stripRing[0], packed, halfW, halfH);
 			DemoPixelDoubleInPlace(dest, halfW, halfH, DEMO_STRIDE);
 			Xil_DCacheFlushRange((unsigned int)dest, fullHeight * DEMO_STRIDE);
 			DisplayChangeFrame(&dispCtrl, destIdx);
 			return 1;
 		}
 
-		DemoCopyHalfPlane(g_stripRing[g_stripWrite], g_halfSrc, halfW, halfH, DEMO_STRIDE);
+		DemoCopyPlane(g_stripRing[g_stripWrite], packed, g_halfSrc, packed, halfW, halfH);
 		g_stripWrite = (g_stripWrite + 1U) % DEMO_SHUFFLE_SLOTS;
 		g_ddrFrameCount++;
 		if (g_ddrFrameCount >= g_shuffleHold)
 		{
 			g_ddrRng = (g_ddrRng * 1664525U) + 1013904223U;
 			i = g_ddrRng % DEMO_SHUFFLE_SLOTS;
-			DemoCopyHalfPlane(dest, g_stripRing[i], halfW, halfH, DEMO_STRIDE);
+			DemoCopyPlane(dest, DEMO_STRIDE, g_stripRing[i], packed, halfW, halfH);
 			DemoPixelDoubleInPlace(dest, halfW, halfH, DEMO_STRIDE);
 			Xil_DCacheFlushRange((unsigned int)dest, fullHeight * DEMO_STRIDE);
 			DisplayChangeFrame(&dispCtrl, destIdx);
@@ -1499,14 +1516,14 @@ static int DemoApplyDdrEffect(u8 *dest, int destIdx, u32 halfW, u32 halfH, u32 f
 
 		if (g_ddrInited == 0)
 		{
-			DemoCopyHalfPlane(g_delayPlane, g_halfSrc, halfW, halfH, DEMO_STRIDE);
+			DemoCopyPlane(g_delayPlane, packed, g_halfSrc, packed, halfW, halfH);
 			g_ddrInited = 1;
 		}
 
 		for (y = 0U; y < halfH; y++)
 		{
-			const u8 *l = g_halfSrc + (y * DEMO_STRIDE);
-			const u8 *p = g_delayPlane + (y * DEMO_STRIDE);
+			const u8 *l = g_halfSrc + (y * packed);
+			const u8 *p = g_delayPlane + (y * packed);
 			u8 *d = dest + (y * DEMO_STRIDE);
 
 			for (n = 0U; n < count; n++)
@@ -1525,7 +1542,7 @@ static int DemoApplyDdrEffect(u8 *dest, int destIdx, u32 halfW, u32 halfH, u32 f
 
 		if (vsPrev != 0)
 		{
-			DemoCopyHalfPlane(g_delayPlane, g_halfSrc, halfW, halfH, DEMO_STRIDE);
+			DemoCopyPlane(g_delayPlane, packed, g_halfSrc, packed, halfW, halfH);
 		}
 
 		DemoPixelDoubleInPlace(dest, halfW, halfH, DEMO_STRIDE);
@@ -1551,14 +1568,14 @@ static int DemoApplyDdrEffect(u8 *dest, int destIdx, u32 halfW, u32 halfH, u32 f
 
 		if (g_ddrInited == 0)
 		{
-			DemoCopyHalfPlane(g_delayPlane, g_halfSrc, halfW, halfH, DEMO_STRIDE);
+			DemoCopyPlane(g_delayPlane, packed, g_halfSrc, packed, halfW, halfH);
 			g_ddrInited = 1;
 		}
 
 		for (y = 0U; y < halfH; y++)
 		{
 			u8 *d = dest + (y * DEMO_STRIDE);
-			const u8 *l = g_halfSrc + (y * DEMO_STRIDE);
+			const u8 *l = g_halfSrc + (y * packed);
 
 			for (x = 0U; x < halfW; x++)
 			{
@@ -1570,7 +1587,7 @@ static int DemoApplyDdrEffect(u8 *dest, int destIdx, u32 halfW, u32 halfH, u32 f
 
 				if ((sx >= 0) && (sy >= 0) && ((u32)sx < halfW) && ((u32)sy < halfH))
 				{
-					const u8 *fb = g_delayPlane + ((u32)sy * DEMO_STRIDE) + ((u32)sx * 3U);
+					const u8 *fb = g_delayPlane + ((u32)sy * packed) + ((u32)sx * 3U);
 					fb0 = fb[0];
 					fb1 = fb[1];
 					fb2 = fb[2];
@@ -1584,7 +1601,7 @@ static int DemoApplyDdrEffect(u8 *dest, int destIdx, u32 halfW, u32 halfH, u32 f
 			}
 		}
 
-		DemoCopyHalfPlane(g_delayPlane, dest, halfW, halfH, DEMO_STRIDE);
+		DemoCopyPlane(g_delayPlane, packed, dest, DEMO_STRIDE, halfW, halfH);
 		DemoPixelDoubleInPlace(dest, halfW, halfH, DEMO_STRIDE);
 		Xil_DCacheFlushRange((unsigned int)dest, fullHeight * DEMO_STRIDE);
 		DisplayChangeFrame(&dispCtrl, destIdx);
@@ -1898,7 +1915,7 @@ static int DemoApplyLiveEffectFrame(void)
 
 	halfW = width / DEMO_IN_DECIM;
 	halfH = height / DEMO_IN_DECIM;
-	if ((halfH * DEMO_STRIDE) > sizeof(g_halfSrc))
+	if ((halfH * DemoPackedStride(halfW)) > sizeof(g_halfSrc))
 	{
 		return 0;
 	}
@@ -1910,9 +1927,10 @@ static int DemoApplyLiveEffectFrame(void)
 	{
 		return DemoApplyDdrEffect(pFrames[dest], dest, halfW, halfH, height);
 	}
+	DemoCopyPlane(g_delayPlane, DEMO_STRIDE, g_halfSrc, DemoPackedStride(halfW), halfW, halfH);
 	clearNow = g_liveEffectNeedClear;
 	g_liveEffectNeedClear = 0;
-	if (DemoApplySelectedEffect(g_liveEffectCmd, g_halfSrc, pFrames[dest], halfW, halfH, clearNow) != 0)
+	if (DemoApplySelectedEffect(g_liveEffectCmd, g_delayPlane, pFrames[dest], halfW, halfH, clearNow) != 0)
 	{
 		return 0;
 	}
@@ -3667,15 +3685,20 @@ static void DemoFillRgbRect(u8 *frame, u32 width, u32 height, u32 stride,
 	{
 		rh = height - y0;
 	}
-	for (y = 0U; y < rh; y++)
 	{
-		u8 *p = frame + ((y0 + y) * stride) + (x0 * 3U);
+		u8 *first = frame + (y0 * stride) + (x0 * 3U);
+		u8 *p = first;
+
 		for (x = 0U; x < rw; x++)
 		{
 			p[0] = r;
 			p[1] = g;
 			p[2] = b;
 			p += 3;
+		}
+		for (y = 1U; y < rh; y++)
+		{
+			memcpy(frame + ((y0 + y) * stride) + (x0 * 3U), first, rw * 3U);
 		}
 	}
 }
@@ -3878,15 +3901,20 @@ void DemoColorWashPattern(u8 *frame, u32 width, u32 height, u32 stride, float ti
 	u32 x;
 
 	DemoHueRgb((u32)(time * 8.0f), &r, &g, &b);
-	for (y = 0U; y < height; y++)
 	{
-		u8 *p = frame + (y * stride);
+		u8 *first = frame;
+		u8 *p = first;
+
 		for (x = 0U; x < width; x++)
 		{
 			p[0] = r;
 			p[1] = g;
 			p[2] = b;
 			p += 3;
+		}
+		for (y = 1U; y < height; y++)
+		{
+			memcpy(frame + (y * stride), first, width * 3U);
 		}
 	}
 	Xil_DCacheFlushRange((unsigned int)frame, height * stride);
@@ -3906,20 +3934,39 @@ void DemoSlidingBarPattern(u8 *frame, u32 width, u32 height, u32 stride, float t
 	}
 	shift = ((u32)time * 3U);
 
-	for (y = 0U; y < height; y++)
 	{
-		u8 r;
-		u8 g;
-		u8 b;
-		u8 *p = frame + (y * stride);
+		u8 prevR = 1U;
+		u8 prevG = 0U;
+		u8 prevB = 0U;
+		u8 *prevRow = NULL;
 
-		DemoHueRgb(((y + shift) / bandH) * 180U, &r, &g, &b);
-		for (x = 0U; x < width; x++)
+		for (y = 0U; y < height; y++)
 		{
-			p[0] = r;
-			p[1] = g;
-			p[2] = b;
-			p += 3;
+			u8 r;
+			u8 g;
+			u8 b;
+			u8 *p = frame + (y * stride);
+
+			DemoHueRgb(((y + shift) / bandH) * 180U, &r, &g, &b);
+			if ((prevRow != NULL) && (r == prevR) && (g == prevG) && (b == prevB))
+			{
+				memcpy(p, prevRow, width * 3U);
+			}
+			else
+			{
+				u8 *q = p;
+				for (x = 0U; x < width; x++)
+				{
+					q[0] = r;
+					q[1] = g;
+					q[2] = b;
+					q += 3;
+				}
+			}
+			prevRow = p;
+			prevR = r;
+			prevG = g;
+			prevB = b;
 		}
 	}
 	Xil_DCacheFlushRange((unsigned int)frame, height * stride);
@@ -3964,36 +4011,75 @@ void DemoFastScalePattern(u8 *lowResFrame, u32 lowWidth, u32 lowHeight, u32 lowS
 	u32 srcX, srcY;
 	u32 srcAddr, destAddr;
 	u32 xScale, yScale;
-	
-	// Calculate scaling factors (fixed-point for speed)
-	xScale = (lowWidth << 16) / highWidth;  // Fixed point 16.16
-	yScale = (lowHeight << 16) / highHeight;
-	
-	for(ycoi = 0; ycoi < highHeight; ycoi++)
+
+	if ((lowWidth > 0U) && (lowHeight > 0U) &&
+		((highWidth % lowWidth) == 0U) && ((highHeight % lowHeight) == 0U))
 	{
-		// Calculate source Y coordinate
+		u32 sx = highWidth / lowWidth;
+		u32 sy = highHeight / lowHeight;
+		u32 rowBytes = highWidth * 3U;
+
+		for (srcY = 0U; srcY < lowHeight; srcY++)
+		{
+			const u8 *s = lowResFrame + (srcY * lowStride);
+			u8 *dstRow = highResFrame + ((srcY * sy) * highStride);
+			u8 *d = dstRow;
+			u32 k;
+
+			for (srcX = 0U; srcX < lowWidth; srcX++)
+			{
+				u8 r = s[0];
+				u8 g = s[1];
+				u8 b = s[2];
+
+				s += 3;
+				for (k = 0U; k < sx; k++)
+				{
+					d[0] = r;
+					d[1] = g;
+					d[2] = b;
+					d += 3;
+				}
+			}
+			for (k = 1U; k < sy; k++)
+			{
+				memcpy(dstRow + (k * highStride), dstRow, rowBytes);
+			}
+		}
+		Xil_DCacheFlushRange((unsigned int)highResFrame, highHeight * highStride);
+		return;
+	}
+
+	xScale = (lowWidth << 16) / highWidth;
+	yScale = (lowHeight << 16) / highHeight;
+
+	for (ycoi = 0; ycoi < highHeight; ycoi++)
+	{
 		srcY = (ycoi * yScale) >> 16;
-		if(srcY >= lowHeight) srcY = lowHeight - 1;
-		
+		if (srcY >= lowHeight)
+		{
+			srcY = lowHeight - 1;
+		}
+
 		destAddr = ycoi * highStride;
 		srcAddr = srcY * lowStride;
-		
-		for(xcoi = 0; xcoi < highWidth; xcoi++)
+
+		for (xcoi = 0; xcoi < highWidth; xcoi++)
 		{
-			// Calculate source X coordinate
 			srcX = (xcoi * xScale) >> 16;
-			if(srcX >= lowWidth) srcX = lowWidth - 1;
-			
-			// Copy pixel (RGB)
+			if (srcX >= lowWidth)
+			{
+				srcX = lowWidth - 1;
+			}
+
 			highResFrame[destAddr] = lowResFrame[srcAddr + srcX * 3];
 			highResFrame[destAddr + 1] = lowResFrame[srcAddr + srcX * 3 + 1];
 			highResFrame[destAddr + 2] = lowResFrame[srcAddr + srcX * 3 + 2];
-			
 			destAddr += 3;
 		}
 	}
-	
-	Xil_DCacheFlushRange((unsigned int) highResFrame, highHeight * highStride);
+
+	Xil_DCacheFlushRange((unsigned int)highResFrame, highHeight * highStride);
 }
 
 /*
@@ -4654,32 +4740,89 @@ void Demo3DPlaneEffect(u8 *srcFrame, u8 *destFrame, u32 width, u32 height, u32 s
 void DemoClearFrame(u8 *frame, u32 width, u32 height, u32 stride)
 {
 	u32 ycoi;
-	u32 totalBytes = height * stride;
-	
-	// Optimized: clear entire frame buffer in one pass
-	// Use word-aligned clearing for better performance
-	u32 *frame32 = (u32 *)frame;
-	u32 wordsToClear = totalBytes / 4;
-	
-	// Clear in 32-bit words (much faster)
-	for (u32 i = 0; i < wordsToClear; i++)
+	u32 rowBytes = width * 3U;
+
+	if (stride == rowBytes)
 	{
-		frame32[i] = 0;
+		memset(frame, 0, height * stride);
 	}
-	
-	// Clear remaining bytes (if not word-aligned)
-	u32 remainingBytes = totalBytes % 4;
-	if (remainingBytes > 0)
+	else
 	{
-		u8 *remainingPtr = (u8 *)&frame32[wordsToClear];
-		for (u32 i = 0; i < remainingBytes; i++)
+		for (ycoi = 0U; ycoi < height; ycoi++)
 		{
-			remainingPtr[i] = 0;
+			memset(frame + (ycoi * stride), 0, rowBytes);
 		}
 	}
-	
-	// Flush cache to ensure clearing is visible
-	Xil_DCacheFlushRange((unsigned int) frame, totalBytes);
+
+	Xil_DCacheFlushRange((unsigned int)frame, height * stride);
+}
+
+void DemoBlitSplash(u8 *frame, u32 width, u32 height, u32 stride)
+{
+	u32 scale;
+	u32 destW;
+	u32 destH;
+	u32 x0;
+	u32 y0;
+	u32 sx;
+	u32 sy;
+	u32 k;
+	u32 rowBytes;
+
+	if ((frame == NULL) || (width == 0U) || (height == 0U) || (stride == 0U))
+	{
+		return;
+	}
+
+	DemoClearFrame(frame, width, height, stride);
+
+	scale = width / SPLASH_WIDTH;
+	if ((height / SPLASH_HEIGHT) < scale)
+	{
+		scale = height / SPLASH_HEIGHT;
+	}
+	if (scale < 1U)
+	{
+		scale = 1U;
+	}
+
+	destW = SPLASH_WIDTH * scale;
+	destH = SPLASH_HEIGHT * scale;
+	if ((destW > width) || (destH > height))
+	{
+		return;
+	}
+
+	x0 = (width - destW) / 2U;
+	y0 = (height - destH) / 2U;
+	rowBytes = destW * 3U;
+
+	for (sy = 0U; sy < SPLASH_HEIGHT; sy++)
+	{
+		const u8 *src = splash_bits + (sy * SPLASH_ROW_BYTES);
+		u8 *dst = frame + ((y0 + (sy * scale)) * stride) + (x0 * 3U);
+		u8 *p = dst;
+
+		for (sx = 0U; sx < SPLASH_WIDTH; sx++)
+		{
+			u8 bit = (u8)((src[sx >> 3] >> (7U - (sx & 7U))) & 1U);
+			u8 v = bit ? 0xFFU : 0x00U;
+
+			for (k = 0U; k < scale; k++)
+			{
+				*p++ = v;
+				*p++ = v;
+				*p++ = v;
+			}
+		}
+
+		for (k = 1U; k < scale; k++)
+		{
+			memcpy(dst + (k * stride), dst, rowBytes);
+		}
+	}
+
+	Xil_DCacheFlushRange((unsigned int)frame, height * stride);
 }
 
 /*
