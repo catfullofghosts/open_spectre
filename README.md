@@ -6,38 +6,31 @@ Sorry about the repo disappearing for a while. Had some issues, it's back now.
 [![Donate](https://img.shields.io/badge/Donate-PayPal-green.svg)](https://www.paypal.com/donate/?hosted_button_id=LSMYWSM7M7EEA)
 Open to donations and contributors with FPGA experience.
 
-> Synthesiser is a unique and revolutionary new product: an instrument capable of producing exciting graphic images on an ordinary television screen. The complete SPECTRE package consists of the synthesiser itself, plus a Sony Trinitron colour monitor and a Sony black-and-white TV camera. The synthesiser was compact (38"x23.5"x7"), portable (about 35 pounds/15.9KG), and unequalled in its simplicity and versatility.
+> The EMS Sprectre video synthesiser was a unique and revolutionary product for its time (late 1970's): an instrument capable of producing exciting graphic images on an ordinary television screen. The complete SPECTRE package consists of the synthesiser itself, plus a Sony Trinitron colour monitor and a Sony black-and-white TV camera. The synthesiser was compact (38"x23.5"x7"), portable (about 35 pounds/15.9KG), and unequalled in its simplicity and versatility.
 
 ![EMS SPECTRE](/Spectron%20Resources/Product%20Photos/spectre1.jpg)
 
-## Status (Arty Z7-20)
+## Status (on an Arty Z7-20)
 
-`overall progress  ████████░░  it runs, still lots of little things to do`
+`overall progress is: it runs!, but still lots of little things to do`
 
 | block | state | notes |
 | --- | --- | --- |
-| HDMI in / out | done* | Digilent Arty Z7-20, In has a bug |
+| HDMI in / out | done | Digilent Arty Z7-20, input works! output is at 720P |
 | digital matrix | done |  |
-| analog matrix | done | signed mix still to do, is unsigned atm |
-| oscillators | done | vert sync still a bit blocky |
+| analog matrix | done | need to merge signed branch in. |
+| oscillators | done | vert sync still a bit blocky, why? |
 | shape gen | wip | needs compare with original|
 | colour encode | done | |
 | audio in | wip | working, but needs propper testing|
-| Vitis test software | done | used to test frambuffer, video in, ect |
+| Vitis test software | done | video in works, frame buffer works, midi parsing works |
+| Pico Based midi usb in | done | is just a bridge (computer -> pico (usb midi) -> uart -> zynq |
 | hardware interface | not started | still software controlled |
-
-```
-digital       [██████████]
-analog        [████████░░]
-shapes        [██████░░░░]
-audio         [███████░░░]
-HW interface  [░░░░░░░░░░]
-```
 
 ## Aim
 
-Recreate the SPECTRE in HDL so it can still make the pictures it was meant to make. Then keep going in the same spirit, not as a museum copy.
-The idea is preservation, but not at the cost of 
+Recreate the SPECTRE in HDL so it can stay true to the original design. Then expand on the design in the same spirit as the original.
+The idea is preservation, but not at the cost of usability and modern quality of life things (like digital video in and out, or MIDI control)
 
 More on that: [Cloning Hardware Ethos](documentation/Cloning%20a%20process%20not%20a%20device.md)
 
