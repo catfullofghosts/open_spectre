@@ -163,7 +163,7 @@ entity digital_reg_file is
     video_fx_dither   : out std_logic_vector(31 downto 0);
     video_fx_mirror   : out std_logic_vector(31 downto 0);
     video_fx_chromatic : out std_logic_vector(31 downto 0);
-    video_fx_sharpness : out std_logic_vector(31 downto 0);
+    video_fx_emboss    : out std_logic_vector(31 downto 0);
     -- Overlay sprites (shared BRAM atlas, up to C_NUM_SPRITES slots)
     overlay_global_en : out std_logic;
     overlay_block_div : out std_logic_vector(2 downto 0); -- 0=/1 1=/2 2=/4 3=/8 4=/16
@@ -333,7 +333,7 @@ architecture RTL of digital_reg_file is
   signal video_fx_dither_i   : std_logic_vector(31 downto 0) := (others => '0'); -- dither bypass
   signal video_fx_mirror_i   : std_logic_vector(31 downto 0) := x"000002D0"; -- half=360px, disabled
   signal video_fx_chromatic_i : std_logic_vector(31 downto 0) := (others => '0');
-  signal video_fx_sharpness_i : std_logic_vector(31 downto 0) := (others => '0');
+  signal video_fx_emboss_i    : std_logic_vector(31 downto 0) := (others => '0');
   signal overlay_global_en_i : std_logic := '0';
   signal overlay_block_div_i : std_logic_vector(2 downto 0) := "000";
   signal overlay_sprites_i   : t_sprite_array := (others => (
@@ -448,8 +448,8 @@ begin
   regs(ra(x"F0")) <= video_fx_mirror_i;
   -- Chromatic aberration: [0]=en, [3:1]=G delay, [6:4]=B delay (0-5 px)
   regs(ra(x"F4")) <= video_fx_chromatic_i;
-  -- Sharpness/blur: [0]=en, [1]=mode (0=blur 1=sharp), [15:8]=strength
-  regs(ra(x"F8")) <= video_fx_sharpness_i;
+  -- Emboss/shadow: [0]=emboss [1]=shadow [15:8]=threshold [23:16]=strength
+  regs(ra(x"F8")) <= video_fx_emboss_i;
   -- Overlay master enable
   regs(ra(x"FC")) <= "0000000000000000000000000000" & overlay_block_div_i & overlay_global_en_i;
 
@@ -709,7 +709,7 @@ begin
           when x"F4" =>
             video_fx_chromatic_i <= write_reg;
           when x"F8" =>
-            video_fx_sharpness_i <= write_reg;
+            video_fx_emboss_i <= write_reg;
           when x"7C" =>
             classic_mode_i <= write_reg(3 downto 0);
             -- [0]=EMS DAC [1]=X delays [2]=4:3 mask [3]=luma+25
@@ -837,7 +837,7 @@ begin
   video_fx_dither   <= video_fx_dither_i;
   video_fx_mirror   <= video_fx_mirror_i;
   video_fx_chromatic <= video_fx_chromatic_i;
-  video_fx_sharpness <= video_fx_sharpness_i;
+  video_fx_emboss <= video_fx_emboss_i;
 
   overlay_global_en <= overlay_global_en_i;
   overlay_block_div <= overlay_block_div_i;

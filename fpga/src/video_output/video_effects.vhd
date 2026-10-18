@@ -4,7 +4,7 @@ use ieee.numeric_std.all;
 
 -- Pipeline (registered stages for timing):
 --   color stage1/2 (+2) -> mirror BRAM (+1) -> logic prev (+1)
---   -> chromatic (+1) -> sharpness (+3 when enabled, +0 bypass)
+--   -> chromatic (+1) -> emboss/shadow (+2)
 -- video_in / video_out packing: B(23:16) & G(15:8) & R(7:0) — matches spector_wrapper bg path.
 --
 -- video_fx_ctrl bit map:
@@ -37,10 +37,11 @@ use ieee.numeric_std.all;
 --   [3:1]  green delay 0-5 pixels
 --   [6:4]  blue delay 0-5 pixels (red undelayed)
 --
--- video_fx_sharpness @ 0xF8 — horizontal 3-tap blur/sharpen on luma:
---   [0]    1=enable
---   [1]    0=blur, 1=sharpen
---   [15:8] strength 0-255
+-- video_fx_emboss @ 0xF8 — horizontal luma edge relief:
+--   [0]     1=emboss (rising luma: brighten 5 px)
+--   [1]     1=shadow (falling luma: darken 5 px)
+--   [15:8]  delta threshold (0 = default 32)
+--   [23:16] add/sub strength (0 = default 80)
 
 entity video_effects is
   port (
@@ -54,14 +55,15 @@ entity video_effects is
     fx_dither       : in  std_logic_vector(31 downto 0);
     fx_mirror       : in  std_logic_vector(31 downto 0);
     fx_chromatic    : in  std_logic_vector(31 downto 0);
-    fx_sharpness    : in  std_logic_vector(31 downto 0);
+    fx_emboss       : in  std_logic_vector(31 downto 0);
     video_out       : out std_logic_vector(23 downto 0)
   );
 end entity video_effects;
 
 architecture rtl of video_effects is
 
-  constant C_MAX_HALF : positive := 512;
+  -- 960 covers 1080p half-line (1920/2). One BRAM36.
+  constant C_MAX_HALF : positive := 960;
 
   type t_half_line_buf is array (0 to C_MAX_HALF - 1) of std_logic_vector(23 downto 0);
 
@@ -70,7 +72,7 @@ architecture rtl of video_effects is
   signal fx_dither_r   : std_logic_vector(31 downto 0);
   signal fx_mirror_r    : std_logic_vector(31 downto 0);
   signal fx_chromatic_r : std_logic_vector(31 downto 0);
-  signal fx_sharpness_r : std_logic_vector(31 downto 0);
+  signal fx_emboss_r    : std_logic_vector(31 downto 0);
 
   signal de_active : std_logic;
 
@@ -106,9 +108,9 @@ architecture rtl of video_effects is
   signal r_chrom      : std_logic_vector(7 downto 0);
   signal g_chrom      : std_logic_vector(7 downto 0);
   signal b_chrom      : std_logic_vector(7 downto 0);
-  signal r_sharp      : std_logic_vector(7 downto 0);
-  signal g_sharp      : std_logic_vector(7 downto 0);
-  signal b_sharp      : std_logic_vector(7 downto 0);
+  signal r_edge       : std_logic_vector(7 downto 0);
+  signal g_edge       : std_logic_vector(7 downto 0);
+  signal b_edge       : std_logic_vector(7 downto 0);
 
   function f_reverse_byte (b : std_logic_vector(7 downto 0)) return std_logic_vector is
     variable v : std_logic_vector(7 downto 0);
@@ -229,7 +231,7 @@ begin
       fx_dither_r   <= fx_dither;
       fx_mirror_r    <= fx_mirror;
       fx_chromatic_r <= fx_chromatic;
-      fx_sharpness_r <= fx_sharpness;
+      fx_emboss_r    <= fx_emboss;
 
       if rst = '1' then
         line_odd <= '0';
@@ -393,28 +395,25 @@ begin
       de_out    => open
     );
 
-  sharpness_inst : entity work.sharpness_effect
+  emboss_shadow_inst : entity work.emboss_shadow_effect
     port map (
-      clk       => clk,
-      rst       => rst,
-      enable    => fx_sharpness_r(0),
-      mode      => fx_sharpness_r(1),
-      strength  => fx_sharpness_r(15 downto 8),
-      r_in      => r_chrom,
-      g_in      => g_chrom,
-      b_in      => b_chrom,
-      hsync_in  => h_sync,
-      vsync_in  => v_sync,
-      de_in     => de_active,
-      r_out     => r_sharp,
-      g_out     => g_sharp,
-      b_out     => b_sharp,
-      hsync_out => open,
-      vsync_out => open,
-      de_out    => open
+      clk        => clk,
+      rst        => rst,
+      emboss_en  => fx_emboss_r(0),
+      shadow_en  => fx_emboss_r(1),
+      threshold  => fx_emboss_r(15 downto 8),
+      strength   => fx_emboss_r(23 downto 16),
+      r_in       => r_chrom,
+      g_in       => g_chrom,
+      b_in       => b_chrom,
+      hsync_in   => h_sync,
+      de_in      => de_active,
+      r_out      => r_edge,
+      g_out      => g_edge,
+      b_out      => b_edge
     );
 
-  pixel_filtered <= b_sharp & g_sharp & r_sharp;
+  pixel_filtered <= b_edge & g_edge & r_edge;
 
   p_output : process (clk) is
   begin

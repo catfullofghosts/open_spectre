@@ -291,10 +291,11 @@ architecture rtl of spector_wrapper_zynq is
   signal u_analog : std_logic_vector(7 downto 0);
   signal v_analog : std_logic_vector(7 downto 0);
 
-  -- Align H/V/SOF with video_pre_fx path (encoder mode):
+  -- Align H/V/SOF with video_fx_out path (encoder mode):
   -- dirt(1) + color_mult(3) + encoder_out(1) + bg_regs(3) + pre_fx(1) = 9
-  -- Pipe length 8 + registered MSB tap = 9 cycles.
-  constant C_OUT_PIPE_LAT : natural := 8;
+  -- fx: color(2)+mirror(1)+logic(1)+chromatic(1)+emboss(2)+out(1) = 8
+  -- total 17. Pipe length 16 + registered MSB tap = 17 cycles.
+  constant C_OUT_PIPE_LAT : natural := 16;
   signal h_sync_pipe : std_logic_vector(C_OUT_PIPE_LAT - 1 downto 0) := (others => '0');
   signal v_sync_pipe : std_logic_vector(C_OUT_PIPE_LAT - 1 downto 0) := (others => '0');
   signal sof_pipe    : std_logic_vector(C_OUT_PIPE_LAT - 1 downto 0) := (others => '0');
@@ -358,7 +359,7 @@ architecture rtl of spector_wrapper_zynq is
   signal video_fx_dither    : std_logic_vector(31 downto 0);
   signal video_fx_mirror    : std_logic_vector(31 downto 0);
   signal video_fx_chromatic : std_logic_vector(31 downto 0);
-  signal video_fx_sharpness : std_logic_vector(31 downto 0);
+  signal video_fx_emboss    : std_logic_vector(31 downto 0);
   signal overlay_global_en  : std_logic;
   signal overlay_block_div  : std_logic_vector(2 downto 0);
   signal overlay_sprites      : t_sprite_array;
@@ -620,7 +621,7 @@ begin
       video_fx_dither     => video_fx_dither,
       video_fx_mirror     => video_fx_mirror,
       video_fx_chromatic  => video_fx_chromatic,
-      video_fx_sharpness  => video_fx_sharpness,
+      video_fx_emboss     => video_fx_emboss,
       overlay_global_en   => overlay_global_en,
       overlay_block_div   => overlay_block_div,
       overlay_sprites     => overlay_sprites,
@@ -1209,24 +1210,23 @@ begin
     end if;
   end process;
 
---  video_effects_inst : entity work.video_effects
---    port map (
---      clk       => pix_clk,
---      rst       => reset,
---      h_sync    => h_sync,
---      v_sync    => v_sync,
---      video_in  => video_pre_fx,
---      fx_ctrl      => video_fx_ctrl,
---      fx_bitplane  => video_fx_bitplane,
---      fx_dither    => video_fx_dither,
---      fx_mirror    => video_fx_mirror,
---      fx_chromatic => video_fx_chromatic,
---      fx_sharpness => video_fx_sharpness,
---      video_out    => video_fx_out
---    );
+  video_effects_inst : entity work.video_effects
+    port map (
+      clk          => pix_clk,
+      rst          => reset,
+      h_sync       => h_sync_n,
+      v_sync       => v_sync_n,
+      video_in     => video_pre_fx,
+      fx_ctrl      => video_fx_ctrl,
+      fx_bitplane  => video_fx_bitplane,
+      fx_dither    => video_fx_dither,
+      fx_mirror    => video_fx_mirror,
+      fx_chromatic => video_fx_chromatic,
+      fx_emboss    => video_fx_emboss,
+      video_out    => video_fx_out
+    );
 
-video_out <= video_pre_fx;
--- video_out <= video_fx_out;
+  video_out <= video_fx_out;
 
 --  frame_video_stats_inst : entity work.frame_video_stats
 --    generic map (

@@ -31,6 +31,7 @@
 #include "xil_types.h"
 #include "display_ctrl/display_ctrl.h"
 #include "video_capture/video_capture.h"
+#include "live_video_fx.h"
 
 /* ------------------------------------------------------------ */
 /*					Miscellaneous Declarations					*/
@@ -120,14 +121,14 @@ void DemoBlitSplash(u8 *frame, u32 width, u32 height, u32 stride);
 void DemoShrinkRandomEffect(u8 *srcFrame, u8 *destFrame, u32 srcWidth, u32 srcHeight, u32 destWidth, u32 destHeight, u32 stride);
 void DemoRunAnimated3DEffect(u8 *srcFrame, u8 **pFrames, u32 srcFrameIdx, u32 srcWidth, u32 srcHeight, u32 srcStride, u32 destWidth, u32 destHeight, char axis, float scale, DisplayCtrl *dispCtrl, VideoCapture *videoCapt);
 
-/* Effect type definitions */
-#define DEMO_MIRROR_NONE 0
-#define DEMO_MIRROR_HORIZONTAL 1
-#define DEMO_MIRROR_VERTICAL 2
-#define DEMO_MIRROR_BOTH 3
-#define DEMO_MIRROR_CENTER_X 4
-#define DEMO_MIRROR_CENTER_Y 5
-#define DEMO_MIRROR_CENTER_XY 6
+/* Effect type definitions (same values as live_video_fx.h) */
+#define DEMO_MIRROR_NONE LIVE_FX_MIRROR_OFF
+#define DEMO_MIRROR_HORIZONTAL LIVE_FX_MIRROR_H
+#define DEMO_MIRROR_VERTICAL LIVE_FX_MIRROR_V
+#define DEMO_MIRROR_BOTH LIVE_FX_MIRROR_BOTH
+#define DEMO_MIRROR_CENTER_X LIVE_FX_MIRROR_CENTER_X
+#define DEMO_MIRROR_CENTER_Y LIVE_FX_MIRROR_CENTER_Y
+#define DEMO_MIRROR_CENTER_XY LIVE_FX_MIRROR_CENTER_XY
 
 /* ------------------------------------------------------------ */
 

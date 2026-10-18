@@ -42,6 +42,7 @@
 #include "xparameters.h"
 #include "midi_uart/midi_uart.h"
 #include "splash.h"
+#include "live_video_fx.h"
 
 /* ------------------------------------------------------------ */
 /*				Math Function Approximations					*/
@@ -345,6 +346,7 @@ static int DemoApplyDdrEffect(u8 *dest, int destIdx, u32 halfW, u32 halfH, u32 f
 static int DemoApplySlitEffect(const u8 *src, u32 width, u32 height);
 static int DemoApplySpeckleEffect(const u8 *src, u32 width, u32 height);
 static int DemoApplyRandomTileEffect(const u8 *src, u32 width, u32 height);
+static int DemoApplyFilmStripEffect(const u8 *src, u32 width, u32 height);
 
 /*
  * Framebuffers for video data
@@ -352,28 +354,19 @@ static int DemoApplyRandomTileEffect(const u8 *src, u32 width, u32 height);
 u8 frameBuf[DISPLAY_NUM_FRAMES][DEMO_MAX_FRAME] __attribute__((aligned(0x20)));
 u8 *pFrames[DISPLAY_NUM_FRAMES]; //array of pointers to the frame buffers
 static u8 g_halfSrc[DEMO_MAX_FRAME / 2U] __attribute__((aligned(0x20)));
-#define DEMO_STRIP_SLOTS 8U
-#define DEMO_FILM_SLOTS 4U
-#define DEMO_SHUFFLE_SLOTS 8U
 static u8 g_delayPlane[DEMO_MAX_FRAME / 2U] __attribute__((aligned(0x20)));
-static u8 g_stripRing[DEMO_STRIP_SLOTS][DEMO_MAX_FRAME / 2U] __attribute__((aligned(0x20)));
-static u32 g_ddrFrameCount = 0U;
 static u32 g_strobeInterval = 4U;
 static u32 g_feedbackAmt = 160U;
-static u32 g_stripInterval = 8U;
-static u32 g_stripWrite = 0U;
+static u32 g_filmTiles = 4U;
 static int g_ddrInited = 0;
 static u32 g_slitChunk = 20U;
-static u32 g_slitIndex = 0U;
 static int g_slitDestIdx = 0;
 static u32 g_specklePct = 30U;
-static u32 g_speckleRng = 1U;
 static u32 g_tileSize = 16U;
 static u32 g_shuffleHold = 1U;
 static u32 g_diffMode = 0U;
 static u32 g_tunnelZoomQ8 = 269U;
 static u32 g_tunnelMix = 200U;
-static u32 g_ddrRng = 1U;
 
 /*
  * Interrupt vector table
@@ -1154,19 +1147,16 @@ static int DemoIsParkedDdrEffect(char cmd)
 {
 	return (DemoIsSlitEffect(cmd) ||
 		(cmd == 'z') || (cmd == 'Z') ||
-		(cmd == 'v') || (cmd == 'V'));
+		(cmd == 'v') || (cmd == 'V') ||
+		(cmd == 'u') || (cmd == 'U'));
 }
 
 static void DemoResetDdrEffectState(void)
 {
-	g_ddrFrameCount = 0U;
-	g_stripWrite = 0U;
 	g_ddrInited = 0;
-	g_slitIndex = 0U;
 	g_slitDestIdx = 0;
-	g_speckleRng = 1U;
-	g_ddrRng = 1U;
 	memset(g_delayPlane, 0, sizeof(g_delayPlane));
+	LiveFxReset();
 }
 
 static void DemoCopyPlane(u8 *dst, u32 dstStride, const u8 *src, u32 srcStride, u32 width, u32 height)
@@ -1183,40 +1173,6 @@ static void DemoCopyPlane(u8 *dst, u32 dstStride, const u8 *src, u32 srcStride, 
 	for (y = 0U; y < height; y++)
 	{
 		memcpy(dst + (y * dstStride), src + (y * srcStride), rowBytes);
-	}
-}
-
-static void DemoBlendHalfPlane(u8 *dst, u32 dstStride, const u8 *live, const u8 *prev,
-	u32 packedStride, u32 halfW, u32 halfH, u32 feedback)
-{
-	u32 liveAmt = 256U - feedback;
-	u32 y;
-	u32 n;
-	u32 count = halfW * 3U;
-
-	for (y = 0U; y < halfH; y++)
-	{
-		const u8 *l = live + (y * packedStride);
-		const u8 *p = prev + (y * packedStride);
-		u8 *d = dst + (y * dstStride);
-
-		for (n = 0U; n < count; n++)
-		{
-			d[n] = (u8)((((u32)l[n] * liveAmt) + ((u32)p[n] * feedback)) >> 8);
-		}
-	}
-}
-
-static void DemoBlitHalfToQuad(u8 *dest, u32 destStride, const u8 *src, u32 srcStride,
-	u32 halfW, u32 halfH, u32 qx, u32 qy)
-{
-	u32 y;
-	u32 rowBytes = halfW * 3U;
-	u8 *d = dest + ((qy * halfH) * destStride) + (qx * halfW * 3U);
-
-	for (y = 0U; y < halfH; y++)
-	{
-		memcpy(d + (y * destStride), src + (y * srcStride), rowBytes);
 	}
 }
 
@@ -1264,23 +1220,20 @@ static void DemoCycleDdrEffectParam(char cmd)
 	}
 	else if ((cmd == 'u') || (cmd == 'U'))
 	{
-		if (g_stripInterval <= 3U)
+		if (g_filmTiles <= 4U)
 		{
-			g_stripInterval = 8U;
+			g_filmTiles = 9U;
 		}
-		else if (g_stripInterval <= 8U)
+		else if (g_filmTiles <= 9U)
 		{
-			g_stripInterval = 16U;
-		}
-		else if (g_stripInterval <= 16U)
-		{
-			g_stripInterval = 30U;
+			g_filmTiles = 16U;
 		}
 		else
 		{
-			g_stripInterval = 3U;
+			g_filmTiles = 4U;
 		}
-		xil_printf("\n\rFilm-strip grab = every %u frames\r\n", (unsigned)g_stripInterval);
+		g_ddrInited = 0;
+		xil_printf("\n\rFilm-strip tiles = %u\r\n", (unsigned)g_filmTiles);
 	}
 	else if (DemoIsSlitEffect(cmd))
 	{
@@ -1296,7 +1249,6 @@ static void DemoCycleDdrEffectParam(char cmd)
 		{
 			g_slitChunk = 10U;
 		}
-		g_slitIndex = 0U;
 		xil_printf("\n\rSlit chunk = %u pixels\r\n", (unsigned)g_slitChunk);
 	}
 	else if ((cmd == 'z') || (cmd == 'Z'))
@@ -1405,224 +1357,49 @@ static void DemoCycleDdrEffectParam(char cmd)
 
 static int DemoApplyDdrEffect(u8 *dest, int destIdx, u32 halfW, u32 halfH, u32 fullHeight)
 {
-	u32 i;
-	u32 packed = DemoPackedStride(halfW);
 	char cmd = g_liveEffectCmd;
+	int wrote = 1;
 
 	if ((cmd == 'r') || (cmd == 'R'))
 	{
-		g_ddrFrameCount++;
-		if ((g_ddrInited == 0) || (g_ddrFrameCount >= g_strobeInterval))
-		{
-			DemoCopyPlane(g_delayPlane, packed, g_halfSrc, packed, halfW, halfH);
-			DemoCopyPlane(dest, DEMO_STRIDE, g_delayPlane, packed, halfW, halfH);
-			DemoPixelDoubleInPlace(dest, halfW, halfH, DEMO_STRIDE);
-			Xil_DCacheFlushRange((unsigned int)dest, fullHeight * DEMO_STRIDE);
-			DisplayChangeFrame(&dispCtrl, destIdx);
-			g_ddrFrameCount = 0U;
-			g_ddrInited = 1;
-		}
-		return 1;
+		wrote = LiveFxStrobe(g_halfSrc, dest, DEMO_STRIDE, halfW, halfH, g_strobeInterval);
+	}
+	else if ((cmd == 's') || (cmd == 'S'))
+	{
+		LiveFxFeedback(g_halfSrc, dest, DEMO_STRIDE, halfW, halfH, g_feedbackAmt);
+	}
+	else if (cmd == ',')
+	{
+		wrote = LiveFxShuffle(g_halfSrc, dest, DEMO_STRIDE, halfW, halfH, g_shuffleHold);
+	}
+	else if (cmd == '-')
+	{
+		LiveFxDifference(g_halfSrc, dest, DEMO_STRIDE, halfW, halfH, (int)g_diffMode);
+	}
+	else if (cmd == '/')
+	{
+		LiveFxTunnel(g_halfSrc, dest, DEMO_STRIDE, halfW, halfH, g_tunnelZoomQ8, g_tunnelMix);
+	}
+	else
+	{
+		return 0;
 	}
 
-	if ((cmd == 's') || (cmd == 'S'))
+	if (wrote != 0)
 	{
-		if (g_ddrInited == 0)
-		{
-			DemoCopyPlane(g_delayPlane, packed, g_halfSrc, packed, halfW, halfH);
-			g_ddrInited = 1;
-		}
-		DemoBlendHalfPlane(dest, DEMO_STRIDE, g_halfSrc, g_delayPlane, packed, halfW, halfH, g_feedbackAmt);
-		DemoCopyPlane(g_delayPlane, packed, dest, DEMO_STRIDE, halfW, halfH);
-		DemoPixelDoubleInPlace(dest, halfW, halfH, DEMO_STRIDE);
+		LiveFxPixelDoubleInPlace(dest, halfW, halfH, DEMO_STRIDE);
 		Xil_DCacheFlushRange((unsigned int)dest, fullHeight * DEMO_STRIDE);
 		DisplayChangeFrame(&dispCtrl, destIdx);
-		return 1;
 	}
-
-	if ((cmd == 'u') || (cmd == 'U'))
-	{
-		if (g_ddrInited == 0)
-		{
-			for (i = 0U; i < DEMO_FILM_SLOTS; i++)
-			{
-				DemoCopyPlane(g_stripRing[i], packed, g_halfSrc, packed, halfW, halfH);
-			}
-			g_stripWrite = 0U;
-			g_ddrInited = 1;
-			g_ddrFrameCount = 0U;
-		}
-		else
-		{
-			g_ddrFrameCount++;
-			if (g_ddrFrameCount >= g_stripInterval)
-			{
-				DemoCopyPlane(g_stripRing[g_stripWrite], packed, g_halfSrc, packed, halfW, halfH);
-				g_stripWrite = (g_stripWrite + 1U) % DEMO_FILM_SLOTS;
-				g_ddrFrameCount = 0U;
-			}
-		}
-
-		DemoBlitHalfToQuad(dest, DEMO_STRIDE, g_stripRing[0], packed, halfW, halfH, 0U, 0U);
-		DemoBlitHalfToQuad(dest, DEMO_STRIDE, g_stripRing[1], packed, halfW, halfH, 1U, 0U);
-		DemoBlitHalfToQuad(dest, DEMO_STRIDE, g_stripRing[2], packed, halfW, halfH, 0U, 1U);
-		DemoBlitHalfToQuad(dest, DEMO_STRIDE, g_stripRing[3], packed, halfW, halfH, 1U, 1U);
-		Xil_DCacheFlushRange((unsigned int)dest, fullHeight * DEMO_STRIDE);
-		DisplayChangeFrame(&dispCtrl, destIdx);
-		return 1;
-	}
-
-	if (cmd == ',')
-	{
-		if (g_ddrInited == 0)
-		{
-			for (i = 0U; i < DEMO_SHUFFLE_SLOTS; i++)
-			{
-				DemoCopyPlane(g_stripRing[i], packed, g_halfSrc, packed, halfW, halfH);
-			}
-			g_stripWrite = 0U;
-			g_ddrFrameCount = 0U;
-			g_ddrInited = 1;
-			DemoCopyPlane(dest, DEMO_STRIDE, g_stripRing[0], packed, halfW, halfH);
-			DemoPixelDoubleInPlace(dest, halfW, halfH, DEMO_STRIDE);
-			Xil_DCacheFlushRange((unsigned int)dest, fullHeight * DEMO_STRIDE);
-			DisplayChangeFrame(&dispCtrl, destIdx);
-			return 1;
-		}
-
-		DemoCopyPlane(g_stripRing[g_stripWrite], packed, g_halfSrc, packed, halfW, halfH);
-		g_stripWrite = (g_stripWrite + 1U) % DEMO_SHUFFLE_SLOTS;
-		g_ddrFrameCount++;
-		if (g_ddrFrameCount >= g_shuffleHold)
-		{
-			g_ddrRng = (g_ddrRng * 1664525U) + 1013904223U;
-			i = g_ddrRng % DEMO_SHUFFLE_SLOTS;
-			DemoCopyPlane(dest, DEMO_STRIDE, g_stripRing[i], packed, halfW, halfH);
-			DemoPixelDoubleInPlace(dest, halfW, halfH, DEMO_STRIDE);
-			Xil_DCacheFlushRange((unsigned int)dest, fullHeight * DEMO_STRIDE);
-			DisplayChangeFrame(&dispCtrl, destIdx);
-			g_ddrFrameCount = 0U;
-		}
-		return 1;
-	}
-
-	if (cmd == '-')
-	{
-		u32 y;
-		u32 n;
-		u32 count = halfW * 3U;
-		int useXor = ((g_diffMode & 1U) != 0U);
-		int vsPrev = (g_diffMode >= 2U);
-
-		if (g_ddrInited == 0)
-		{
-			DemoCopyPlane(g_delayPlane, packed, g_halfSrc, packed, halfW, halfH);
-			g_ddrInited = 1;
-		}
-
-		for (y = 0U; y < halfH; y++)
-		{
-			const u8 *l = g_halfSrc + (y * packed);
-			const u8 *p = g_delayPlane + (y * packed);
-			u8 *d = dest + (y * DEMO_STRIDE);
-
-			for (n = 0U; n < count; n++)
-			{
-				if (useXor != 0)
-				{
-					d[n] = (u8)(l[n] ^ p[n]);
-				}
-				else
-				{
-					int v = (int)l[n] - (int)p[n];
-					d[n] = (u8)((v < 0) ? -v : v);
-				}
-			}
-		}
-
-		if (vsPrev != 0)
-		{
-			DemoCopyPlane(g_delayPlane, packed, g_halfSrc, packed, halfW, halfH);
-		}
-
-		DemoPixelDoubleInPlace(dest, halfW, halfH, DEMO_STRIDE);
-		Xil_DCacheFlushRange((unsigned int)dest, fullHeight * DEMO_STRIDE);
-		DisplayChangeFrame(&dispCtrl, destIdx);
-		return 1;
-	}
-
-	if (cmd == '/')
-	{
-		u32 y;
-		u32 x;
-		int cx = (int)(halfW / 2U);
-		int cy = (int)(halfH / 2U);
-		u32 liveAmt;
-		u32 fbAmt = g_tunnelMix;
-
-		if (fbAmt > 256U)
-		{
-			fbAmt = 256U;
-		}
-		liveAmt = 256U - fbAmt;
-
-		if (g_ddrInited == 0)
-		{
-			DemoCopyPlane(g_delayPlane, packed, g_halfSrc, packed, halfW, halfH);
-			g_ddrInited = 1;
-		}
-
-		for (y = 0U; y < halfH; y++)
-		{
-			u8 *d = dest + (y * DEMO_STRIDE);
-			const u8 *l = g_halfSrc + (y * packed);
-
-			for (x = 0U; x < halfW; x++)
-			{
-				int sx = (((((int)x - cx) * (int)g_tunnelZoomQ8) >> 8) + cx);
-				int sy = (((((int)y - cy) * (int)g_tunnelZoomQ8) >> 8) + cy);
-				u8 fb0 = 0U;
-				u8 fb1 = 0U;
-				u8 fb2 = 0U;
-
-				if ((sx >= 0) && (sy >= 0) && ((u32)sx < halfW) && ((u32)sy < halfH))
-				{
-					const u8 *fb = g_delayPlane + ((u32)sy * packed) + ((u32)sx * 3U);
-					fb0 = fb[0];
-					fb1 = fb[1];
-					fb2 = fb[2];
-				}
-
-				d[0] = (u8)((((u32)l[0] * liveAmt) + ((u32)fb0 * fbAmt)) >> 8);
-				d[1] = (u8)((((u32)l[1] * liveAmt) + ((u32)fb1 * fbAmt)) >> 8);
-				d[2] = (u8)((((u32)l[2] * liveAmt) + ((u32)fb2 * fbAmt)) >> 8);
-				d += 3;
-				l += 3;
-			}
-		}
-
-		DemoCopyPlane(g_delayPlane, packed, dest, DEMO_STRIDE, halfW, halfH);
-		DemoPixelDoubleInPlace(dest, halfW, halfH, DEMO_STRIDE);
-		Xil_DCacheFlushRange((unsigned int)dest, fullHeight * DEMO_STRIDE);
-		DisplayChangeFrame(&dispCtrl, destIdx);
-		return 1;
-	}
-
-	return 0;
+	return 1;
 }
 
 static int DemoApplySlitEffect(const u8 *src, u32 width, u32 height)
 {
 	u8 *dest;
 	u32 chunk;
-	u32 maxSlots;
-	u32 slot;
-	u32 copyW;
-	u32 copyH;
-	u32 y;
-	u32 row;
-	u32 srcY0;
 	char cmd = g_liveEffectCmd;
+	int mode;
 
 	chunk = g_slitChunk;
 	if (chunk == 0U)
@@ -1636,78 +1413,27 @@ static int DemoApplySlitEffect(const u8 *src, u32 width, u32 height)
 		memset(pFrames[g_slitDestIdx], 0, height * DEMO_STRIDE);
 		Xil_DCacheFlushRange((unsigned int)pFrames[g_slitDestIdx], height * DEMO_STRIDE);
 		DisplayChangeFrame(&dispCtrl, g_slitDestIdx);
-		g_slitIndex = 0U;
 		g_ddrInited = 1;
 	}
 
 	dest = pFrames[g_slitDestIdx];
-
 	if ((cmd == 'w') || (cmd == 'W'))
 	{
-		maxSlots = (width + chunk - 1U) / chunk;
-		if (g_slitIndex >= maxSlots)
-		{
-			g_slitIndex = 0U;
-		}
-		slot = g_slitIndex * chunk;
-		copyW = chunk;
-		if ((slot + copyW) > width)
-		{
-			copyW = width - slot;
-		}
-		for (y = 0U; y < height; y++)
-		{
-			memcpy(dest + (y * DEMO_STRIDE) + (slot * 3U),
-				src + (y * DEMO_STRIDE) + (slot * 3U),
-				copyW * 3U);
-		}
-		g_slitIndex++;
+		mode = LIVE_FX_SLIT_COLUMNS;
 	}
 	else if ((cmd == 'x') || (cmd == 'X'))
 	{
-		maxSlots = (height + chunk - 1U) / chunk;
-		if (g_slitIndex >= maxSlots)
-		{
-			g_slitIndex = 0U;
-		}
-		slot = g_slitIndex * chunk;
-		copyH = chunk;
-		if ((slot + copyH) > height)
-		{
-			copyH = height - slot;
-		}
-		for (y = 0U; y < copyH; y++)
-		{
-			memcpy(dest + ((slot + y) * DEMO_STRIDE),
-				src + ((slot + y) * DEMO_STRIDE),
-				width * 3U);
-		}
-		g_slitIndex++;
+		mode = LIVE_FX_SLIT_ROWS;
 	}
 	else if ((cmd == 'y') || (cmd == 'Y'))
 	{
-		srcY0 = (height > chunk) ? ((height - chunk) / 2U) : 0U;
-		for (slot = 0U; slot < height; slot += chunk)
-		{
-			copyH = chunk;
-			if ((slot + copyH) > height)
-			{
-				copyH = height - slot;
-			}
-			for (row = 0U; row < copyH; row++)
-			{
-				memcpy(dest + ((slot + row) * DEMO_STRIDE),
-					src + ((srcY0 + row) * DEMO_STRIDE),
-					width * 3U);
-			}
-		}
+		mode = LIVE_FX_SLIT_CENTER;
 	}
 	else
 	{
 		return 0;
 	}
-
-	Xil_DCacheFlushRange((unsigned int)dest, height * DEMO_STRIDE);
+	LiveFxSlitScan(src, dest, width, height, DEMO_STRIDE, mode, chunk);
 	return 1;
 }
 
@@ -1736,139 +1462,55 @@ static int DemoParkDdrDest(const u8 *src, u32 width, u32 height, int copySrc)
 	}
 	Xil_DCacheFlushRange((unsigned int)pFrames[g_slitDestIdx], height * DEMO_STRIDE);
 	DisplayChangeFrame(&dispCtrl, g_slitDestIdx);
-	g_slitIndex = 0U;
 	g_ddrInited = 1;
 	return g_slitDestIdx;
 }
 
 static int DemoApplySpeckleEffect(const u8 *src, u32 width, u32 height)
 {
-	u8 *dest;
-	u32 thresh;
-	u32 y;
-	u32 x;
-	u32 rng;
-
 	if (DemoParkDdrDest(src, width, height, 1) < 0)
 	{
 		return 0;
 	}
-
-	dest = pFrames[g_slitDestIdx];
-	thresh = (g_specklePct * 256U) / 100U;
-	if (thresh > 256U)
-	{
-		thresh = 256U;
-	}
-	rng = g_speckleRng;
-
-	for (y = 0U; y < height; y++)
-	{
-		const u8 *s = src + (y * DEMO_STRIDE);
-		u8 *d = dest + (y * DEMO_STRIDE);
-
-		for (x = 0U; x < width; x++)
-		{
-			rng = (rng * 1664525U) + 1013904223U;
-			if ((rng >> 24) < thresh)
-			{
-				d[0] = s[0];
-				d[1] = s[1];
-				d[2] = s[2];
-			}
-			s += 3;
-			d += 3;
-		}
-	}
-
-	g_speckleRng = rng;
-	Xil_DCacheFlushRange((unsigned int)dest, height * DEMO_STRIDE);
+	LiveFxSpeckle(src, pFrames[g_slitDestIdx], width, height, DEMO_STRIDE, g_specklePct);
 	return 1;
 }
 
 static int DemoApplyRandomTileEffect(const u8 *src, u32 width, u32 height)
 {
-	u8 *dest;
-	u32 tile;
-	u32 thresh;
-	u32 tx;
-	u32 ty;
-	u32 y;
-	u32 copyW;
-	u32 copyH;
-	u32 rng;
+	u32 tile = g_tileSize;
 
 	if (DemoParkDdrDest(src, width, height, 1) < 0)
 	{
 		return 0;
 	}
-
-	dest = pFrames[g_slitDestIdx];
-	tile = g_tileSize;
 	if (tile == 0U)
 	{
 		tile = 16U;
 	}
-	thresh = (30U * 256U) / 100U;
-	rng = g_ddrRng;
+	LiveFxRandomTiles(src, pFrames[g_slitDestIdx], width, height, DEMO_STRIDE, tile);
+	return 1;
+}
 
-	for (ty = 0U; ty < height; ty += tile)
+static int DemoApplyFilmStripEffect(const u8 *src, u32 width, u32 height)
+{
+	u32 tiles = g_filmTiles;
+
+	if (DemoParkDdrDest(src, width, height, 0) < 0)
 	{
-		copyH = tile;
-		if ((ty + copyH) > height)
-		{
-			copyH = height - ty;
-		}
-		for (tx = 0U; tx < width; tx += tile)
-		{
-			rng = (rng * 1664525U) + 1013904223U;
-			if ((rng >> 24) >= thresh)
-			{
-				continue;
-			}
-			copyW = tile;
-			if ((tx + copyW) > width)
-			{
-				copyW = width - tx;
-			}
-			for (y = 0U; y < copyH; y++)
-			{
-				memcpy(dest + ((ty + y) * DEMO_STRIDE) + (tx * 3U),
-					src + ((ty + y) * DEMO_STRIDE) + (tx * 3U),
-					copyW * 3U);
-			}
-		}
+		return 0;
 	}
-
-	g_ddrRng = rng;
-	Xil_DCacheFlushRange((unsigned int)dest, height * DEMO_STRIDE);
+	if (tiles < 4U)
+	{
+		tiles = 4U;
+	}
+	LiveFxFilmStrip(src, pFrames[g_slitDestIdx], width, height, DEMO_STRIDE, tiles);
 	return 1;
 }
 
 static void DemoPixelDoubleInPlace(u8 *frame, u32 halfW, u32 halfH, u32 stride)
 {
-	int y;
-	int x;
-
-	for (y = (int)halfH - 1; y >= 0; y--)
-	{
-		u8 *srcRow = frame + ((u32)y * stride);
-		u8 *dstRow = frame + ((u32)y * 2U * stride);
-
-		for (x = (int)halfW - 1; x >= 0; x--)
-		{
-			u8 *s = srcRow + ((u32)x * 3U);
-			u8 *d = dstRow + ((u32)x * 6U);
-
-			d[0] = s[0];
-			d[1] = s[1];
-			d[2] = s[2];
-			d[3] = s[0];
-			d[4] = s[1];
-			d[5] = s[2];
-		}
-		memcpy(dstRow + stride, dstRow, halfW * 6U);
-	}
+	LiveFxPixelDoubleInPlace(frame, halfW, halfH, stride);
 }
 
 static int DemoApplyLiveEffectFrame(void)
@@ -1904,6 +1546,10 @@ static int DemoApplyLiveEffectFrame(void)
 		if ((g_liveEffectCmd == 'v') || (g_liveEffectCmd == 'V'))
 		{
 			return DemoApplyRandomTileEffect(src, width, height);
+		}
+		if ((g_liveEffectCmd == 'u') || (g_liveEffectCmd == 'U'))
+		{
+			return DemoApplyFilmStripEffect(src, width, height);
 		}
 		return DemoApplySlitEffect(src, width, height);
 	}
@@ -1950,8 +1596,6 @@ static void DemoInvalidateVideoSrc(u8 *frame, u32 height)
 
 static int DemoApplySelectedEffect(char cmd, u8 *src, u8 *dst, u32 width, u32 height, int clearFrame)
 {
-	const float PI = 3.14159265359f;
-
 	if (clearFrame)
 	{
 		DemoClearFrame(dst, width, height, DEMO_STRIDE);
@@ -1960,79 +1604,79 @@ static int DemoApplySelectedEffect(char cmd, u8 *src, u8 *dst, u32 width, u32 he
 	switch (cmd)
 	{
 	case '1':
-		DemoMirrorEffect(src, dst, width, height, DEMO_STRIDE, DEMO_MIRROR_HORIZONTAL);
+		LiveFxMirror(src, dst, width, height, DEMO_STRIDE, LIVE_FX_MIRROR_H);
 		return 0;
 	case '2':
-		DemoMirrorEffect(src, dst, width, height, DEMO_STRIDE, DEMO_MIRROR_VERTICAL);
+		LiveFxMirror(src, dst, width, height, DEMO_STRIDE, LIVE_FX_MIRROR_V);
 		return 0;
 	case '3':
-		DemoMirrorEffect(src, dst, width, height, DEMO_STRIDE, DEMO_MIRROR_BOTH);
+		LiveFxMirror(src, dst, width, height, DEMO_STRIDE, LIVE_FX_MIRROR_BOTH);
 		return 0;
 	case '4':
-		DemoMirrorEffect(src, dst, width, height, DEMO_STRIDE, DEMO_MIRROR_CENTER_X);
+		LiveFxMirror(src, dst, width, height, DEMO_STRIDE, LIVE_FX_MIRROR_CENTER_X);
 		return 0;
 	case '5':
-		DemoMirrorEffect(src, dst, width, height, DEMO_STRIDE, DEMO_MIRROR_CENTER_Y);
+		LiveFxMirror(src, dst, width, height, DEMO_STRIDE, LIVE_FX_MIRROR_CENTER_Y);
 		return 0;
 	case '6':
-		DemoMirrorEffect(src, dst, width, height, DEMO_STRIDE, DEMO_MIRROR_CENTER_XY);
+		LiveFxMirror(src, dst, width, height, DEMO_STRIDE, LIVE_FX_MIRROR_CENTER_XY);
 		return 0;
 	case '7':
-		DemoTileEffect(src, dst, width, height, width, height, DEMO_STRIDE, 2, 2);
+		LiveFxTile(src, dst, width, height, DEMO_STRIDE, LIVE_FX_TILE_2X2);
 		return 0;
 	case '8':
-		DemoTileEffect(src, dst, width, height, width, height, DEMO_STRIDE, 3, 3);
+		LiveFxTile(src, dst, width, height, DEMO_STRIDE, LIVE_FX_TILE_3X3);
 		return 0;
 	case '9':
-		DemoTileEffect(src, dst, width, height, width, height, DEMO_STRIDE, 4, 4);
+		LiveFxTile(src, dst, width, height, DEMO_STRIDE, LIVE_FX_TILE_4X4);
 		return 0;
 	case 'a':
 	case 'A':
-		DemoZoomEffect(src, dst, width, height, DEMO_STRIDE, 2.0f, 0.5f, 0.5f);
+		LiveFxZoom(src, dst, width, height, DEMO_STRIDE, LIVE_FX_ZOOM_IN);
 		return 0;
 	case 'b':
 	case 'B':
-		DemoZoomEffect(src, dst, width, height, DEMO_STRIDE, 0.5f, 0.5f, 0.5f);
+		LiveFxZoom(src, dst, width, height, DEMO_STRIDE, LIVE_FX_ZOOM_OUT);
 		return 0;
 	case 'c':
 	case 'C':
-		DemoMosaicEffect(src, dst, width, height, DEMO_STRIDE, 8);
+		LiveFxMosaic(src, dst, width, height, DEMO_STRIDE, LIVE_FX_MOSAIC_8);
 		return 0;
 	case 'd':
 	case 'D':
-		DemoMosaicEffect(src, dst, width, height, DEMO_STRIDE, 16);
+		LiveFxMosaic(src, dst, width, height, DEMO_STRIDE, LIVE_FX_MOSAIC_16);
 		return 0;
 	case 'e':
 	case 'E':
-		DemoMosaicEffect(src, dst, width, height, DEMO_STRIDE, 32);
+		LiveFxMosaic(src, dst, width, height, DEMO_STRIDE, LIVE_FX_MOSAIC_32);
 		return 0;
 	case 'f':
 	case 'F':
-		Demo3DPlaneEffect(src, dst, width, height, DEMO_STRIDE, 0.0f, 0.0f, PI / 4.0f, 1.0f, 0.0f, 0.0f);
+		LiveFxPlane3D(src, dst, width, height, DEMO_STRIDE, LIVE_FX_PLANE3D_Z45);
 		return 0;
 	case 'g':
 	case 'G':
-		Demo3DPlaneEffect(src, dst, width, height, DEMO_STRIDE, 0.0f, 0.0f, PI / 2.0f, 1.0f, 0.0f, 0.0f);
+		LiveFxPlane3D(src, dst, width, height, DEMO_STRIDE, LIVE_FX_PLANE3D_Z90);
 		return 0;
 	case 'h':
 	case 'H':
-		Demo3DPlaneEffect(src, dst, width, height, DEMO_STRIDE, PI / 3.0f, 0.0f, 0.0f, 0.7f, 0.0f, 0.0f);
+		LiveFxPlane3D(src, dst, width, height, DEMO_STRIDE, LIVE_FX_PLANE3D_X);
 		return 0;
 	case 'i':
 	case 'I':
-		Demo3DPlaneEffect(src, dst, width, height, DEMO_STRIDE, 0.0f, PI / 3.0f, 0.0f, 0.7f, 0.0f, 0.0f);
+		LiveFxPlane3D(src, dst, width, height, DEMO_STRIDE, LIVE_FX_PLANE3D_Y);
 		return 0;
 	case 'j':
 	case 'J':
-		Demo3DPlaneEffect(src, dst, width, height, DEMO_STRIDE, PI / 4.0f, PI / 4.0f, PI / 4.0f, 0.7f, 0.0f, 0.0f);
+		LiveFxPlane3D(src, dst, width, height, DEMO_STRIDE, LIVE_FX_PLANE3D_XYZ);
 		return 0;
 	case 'k':
 	case 'K':
-		Demo3DPlaneEffect(src, dst, width, height, DEMO_STRIDE, 0.0f, 0.0f, PI / 6.0f, 1.5f, 0.0f, 0.0f);
+		LiveFxPlane3D(src, dst, width, height, DEMO_STRIDE, LIVE_FX_PLANE3D_SCALE);
 		return 0;
 	case 'l':
 	case 'L':
-		DemoShrinkRandomEffect(src, dst, width, height, width, height, DEMO_STRIDE);
+		LiveFxShrinkRandom(src, dst, width, height, DEMO_STRIDE, 1);
 		return 0;
 	default:
 		return -1;
@@ -2295,8 +1939,8 @@ void DemoEffectMenu()
 			}
 			else if ((g_liveEffectCmd == 'u') || (g_liveEffectCmd == 'U'))
 			{
-				xil_printf("  film strip grab every %u frames (press U again to change)\n\r",
-					(unsigned)g_stripInterval);
+				xil_printf("  film strip %u tiles (press U again to change)\n\r",
+					(unsigned)g_filmTiles);
 			}
 			else if (DemoIsSlitEffect(g_liveEffectCmd))
 			{
@@ -2356,7 +2000,7 @@ void DemoEffectMenu()
 		xil_printf("L - Shrink 25%% and Random Position\n\r");
 		xil_printf("R - Strobe / freeze (DDR, repeat to change interval)\n\r");
 		xil_printf("S - Feedback (DDR, repeat to change mix)\n\r");
-		xil_printf("U - Film strip 2x2 (DDR, repeat to change grab rate)\n\r");
+		xil_printf("U - Film strip (DDR, repeat to change tile count)\n\r");
 		xil_printf("W - Slit scan columns (20px, new frame at next X)\n\r");
 		xil_printf("X - Slit scan rows (20px, new frame at next Y)\n\r");
 		xil_printf("Y - Center band tiled vertically (same slice fills the screen)\n\r");
@@ -4318,574 +3962,90 @@ void DemoRunAnimatedPattern(u8 *frame, u32 width, u32 height, u32 stride, int pa
 /*				Video Effect Functions							*/
 /* ------------------------------------------------------------ */
 
-/*
- * Mirror Effect - Flip image horizontally, vertically, or both
- * Works on RGB frames (both animations and video)
- */
-static void DemoReverseRgbRow(u8 *dst, const u8 *src, u32 width)
-{
-	const u8 *s = src + (width - 1U) * 3U;
-	u32 x;
-
-	for (x = 0U; x < width; x++)
-	{
-		dst[0] = s[0];
-		dst[1] = s[1];
-		dst[2] = s[2];
-		dst += 3;
-		s -= 3;
-	}
-}
-
 void DemoMirrorEffect(u8 *srcFrame, u8 *destFrame, u32 width, u32 height, u32 stride, int mirrorType)
 {
-	u32 y;
-	u32 centerX = width / 2U;
-	u32 centerY = height / 2U;
-	u32 rowBytes = width * 3U;
-	u32 leftBytes = centerX * 3U;
-	u32 rightWidth = width - centerX;
-
-	for (y = 0U; y < height; y++)
-	{
-		u8 *dstRow = destFrame + (y * stride);
-		const u8 *srcRow;
-		u32 srcY;
-
-		switch (mirrorType)
-		{
-		case DEMO_MIRROR_VERTICAL:
-			srcY = height - 1U - y;
-			memcpy(dstRow, srcFrame + (srcY * stride), rowBytes);
-			break;
-		case DEMO_MIRROR_HORIZONTAL:
-			DemoReverseRgbRow(dstRow, srcFrame + (y * stride), width);
-			break;
-		case DEMO_MIRROR_BOTH:
-			srcY = height - 1U - y;
-			DemoReverseRgbRow(dstRow, srcFrame + (srcY * stride), width);
-			break;
-		case DEMO_MIRROR_CENTER_X:
-			srcRow = srcFrame + (y * stride);
-			memcpy(dstRow, srcRow, leftBytes);
-			DemoReverseRgbRow(dstRow + leftBytes, srcRow, rightWidth);
-			break;
-		case DEMO_MIRROR_CENTER_Y:
-			srcY = (y < centerY) ? y : (height - 1U - y);
-			memcpy(dstRow, srcFrame + (srcY * stride), rowBytes);
-			break;
-		case DEMO_MIRROR_CENTER_XY:
-			srcY = (y < centerY) ? y : (height - 1U - y);
-			srcRow = srcFrame + (srcY * stride);
-			memcpy(dstRow, srcRow, leftBytes);
-			DemoReverseRgbRow(dstRow + leftBytes, srcRow, rightWidth);
-			break;
-		default:
-			memcpy(dstRow, srcFrame + (y * stride), rowBytes);
-			break;
-		}
-	}
-
-	Xil_DCacheFlushRange((unsigned int)destFrame, height * stride);
+	LiveFxMirror(srcFrame, destFrame, width, height, stride, mirrorType);
 }
 
-/*
- * Tile Effect - Repeat source image multiple times across destination
- * Works on RGB frames (both animations and video)
- */
 void DemoTileEffect(u8 *srcFrame, u8 *destFrame, u32 srcWidth, u32 srcHeight, u32 destWidth, u32 destHeight, u32 stride, u32 tilesX, u32 tilesY)
 {
-	u32 xcoi, ycoi;
-	u32 destAddr;
-	u32 srcX, srcY;
-	u32 srcAddr;
-	
-	// Ensure at least 1 tile
-	if (tilesX == 0) tilesX = 1;
-	if (tilesY == 0) tilesY = 1;
-	
-	// Calculate tile dimensions (how big each tile should be)
-	u32 tileWidth = destWidth / tilesX;
-	u32 tileHeight = destHeight / tilesY;
-	
-	// Pre-calculate scaling factors to avoid divisions in inner loop
-	u32 srcYScale = (srcHeight << 16) / tileHeight;  // Fixed-point scaling
-	u32 srcXScale = (srcWidth << 16) / tileWidth;
-	
-	for(ycoi = 0; ycoi < destHeight; ycoi++)
+	int mode = LIVE_FX_TILE_OFF;
+
+	(void)srcWidth;
+	(void)srcHeight;
+	(void)destWidth;
+	(void)destHeight;
+	if ((tilesX == 2U) && (tilesY == 2U))
 	{
-		destAddr = ycoi * stride;
-		
-		// Determine which tile row we're in
-		u32 tileRow = ycoi / tileHeight;
-		if (tileRow >= tilesY) tileRow = tilesY - 1;
-		
-		// Get Y position within the current tile
-		u32 yInTile = ycoi % tileHeight;
-		
-		// Map tile Y to source Y (scale source to fit tile size) - optimized
-		srcY = (yInTile * srcYScale) >> 16;
-		if (srcY >= srcHeight) srcY = srcHeight - 1;
-		
-		for(xcoi = 0; xcoi < destWidth; xcoi++)
-		{
-			// Determine which tile column we're in
-			u32 tileCol = xcoi / tileWidth;
-			if (tileCol >= tilesX) tileCol = tilesX - 1;
-			
-			// Get X position within the current tile
-			u32 xInTile = xcoi % tileWidth;
-			
-			// Map tile X to source X (scale source to fit tile size) - optimized
-			srcX = (xInTile * srcXScale) >> 16;
-			if (srcX >= srcWidth) srcX = srcWidth - 1;
-			
-			srcAddr = srcY * stride + srcX * 3;
-			
-			// Copy RGB pixel
-			destFrame[destAddr] = srcFrame[srcAddr];
-			destFrame[destAddr + 1] = srcFrame[srcAddr + 1];
-			destFrame[destAddr + 2] = srcFrame[srcAddr + 2];
-			
-			destAddr += 3;
-		}
+		mode = LIVE_FX_TILE_2X2;
 	}
-	
-	Xil_DCacheFlushRange((unsigned int) destFrame, destHeight * stride);
+	else if ((tilesX == 3U) && (tilesY == 3U))
+	{
+		mode = LIVE_FX_TILE_3X3;
+	}
+	else if ((tilesX == 4U) && (tilesY == 4U))
+	{
+		mode = LIVE_FX_TILE_4X4;
+	}
+	else if ((tilesX == 8U) && (tilesY == 8U))
+	{
+		mode = LIVE_FX_TILE_8X8;
+	}
+	else if ((tilesX == 16U) && (tilesY == 16U))
+	{
+		mode = LIVE_FX_TILE_16X16;
+	}
+	LiveFxTile(srcFrame, destFrame, destWidth, destHeight, stride, mode);
 }
 
-/*
- * Zoom Effect - Zoom in/out with optional center point
- * Works on RGB frames (both animations and video)
- * zoom > 1.0 = zoom in, zoom < 1.0 = zoom out
- * centerX, centerY are normalized (0.0-1.0) for center point
- */
 void DemoZoomEffect(u8 *srcFrame, u8 *destFrame, u32 width, u32 height, u32 stride, float zoom, float centerX, float centerY)
 {
-	u32 xcoi, ycoi;
-	u32 destAddr;
-	float srcX, srcY;
-	u32 srcXInt, srcYInt;
-	u32 srcAddr;
-	
-	// Clamp center to valid range
-	if (centerX < 0.0f) centerX = 0.0f;
-	if (centerX > 1.0f) centerX = 1.0f;
-	if (centerY < 0.0f) centerY = 0.0f;
-	if (centerY > 1.0f) centerY = 1.0f;
-	
-	// Pre-calculate inverse zoom to avoid division in loop
-	float invZoom = 1.0f / zoom;
-	
-	// Calculate center point in pixel coordinates
-	float centerXPix = centerX * (float)width;
-	float centerYPix = centerY * (float)height;
-	
-	// Calculate offset to center the zoom (optimized)
-	float offsetX = centerXPix * (1.0f - invZoom);
-	float offsetY = centerYPix * (1.0f - invZoom);
-	
-	// Pre-calculate bounds for clamping
-	float maxX = (float)(width - 1);
-	float maxY = (float)(height - 1);
-	
-	for(ycoi = 0; ycoi < height; ycoi++)
+	int mode = LIVE_FX_ZOOM_OFF;
+
+	(void)centerX;
+	(void)centerY;
+	if (zoom > 1.0f)
 	{
-		destAddr = ycoi * stride;
-		
-		// Pre-calculate Y component
-		float yZoomed = (float)ycoi * invZoom + offsetY;
-		
-		for(xcoi = 0; xcoi < width; xcoi++)
-		{
-			// Calculate source coordinates with zoom (optimized)
-			srcX = (float)xcoi * invZoom + offsetX;
-			srcY = yZoomed;
-			
-			// Clamp to source bounds
-			if (srcX < 0.0f) srcX = 0.0f;
-			if (srcX >= (float)width) srcX = (float)(width - 1);
-			if (srcY < 0.0f) srcY = 0.0f;
-			if (srcY >= (float)height) srcY = (float)(height - 1);
-			
-			// Nearest neighbor sampling
-			srcXInt = (u32)srcX;
-			srcYInt = (u32)srcY;
-			
-			srcAddr = srcYInt * stride + srcXInt * 3;
-			
-			// Copy RGB pixel
-			destFrame[destAddr] = srcFrame[srcAddr];
-			destFrame[destAddr + 1] = srcFrame[srcAddr + 1];
-			destFrame[destAddr + 2] = srcFrame[srcAddr + 2];
-			
-			destAddr += 3;
-		}
+		mode = LIVE_FX_ZOOM_IN;
 	}
-	
-	Xil_DCacheFlushRange((unsigned int) destFrame, height * stride);
+	else if (zoom < 1.0f)
+	{
+		mode = LIVE_FX_ZOOM_OUT;
+	}
+	LiveFxZoom(srcFrame, destFrame, width, height, stride, mode);
 }
 
-/*
- * Mosaic/Pixelate Effect - Group pixels into blocks
- * Works on RGB frames (both animations and video)
- * blockSize = size of each mosaic block (e.g., 8 = 8x8 blocks)
- */
 void DemoMosaicEffect(u8 *srcFrame, u8 *destFrame, u32 width, u32 height, u32 stride, u32 blockSize)
 {
-	u32 xcoi, ycoi;
-	u32 destAddr;
-	u32 blockX, blockY;
-	u32 blockStartX, blockStartY;
-	u32 srcX, srcY;
-	u32 srcAddr;
-	u32 rSum, gSum, bSum;
-	u32 pixelCount;
-	u8 rAvg, gAvg, bAvg;
-	
-	// Ensure block size is at least 1
-	if (blockSize == 0) blockSize = 1;
-	
-	// Process in blocks
-	for(blockY = 0; blockY < height; blockY += blockSize)
-	{
-		for(blockX = 0; blockX < width; blockX += blockSize)
-		{
-			// Calculate block bounds
-			u32 blockEndX = blockX + blockSize;
-			u32 blockEndY = blockY + blockSize;
-			if (blockEndX > width) blockEndX = width;
-			if (blockEndY > height) blockEndY = height;
-			
-			// Calculate average color of this block
-			rSum = gSum = bSum = 0;
-			pixelCount = 0;
-			
-			for(srcY = blockY; srcY < blockEndY; srcY++)
-			{
-				srcAddr = srcY * stride + blockX * 3;
-				for(srcX = blockX; srcX < blockEndX; srcX++)
-				{
-					rSum += srcFrame[srcAddr];
-					gSum += srcFrame[srcAddr + 1];
-					bSum += srcFrame[srcAddr + 2];
-					srcAddr += 3;
-					pixelCount++;
-				}
-			}
-			
-			// Calculate average
-			rAvg = (u8)(rSum / pixelCount);
-			gAvg = (u8)(gSum / pixelCount);
-			bAvg = (u8)(bSum / pixelCount);
-			
-			/* Write one block row, then replicate it with stride. */
-			destAddr = blockY * stride + blockX * 3U;
-			for (xcoi = blockX; xcoi < blockEndX; xcoi++)
-			{
-				destFrame[destAddr] = rAvg;
-				destFrame[destAddr + 1] = gAvg;
-				destFrame[destAddr + 2] = bAvg;
-				destAddr += 3U;
-			}
-			{
-				u32 rowSlice = (blockEndX - blockX) * 3U;
-				u8 *firstRow = destFrame + (blockY * stride) + (blockX * 3U);
+	int mode = LIVE_FX_MOSAIC_OFF;
 
-				for (ycoi = blockY + 1U; ycoi < blockEndY; ycoi++)
-				{
-					memcpy(destFrame + (ycoi * stride) + (blockX * 3U), firstRow, rowSlice);
-				}
-			}
-		}
+	if (blockSize <= 8U)
+	{
+		mode = LIVE_FX_MOSAIC_8;
 	}
-	
-	Xil_DCacheFlushRange((unsigned int) destFrame, height * stride);
-}
-
-/*
- * 3D Plane Effect - Transform image as if it's a flat plane in 3D space
- * Works on RGB frames (both animations and video)
- * rotX, rotY, rotZ = rotation angles in radians
- * scale = scale factor (1.0 = no scaling)
- * offsetX, offsetY = translation offset in pixels
- */
-void Demo3DPlaneEffect(u8 *srcFrame, u8 *destFrame, u32 width, u32 height, u32 stride, float rotX, float rotY, float rotZ, float scale, float offsetX, float offsetY)
-{
-	u32 xcoi, ycoi;
-	u32 destAddr;
-	float srcX, srcY;
-	u32 srcXInt, srcYInt;
-	u32 srcAddr;
-	
-	// Pre-calculate rotation matrices
-	float cosX = fast_cos(rotX);
-	float sinX = fast_sin(rotX);
-	float cosY = fast_cos(rotY);
-	float sinY = fast_sin(rotY);
-	float cosZ = fast_cos(rotZ);
-	float sinZ = fast_sin(rotZ);
-	
-	// Center point
-	float centerX = (float)width * 0.5f;
-	float centerY = (float)height * 0.5f;
-	float invCenterX = 1.0f / centerX;
-	float invCenterY = 1.0f / centerY;
-	float maxX = (float)(width - 1U);
-	float maxY = (float)(height - 1U);
-	
-	// Perspective distance (viewer distance from plane)
-	// Controls how much perspective effect - smaller = more dramatic
-	float perspectiveDist = 2.5f;
-	
-	// For inverse mapping: for each destination pixel, find which source pixel maps to it
-	for(ycoi = 0; ycoi < height; ycoi++)
+	else if (blockSize <= 16U)
 	{
-		float screenY = ((float)ycoi - centerY) * invCenterY;
-		float screenX = (-centerX) * invCenterX;
-		destAddr = ycoi * stride;
-		
-		for(xcoi = 0; xcoi < width; xcoi++)
-		{
-			// Apply inverse scaling
-			float scaledX = screenX / scale;
-			float scaledY = screenY / scale;
-			
-			// For a plane rotating in 3D space:
-			// The source image is a plane at Z=0
-			// After rotation, each point (x,y,0) becomes a 3D point
-			// That 3D point projects to screen coordinates with perspective
-			// We need the inverse: given screen coords, find original (x,y,0)
-			
-			// Use iterative method to solve for source coordinates
-			// Start with screen coordinates as initial guess
-			float srcNX = scaledX;
-			float srcNY = scaledY;
-			
-			// Iterate to find the correct source coordinates
-			// Usually converges in 2-3 iterations, reduced to 3 for performance
-			for(int iter = 0; iter < 3; iter++)
-			{
-				// Forward: rotate source point (srcNX, srcNY, 0) in 3D
-				// Rotate around X axis
-				float px = srcNX;
-				float py = srcNY * cosX;
-				float pz = srcNY * sinX;
-				
-				// Rotate around Y axis
-				float px2 = px * cosY - pz * sinY;
-				float pz2 = px * sinY + pz * cosY;
-				px = px2;
-				pz = pz2;
-				
-				// Rotate around Z axis
-				float px3 = px * cosZ - py * sinZ;
-				float py3 = px * sinZ + py * cosZ;
-				px = px3;
-				py = py3;
-				
-				// Apply perspective projection
-				// Perspective: screen = 3D / (1 + Z/distance)
-				float perspFactor = 1.0f / (1.0f + pz / perspectiveDist);
-				float projX = px * perspFactor;
-				float projY = py * perspFactor;
-				
-				// Calculate error
-				float errX = scaledX - projX;
-				float errY = scaledY - projY;
-				
-				// Adjust source coordinates based on error
-				// Approximate inverse by scaling error by inverse of derivative
-				srcNX += errX * 0.8f;
-				srcNY += errY * 0.8f;
-			}
-			
-			// Convert back to pixel coordinates
-			srcX = srcNX * centerX + centerX + offsetX;
-			srcY = srcNY * centerY + centerY + offsetY;
-			
-			// Clamp to source bounds (optimized)
-			if (srcX < 0.0f) srcX = 0.0f;
-			else if (srcX > maxX) srcX = maxX;
-			if (srcY < 0.0f) srcY = 0.0f;
-			else if (srcY > maxY) srcY = maxY;
-			
-			// Nearest neighbor sampling
-			srcXInt = (u32)srcX;
-			srcYInt = (u32)srcY;
-			
-			if (srcXInt < width && srcYInt < height)
-			{
-				srcAddr = srcYInt * stride + srcXInt * 3;
-				
-				// Copy RGB pixel
-				destFrame[destAddr] = srcFrame[srcAddr];
-				destFrame[destAddr + 1] = srcFrame[srcAddr + 1];
-				destFrame[destAddr + 2] = srcFrame[srcAddr + 2];
-			}
-			// If out of bounds, pixel remains cleared (black)
-			
-			destAddr += 3;
-			screenX += invCenterX;
-		}
-	}
-	
-	Xil_DCacheFlushRange((unsigned int) destFrame, height * stride);
-}
-
-/*
- * Clear Frame - Fill frame with black (RGB = 0,0,0)
- * Useful before applying effects like zoom/rotate to avoid artifacts
- */
-void DemoClearFrame(u8 *frame, u32 width, u32 height, u32 stride)
-{
-	u32 ycoi;
-	u32 rowBytes = width * 3U;
-
-	if (stride == rowBytes)
-	{
-		memset(frame, 0, height * stride);
+		mode = LIVE_FX_MOSAIC_16;
 	}
 	else
 	{
-		for (ycoi = 0U; ycoi < height; ycoi++)
-		{
-			memset(frame + (ycoi * stride), 0, rowBytes);
-		}
+		mode = LIVE_FX_MOSAIC_32;
 	}
-
-	Xil_DCacheFlushRange((unsigned int)frame, height * stride);
+	LiveFxMosaic(srcFrame, destFrame, width, height, stride, mode);
 }
 
-void DemoBlitSplash(u8 *frame, u32 width, u32 height, u32 stride)
+void Demo3DPlaneEffect(u8 *srcFrame, u8 *destFrame, u32 width, u32 height, u32 stride, float rotX, float rotY, float rotZ, float scale, float offsetX, float offsetY)
 {
-	u32 scale;
-	u32 destW;
-	u32 destH;
-	u32 x0;
-	u32 y0;
-	u32 sx;
-	u32 sy;
-	u32 k;
-	u32 rowBytes;
-
-	if ((frame == NULL) || (width == 0U) || (height == 0U) || (stride == 0U))
-	{
-		return;
-	}
-
-	DemoClearFrame(frame, width, height, stride);
-
-	scale = width / SPLASH_WIDTH;
-	if ((height / SPLASH_HEIGHT) < scale)
-	{
-		scale = height / SPLASH_HEIGHT;
-	}
-	if (scale < 1U)
-	{
-		scale = 1U;
-	}
-
-	destW = SPLASH_WIDTH * scale;
-	destH = SPLASH_HEIGHT * scale;
-	if ((destW > width) || (destH > height))
-	{
-		return;
-	}
-
-	x0 = (width - destW) / 2U;
-	y0 = (height - destH) / 2U;
-	rowBytes = destW * 3U;
-
-	for (sy = 0U; sy < SPLASH_HEIGHT; sy++)
-	{
-		const u8 *src = splash_bits + (sy * SPLASH_ROW_BYTES);
-		u8 *dst = frame + ((y0 + (sy * scale)) * stride) + (x0 * 3U);
-		u8 *p = dst;
-
-		for (sx = 0U; sx < SPLASH_WIDTH; sx++)
-		{
-			u8 bit = (u8)((src[sx >> 3] >> (7U - (sx & 7U))) & 1U);
-			u8 v = bit ? 0xFFU : 0x00U;
-
-			for (k = 0U; k < scale; k++)
-			{
-				*p++ = v;
-				*p++ = v;
-				*p++ = v;
-			}
-		}
-
-		for (k = 1U; k < scale; k++)
-		{
-			memcpy(dst + (k * stride), dst, rowBytes);
-		}
-	}
-
-	Xil_DCacheFlushRange((unsigned int)frame, height * stride);
+	LiveFxPlane3DRaw(srcFrame, destFrame, width, height, stride, rotX, rotY, rotZ, scale, offsetX, offsetY);
 }
 
-/*
- * Shrink and Random Position Effect - Shrinks image to 75% and places it at random position
- * Works on RGB frames (both animations and video)
- */
 void DemoShrinkRandomEffect(u8 *srcFrame, u8 *destFrame, u32 srcWidth, u32 srcHeight, u32 destWidth, u32 destHeight, u32 stride)
 {
-	u32 xcoi, ycoi;
-	u32 destAddr;
-	u32 srcX, srcY;
-	u32 srcAddr;
-	
-	// Shrink to 75% (scale factor 0.75)
-	float scale = 0.75f;
-	u32 shrunkWidth = (u32)(srcWidth * scale);
-	u32 shrunkHeight = (u32)(srcHeight * scale);
-	
-	// Generate random position (using a simple pseudo-random based on time/state)
-	// Use a simple LCG (Linear Congruential Generator) for pseudo-random
-	static u32 randomSeed = 12345;
-	randomSeed = randomSeed * 1103515245 + 12345;
-	u32 randX = randomSeed;
-	randomSeed = randomSeed * 1103515245 + 12345;
-	u32 randY = randomSeed;
-	
-	// Calculate random position ensuring shrunk image fits
-	u32 maxX = (destWidth > shrunkWidth) ? (destWidth - shrunkWidth) : 0;
-	u32 maxY = (destHeight > shrunkHeight) ? (destHeight - shrunkHeight) : 0;
-	
-	u32 posX = (maxX > 0) ? (randX % maxX) : 0;
-	u32 posY = (maxY > 0) ? (randY % maxY) : 0;
-	
-	// Clear destination (frame should already be cleared, but ensure it)
-	DemoClearFrame(destFrame, destWidth, destHeight, stride);
-	
-	// Copy and scale source to destination at random position
-	for(ycoi = 0; ycoi < shrunkHeight && (posY + ycoi) < destHeight; ycoi++)
-	{
-		destAddr = (posY + ycoi) * stride + posX * 3;
-		
-		// Calculate source Y (scale up)
-		srcY = (ycoi * srcHeight) / shrunkHeight;
-		if (srcY >= srcHeight) srcY = srcHeight - 1;
-		
-		for(xcoi = 0; xcoi < shrunkWidth && (posX + xcoi) < destWidth; xcoi++)
-		{
-			// Calculate source X (scale up)
-			srcX = (xcoi * srcWidth) / shrunkWidth;
-			if (srcX >= srcWidth) srcX = srcWidth - 1;
-			
-			srcAddr = srcY * stride + srcX * 3;
-			
-			// Copy RGB pixel
-			destFrame[destAddr] = srcFrame[srcAddr];
-			destFrame[destAddr + 1] = srcFrame[srcAddr + 1];
-			destFrame[destAddr + 2] = srcFrame[srcAddr + 2];
-			
-			destAddr += 3;
-		}
-	}
-	
-	Xil_DCacheFlushRange((unsigned int) destFrame, destHeight * stride);
+	(void)srcWidth;
+	(void)srcHeight;
+	(void)destWidth;
+	(void)destHeight;
+	LiveFxShrinkRandom(srcFrame, destFrame, destWidth, destHeight, stride, 1);
 }
 
 /*
