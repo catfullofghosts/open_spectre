@@ -94,7 +94,7 @@ proc open_spec_bd_cell_count {bd_file} {
 }
 
 proc open_spec_remove_bd {bd_name bd_file} {
-  puts "Removing incomplete block design: $bd_file"
+  puts "Removing block design: $bd_file"
   catch {close_bd_design [current_bd_design -quiet]}
   catch {export_ip_user_files -of_objects [get_files $bd_file] -no_script -reset -force -quiet}
   catch {remove_files [get_files -quiet ${bd_name}.bd]}
@@ -257,10 +257,17 @@ foreach r [get_runs -quiet "*spector_wrapper*_synth_1"] {
 }
 
 # -----------------------------------------------------------------------------
-# Block design: reuse only if populated; recreate stub/empty BD
+# Block design: reuse only if populated; recreate stub/empty BD.
+# clean always drops the saved BD so the next create sources fpga/syn/hdmi_in.tcl.
 # -----------------------------------------------------------------------------
 set bd_rebuilt 0
 set bd_file [open_spec_find_bd $bd_name]
+
+if {$do_clean && $bd_file ne ""} {
+  puts "clean: dropping saved block design; recreating from $bd_tcl"
+  open_spec_remove_bd $bd_name $bd_file
+  set bd_file ""
+}
 
 if {$bd_file ne ""} {
   set ncells [open_spec_bd_cell_count $bd_file]

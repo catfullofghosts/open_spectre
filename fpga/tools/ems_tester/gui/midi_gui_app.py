@@ -1,4 +1,4 @@
-"""Open Spectre MIDI panel — Channel 1 CCs 1–58 via the Pico USB gadget."""
+"""Open Spectre MIDI panel — Channel 1 CCs 1–86 via the Pico USB gadget."""
 
 import os
 import sys
@@ -122,7 +122,7 @@ class MidiGUIApp(QMainWindow):
         self.status_label = QLabel("Not connected")
         self.status_label.setStyleSheet("color: red; font-weight: bold;")
         midi_layout.addWidget(self.status_label)
-        midi_layout.addWidget(QLabel("Channel 1  ·  CCs 1–58"))
+        midi_layout.addWidget(QLabel("Channel 1  ·  CCs 1–86"))
         midi_layout.addWidget(QLabel("Matrix  ·  SysEx 7D 53 50"))
 
         self.send_all_btn = QPushButton("Send all")
@@ -144,6 +144,7 @@ class MidiGUIApp(QMainWindow):
 
         tabs = QTabWidget()
         tabs.addTab(self._cc_panel(), "CC Controls")
+        tabs.addTab(self._video_fx_panel(), "Video FX")
 
         self.digital_grid = MatrixGridWidget(
             DIGITAL_GRID_ROWS,
@@ -207,6 +208,106 @@ class MidiGUIApp(QMainWindow):
         body_layout.addLayout(col_c)
         scroll.setWidget(body)
         return scroll
+
+    def _video_fx_panel(self):
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        body = QWidget()
+        body_layout = QHBoxLayout(body)
+        col_a = QVBoxLayout()
+        col_b = QVBoxLayout()
+        col_a.addWidget(self._fx_color_group())
+        col_a.addWidget(self._fx_scan_group())
+        col_a.addWidget(self._fx_bitplane_group())
+        col_a.addStretch()
+        col_b.addWidget(self._fx_dither_group())
+        col_b.addWidget(self._fx_mirror_group())
+        col_b.addWidget(self._fx_chromatic_group())
+        col_b.addWidget(self._fx_emboss_group())
+        col_b.addStretch()
+        body_layout.addLayout(col_a)
+        body_layout.addLayout(col_b)
+        scroll.setWidget(body)
+        return scroll
+
+    def _fx_color_group(self):
+        group = QGroupBox("Color")
+        layout = QVBoxLayout(group)
+        self._add_toggle(layout, "Invert R", False, lambda on: self.queue_cc(59, gate_to_cc(on)))
+        self._add_toggle(layout, "Invert G", False, lambda on: self.queue_cc(60, gate_to_cc(on)))
+        self._add_toggle(layout, "Invert B", False, lambda on: self.queue_cc(61, gate_to_cc(on)))
+        self._add_choice(
+            layout,
+            "Swap",
+            ["RGB", "BGR", "GRB", "RBG"],
+            lambda i: self.queue_cc(62, enum_to_cc(i, 2)),
+        )
+        self._add_toggle(layout, "Bit reverse R", False, lambda on: self.queue_cc(63, gate_to_cc(on)))
+        self._add_toggle(layout, "Bit reverse G", False, lambda on: self.queue_cc(64, gate_to_cc(on)))
+        self._add_toggle(layout, "Bit reverse B", False, lambda on: self.queue_cc(65, gate_to_cc(on)))
+        return group
+
+    def _fx_scan_group(self):
+        group = QGroupBox("Scanline and previous pixel")
+        layout = QVBoxLayout(group)
+        self._add_toggle(layout, "Scanlines", False, lambda on: self.queue_cc(66, gate_to_cc(on)))
+        self._add_slider(layout, "Scan delay", 0, 2, 0, lambda v: self.queue_cc(67, enum_to_cc(v, 2)))
+        self._add_choice(
+            layout,
+            "With previous",
+            ["Off", "OR", "AND", "XOR"],
+            lambda i: self.queue_cc(68, enum_to_cc(i, 2)),
+        )
+        return group
+
+    def _fx_bitplane_group(self):
+        group = QGroupBox("Bit plane")
+        layout = QVBoxLayout(group)
+        layout.addWidget(QLabel("Bypass on keeps the full 8-bit channel."))
+        self._add_toggle(layout, "R bypass", True, lambda on: self.queue_cc(69, gate_to_cc(on)))
+        self._add_slider(layout, "R bit", 0, 7, 0, lambda v: self.queue_cc(70, enum_to_cc(v, 3)))
+        self._add_toggle(layout, "G bypass", True, lambda on: self.queue_cc(71, gate_to_cc(on)))
+        self._add_slider(layout, "G bit", 0, 7, 0, lambda v: self.queue_cc(72, enum_to_cc(v, 3)))
+        self._add_toggle(layout, "B bypass", True, lambda on: self.queue_cc(73, gate_to_cc(on)))
+        self._add_slider(layout, "B bit", 0, 7, 0, lambda v: self.queue_cc(74, enum_to_cc(v, 3)))
+        return group
+
+    def _fx_dither_group(self):
+        group = QGroupBox("Dither")
+        layout = QVBoxLayout(group)
+        self._add_toggle(layout, "Enable", False, lambda on: self.queue_cc(75, gate_to_cc(on)))
+        self._add_choice(
+            layout,
+            "Depth",
+            ["6-bit", "5-bit", "4-bit", "3-bit"],
+            lambda i: self.queue_cc(76, enum_to_cc(i, 2)),
+        )
+        return group
+
+    def _fx_mirror_group(self):
+        group = QGroupBox("Horizontal mirror")
+        layout = QVBoxLayout(group)
+        self._add_toggle(layout, "Enable", False, lambda on: self.queue_cc(77, gate_to_cc(on)))
+        self._add_slider(layout, "Half width", 0, 960, 360, lambda v: self.send_u14(78, 79, v))
+        return group
+
+    def _fx_chromatic_group(self):
+        group = QGroupBox("Chromatic aberration")
+        layout = QVBoxLayout(group)
+        self._add_toggle(layout, "Enable", False, lambda on: self.queue_cc(80, gate_to_cc(on)))
+        self._add_slider(layout, "Green delay", 0, 5, 0, lambda v: self.queue_cc(81, enum_to_cc(v, 3)))
+        self._add_slider(layout, "Blue delay", 0, 5, 0, lambda v: self.queue_cc(82, enum_to_cc(v, 3)))
+        return group
+
+    def _fx_emboss_group(self):
+        group = QGroupBox("Emboss and shadow")
+        layout = QVBoxLayout(group)
+        layout.addWidget(QLabel("Threshold 0 and strength 0 use the hardware defaults (32 and 80)."))
+        self._add_toggle(layout, "Emboss", False, lambda on: self.queue_cc(83, gate_to_cc(on)))
+        self._add_toggle(layout, "Shadow", False, lambda on: self.queue_cc(84, gate_to_cc(on)))
+        self._add_slider(layout, "Threshold", 0, 255, 0, lambda v: self.queue_cc(85, scale_to_cc(v, 255)))
+        self._add_slider(layout, "Strength", 0, 255, 0, lambda v: self.queue_cc(86, scale_to_cc(v, 255)))
+        return group
 
     def _osc_group(self, title, base_cc):
         group = QGroupBox(title)

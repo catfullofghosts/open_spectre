@@ -70,6 +70,12 @@
 #define REG_OSC1_A    0xCCU
 #define REG_OSC2_A    0xD0U
 #define REG_NOISE_A   0xDCU
+#define REG_FX_CTRL   0xE4U
+#define REG_FX_BIT    0xE8U
+#define REG_FX_DITH   0xECU
+#define REG_FX_MIRROR 0xF0U
+#define REG_FX_CHROMA 0xF4U
+#define REG_FX_EMBOSS 0xF8U
 #define SHAPE_SLIDER_MAX 1000U
 
 static XUartPs MidiUart;
@@ -91,6 +97,7 @@ static u8 g_noise_f_msb, g_noise_f_lsb;
 static u8 g_y_msb, g_y_lsb;
 static u8 g_cr_msb, g_cr_lsb;
 static u8 g_cb_msb, g_cb_lsb;
+static u8 g_mirror_msb, g_mirror_lsb;
 
 #define MIDI_SYSEX_MAX 24U
 #define MIDI_DIG_OUTS  57U
@@ -524,6 +531,98 @@ static void MidiMapCc(u8 cc, u8 val)
 		MidiRegFld(REG_VID_SPAN, 0xFFU, 0U, MidiScale(val, 255U));
 		break;
 
+	case 59:
+		MidiRegFld(REG_FX_CTRL, 0x1U, 0U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 60:
+		MidiRegFld(REG_FX_CTRL, 0x1U, 1U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 61:
+		MidiRegFld(REG_FX_CTRL, 0x1U, 2U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 62:
+		MidiRegFld(REG_FX_CTRL, 0x3U, 3U, (u32)val >> 5);
+		break;
+	case 63:
+		MidiRegFld(REG_FX_CTRL, 0x1U, 5U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 64:
+		MidiRegFld(REG_FX_CTRL, 0x1U, 6U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 65:
+		MidiRegFld(REG_FX_CTRL, 0x1U, 7U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 66:
+		MidiRegFld(REG_FX_CTRL, 0x1U, 8U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 67:
+		MidiRegFld(REG_FX_CTRL, 0x3U, 9U, (u32)val >> 5);
+		break;
+	case 68:
+		MidiRegFld(REG_FX_CTRL, 0x3U, 11U, (u32)val >> 5);
+		break;
+
+	case 69:
+		MidiRegFld(REG_FX_BIT, 0x1U, 3U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 70:
+		MidiRegFld(REG_FX_BIT, 0x7U, 0U, (u32)val >> 4);
+		break;
+	case 71:
+		MidiRegFld(REG_FX_BIT, 0x1U, 7U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 72:
+		MidiRegFld(REG_FX_BIT, 0x7U, 4U, (u32)val >> 4);
+		break;
+	case 73:
+		MidiRegFld(REG_FX_BIT, 0x1U, 11U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 74:
+		MidiRegFld(REG_FX_BIT, 0x7U, 8U, (u32)val >> 4);
+		break;
+
+	case 75:
+		MidiRegFld(REG_FX_DITH, 0x1U, 0U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 76:
+		MidiRegFld(REG_FX_DITH, 0x3U, 1U, (u32)val >> 5);
+		break;
+
+	case 77:
+		MidiRegFld(REG_FX_MIRROR, 0x1U, 0U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 78:
+		g_mirror_msb = val;
+		MidiRegFld(REG_FX_MIRROR, 0x7FFU, 1U, MidiU14(g_mirror_msb, g_mirror_lsb));
+		break;
+	case 79:
+		g_mirror_lsb = val;
+		MidiRegFld(REG_FX_MIRROR, 0x7FFU, 1U, MidiU14(g_mirror_msb, g_mirror_lsb));
+		break;
+
+	case 80:
+		MidiRegFld(REG_FX_CHROMA, 0x1U, 0U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 81:
+		MidiRegFld(REG_FX_CHROMA, 0x7U, 1U, (u32)val >> 4);
+		break;
+	case 82:
+		MidiRegFld(REG_FX_CHROMA, 0x7U, 4U, (u32)val >> 4);
+		break;
+
+	case 83:
+		MidiRegFld(REG_FX_EMBOSS, 0x1U, 0U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 84:
+		MidiRegFld(REG_FX_EMBOSS, 0x1U, 1U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 85:
+		MidiRegFld(REG_FX_EMBOSS, 0xFFU, 8U, MidiScale(val, 255U));
+		break;
+	case 86:
+		MidiRegFld(REG_FX_EMBOSS, 0xFFU, 16U, MidiScale(val, 255U));
+		break;
+
 	default:
 		break;
 	}
@@ -544,6 +643,8 @@ static void MidiMapSeed(void)
 	MidiSplit12((w >> 16) & 0xFFFU, &g_cr_msb, &g_cr_lsb);
 	w = MidiRegRd(REG_YUV_CB);
 	MidiSplit12(w & 0xFFFU, &g_cb_msb, &g_cb_lsb);
+	w = MidiRegRd(REG_FX_MIRROR);
+	MidiSplit14((w >> 1) & 0x7FFU, &g_mirror_msb, &g_mirror_lsb);
 }
 
 static u8 MidiDataBytes(u8 status)

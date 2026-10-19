@@ -43,8 +43,10 @@ set "VIVADO_ARGS="
 :parse_args
 if "%~1"=="" goto args_done
 if /i "%~1"=="clean" (
-  REM Wipe locally; do not pass "clean" to Vivado (project already gone)
+  REM Wipe the build tree, and tell Vivado to drop any block design that survives
+  REM so the project is recreated from fpga\syn\hdmi_in.tcl.
   set "DO_CLEAN=1"
+  set "VIVADO_ARGS=!VIVADO_ARGS! clean"
   shift & goto parse_args
 )
 if /i "%~1"=="clean_only" (
