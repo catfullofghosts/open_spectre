@@ -6,8 +6,6 @@
 ## Clock signal
 
 #set_property -dict { PACKAGE_PIN H16    IOSTANDARD LVCMOS33 } [get_ports { clk }]; #IO_L13P_T2_MRCC_35 Sch=SYSCLK
-create_clock -add -name sys_clk_pin -period 10.00 -waveform {0 5} [get_ports { pix_clk }];#set
-create_clock -add -name sys_clk_pin -period 10.00 -waveform {0 5} [get_ports { regs_clk }];#set
 
 
 ##Switches
@@ -82,6 +80,9 @@ set_property -dict { PACKAGE_PIN W14   IOSTANDARD LVCMOS33 } [get_ports { UART1_
 
 #set_property -dict { PACKAGE_PIN H17   IOSTANDARD LVCMOS33 } [get_ports { hdmi_rx_cec }]; #IO_L13N_T2_MRCC_35 Sch=HDMI_RX_CEC
 set_property -dict {PACKAGE_PIN P19 IOSTANDARD TMDS_33} [get_ports TMDS_clk_n]
+set_property -dict { PACKAGE_PIN N18   IOSTANDARD TMDS_33  } [get_ports { TMDS_clk_p }]; #IO_L13P_T2_MRCC_34 Sch=HDMI_RX_CLK_P
+# P pin only. A second create_clock on TMDS_clk_n makes Vivado time one
+# MMCM as two pixel clocks 1.346 ns apart.
 create_clock -period 13.461 -waveform {0.000 6.730} [get_ports TMDS_clk_p]
 set_property -dict {PACKAGE_PIN W20 IOSTANDARD TMDS_33} [get_ports {TMDS_data_n[0]}]
 set_property -dict {PACKAGE_PIN V20 IOSTANDARD TMDS_33} [get_ports {TMDS_data_p[0]}]

@@ -83,10 +83,54 @@ architecture Behavioral of SinWaveGenerator is
     signal waveform_div_result : std_logic_vector(11 downto 0) := (others => '0');
     signal waveform_div_result_reg : std_logic_vector(11 downto 0) := (others => '0');
 
+    -- ((64 - n) * 4096) / 360 and (duty * 4096) / 360, computed at elaboration.
+    -- A runtime divide here is a 15-level cone and misses 100 MHz.
+    type t_phase_lut is array (0 to 63) of unsigned(11 downto 0);
+    type t_pwm_lut is array (0 to 511) of unsigned(11 downto 0);
+
+    function f_phase_inc_lut return t_phase_lut is
+        variable lut : t_phase_lut;
+        variable v   : integer;
+    begin
+        for i in 0 to 63 loop
+            v := ((64 - i) * C_SINE_PHASE_FULL) / 360;
+            if v < 1 then
+                v := 1;
+            elsif v > C_SINE_PHASE_MAX then
+                v := C_SINE_PHASE_MAX;
+            end if;
+            lut(i) := to_unsigned(v, 12);
+        end loop;
+        return lut;
+    end function f_phase_inc_lut;
+
+    function f_pwm_lut return t_pwm_lut is
+        variable lut : t_pwm_lut;
+        variable v   : integer;
+    begin
+        for i in 0 to 511 loop
+            if i > 360 then
+                v := C_SINE_PHASE_MAX;
+            else
+                -- 12-bit phase. duty=360 is 4096, which wraps to 0 the same
+                -- way the old integer assignment did.
+                v := ((i * C_SINE_PHASE_FULL) / 360) mod 4096;
+            end if;
+            lut(i) := to_unsigned(v, 12);
+        end loop;
+        return lut;
+    end function f_pwm_lut;
+
+    signal C_PHASE_INC_LUT : t_phase_lut := f_phase_inc_lut;
+    signal C_PWM_LUT       : t_pwm_lut := f_pwm_lut;
+
+    attribute rom_style : string;
+    attribute rom_style of C_PHASE_INC_LUT : signal is "distributed";
+    attribute rom_style of C_PWM_LUT       : signal is "distributed";
+
 begin
 
    process(clk)
-     variable v_phase_inc : integer range 0 to C_SINE_PHASE_MAX;
    begin
    if rising_edge(clk) then
        freq_reg <= freq;
@@ -95,20 +139,11 @@ begin
        dist_freq <= freq_plus_36;
        scaled_freq <= "00" & freq_reg;
 
-       v_phase_inc := ((64 - to_integer(unsigned(freq_reg(5 downto 0))))
-                       * C_SINE_PHASE_FULL) / 360;
-       if v_phase_inc < 1 then
-         phase_inc_reg <= 1;
-       else
-         phase_inc_reg <= v_phase_inc;
-       end if;
+       phase_inc_reg <= to_integer(
+           C_PHASE_INC_LUT(to_integer(unsigned(freq_reg(5 downto 0)))));
 
-       -- Map legacy 0-360 duty register into 12-bit phase
-       if unsigned(pwm_duty) > 360 then
-           pwm_threshold <= C_SINE_PHASE_MAX;
-       else
-           pwm_threshold <= (to_integer(unsigned(pwm_duty)) * C_SINE_PHASE_FULL) / 360;
-       end if;
+       pwm_threshold <= to_integer(
+           C_PWM_LUT(to_integer(unsigned(pwm_duty))));
       end if;
     end process;
 

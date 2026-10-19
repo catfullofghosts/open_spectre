@@ -101,6 +101,18 @@ architecture rtl of audio_input is
   signal lp_shift_r    : unsigned(3 downto 0) := to_unsigned(8, 4);
   signal crossover_r   : std_logic_vector(7 downto 0) := x"80";
   signal crossover_prev : std_logic_vector(7 downto 0) := (others => '0');
+  signal diff_r        : signed(C_LP_BITS - 1 downto 0) := (others => '0');
+  signal lp_base_r     : signed(C_LP_BITS - 1 downto 0) := (others => '0');
+  signal sample_lp_r   : signed(C_LP_BITS - 1 downto 0) := (others => '0');
+  signal sample_full_r : signed(G_I2S_BITS - 1 downto 0) := (others => '0');
+  signal shift_amt_r   : unsigned(3 downto 0) := (others => '0');
+  signal shifted_lo_r  : signed(C_LP_BITS - 1 downto 0) := (others => '0');
+  signal lp_s1         : signed(C_LP_BITS - 1 downto 0) := (others => '0');
+  signal treb_s1       : signed(C_LP_BITS - 1 downto 0) := (others => '0');
+  signal sample_s1     : signed(G_I2S_BITS - 1 downto 0) := (others => '0');
+  signal filt_go       : std_logic := '0';
+  signal shift_go      : std_logic := '0';
+  signal mag_go        : std_logic := '0';
   signal audio_sig_int : std_logic_vector(G_OUT_BITS - 1 downto 0);
   signal audio_t_int   : std_logic_vector(G_OUT_BITS - 1 downto 0);
   signal audio_b_int   : std_logic_vector(G_OUT_BITS - 1 downto 0);
@@ -197,6 +209,34 @@ architecture rtl of audio_input is
   begin
     return resize(shift_right(value, C_SHIFT), C_LP_BITS);
   end function f_sample_to_lp;
+
+  -- Literal shifts are wiring. A variable shift_right by 0..15 is a barrel
+  -- that, chained with the magnitude scale, missed 100 MHz.
+  function f_shift_lo (
+    value : signed(C_LP_BITS - 1 downto 0);
+    sel   : unsigned(1 downto 0)
+  ) return signed is
+  begin
+    case sel is
+      when "00"   => return value;
+      when "01"   => return shift_right(value, 1);
+      when "10"   => return shift_right(value, 2);
+      when others => return shift_right(value, 3);
+    end case;
+  end function f_shift_lo;
+
+  function f_shift_hi (
+    value : signed(C_LP_BITS - 1 downto 0);
+    sel   : unsigned(1 downto 0)
+  ) return signed is
+  begin
+    case sel is
+      when "00"   => return value;
+      when "01"   => return shift_right(value, 4);
+      when "10"   => return shift_right(value, 8);
+      when others => return shift_right(value, 12);
+    end case;
+  end function f_shift_hi;
 
 begin
 
@@ -312,22 +352,38 @@ begin
     end if;
   end process p_i2s_rx;
 
-  -- Stage 1: LP crossover filter + magnitude scaling into 12-bit targets
+  -- Low-pass split across three clocks, then magnitude on a fourth.
+  -- Samples are ~48 kHz, so the extra cycles do not change the envelopes.
+  -- filt_go -> shift_go -> mag_go keeps env_clear_d asserted until the
+  -- matching envelope step, including a crossover that lands on a sample.
   p_dsp_filter : process (clk) is
-    variable v_lp       : signed(C_LP_BITS - 1 downto 0);
+    variable v_lp_base  : signed(C_LP_BITS - 1 downto 0);
     variable v_sample_u : signed(C_LP_BITS - 1 downto 0);
-    variable v_treb     : signed(C_LP_BITS - 1 downto 0);
+    variable v_lp       : signed(C_LP_BITS - 1 downto 0);
     variable v_xover    : boolean;
   begin
     if rising_edge(clk) then
-      dsp_pending <= sample_v;
-
       if rst = '1' then
         lp_state       <= (others => '0');
         crossover_prev <= crossover_r;
         env_clear_d    <= '0';
-        audio_mag_pre_r <= (others => '0');
+        diff_r         <= (others => '0');
+        lp_base_r      <= (others => '0');
+        sample_lp_r    <= (others => '0');
+        sample_full_r  <= (others => '0');
+        shift_amt_r    <= (others => '0');
+        shifted_lo_r   <= (others => '0');
+        lp_s1          <= (others => '0');
+        treb_s1        <= (others => '0');
+        sample_s1      <= (others => '0');
+        filt_go        <= '0';
+        shift_go       <= '0';
+        mag_go         <= '0';
       else
+        shift_go <= filt_go;
+        mag_go   <= shift_go;
+        filt_go  <= '0';
+
         v_xover := crossover_r /= crossover_prev;
 
         if v_xover then
@@ -336,30 +392,63 @@ begin
           if sample_v = '0' then
             lp_state <= (others => '0');
           end if;
-        elsif env_clear_d = '1' and (dsp_pending = '1' or sample_v = '0') then
+        elsif env_clear_d = '1' and
+              (dsp_pending = '1' or
+               (sample_v = '0' and filt_go = '0' and shift_go = '0' and mag_go = '0')) then
           env_clear_d <= '0';
         end if;
 
         if sample_v = '1' then
           if v_xover then
-            v_lp := (others => '0');
+            v_lp_base := (others => '0');
           else
-            v_lp := lp_state;
+            v_lp_base := lp_state;
           end if;
 
-          v_sample_u := f_sample_to_lp(signed(shift_reg));
-          v_lp := v_lp + shift_right(v_sample_u - v_lp, to_integer(lp_shift_r));
-          lp_state <= v_lp;
+          v_sample_u    := f_sample_to_lp(signed(shift_reg));
+          diff_r        <= v_sample_u - v_lp_base;
+          lp_base_r     <= v_lp_base;
+          sample_lp_r   <= v_sample_u;
+          sample_full_r <= signed(shift_reg);
+          shift_amt_r   <= lp_shift_r;
+          filt_go       <= '1';
+        end if;
 
-          v_treb := v_sample_u - v_lp;
-          mag_sig_env <= f_to_env_mag(signed(shift_reg));
-          mag_t_env   <= f_signed_to_env_mag(v_treb);
-          mag_b_env   <= f_signed_to_env_mag(v_lp);
-          audio_mag_pre_r <= std_logic_vector(mag_sig_env);
+        if filt_go = '1' then
+          shifted_lo_r <= f_shift_lo(diff_r, shift_amt_r(1 downto 0));
+        end if;
+
+        if shift_go = '1' then
+          v_lp      := lp_base_r + f_shift_hi(shifted_lo_r, shift_amt_r(3 downto 2));
+          lp_state  <= v_lp;
+          lp_s1     <= v_lp;
+          treb_s1   <= sample_lp_r - v_lp;
+          sample_s1 <= sample_full_r;
         end if;
       end if;
     end if;
   end process p_dsp_filter;
+
+  p_dsp_mag : process (clk) is
+  begin
+    if rising_edge(clk) then
+      if rst = '1' then
+        dsp_pending     <= '0';
+        mag_sig_env     <= (others => '0');
+        mag_t_env       <= (others => '0');
+        mag_b_env       <= (others => '0');
+        audio_mag_pre_r <= (others => '0');
+      else
+        dsp_pending <= mag_go;
+        if mag_go = '1' then
+          audio_mag_pre_r <= std_logic_vector(mag_sig_env);
+          mag_sig_env     <= f_to_env_mag(sample_s1);
+          mag_t_env       <= f_signed_to_env_mag(treb_s1);
+          mag_b_env       <= f_signed_to_env_mag(lp_s1);
+        end if;
+      end if;
+    end if;
+  end process p_dsp_mag;
 
   -- Stage 2: 12-bit envelope followers (short carry chains)
   p_dsp_env : process (clk) is
