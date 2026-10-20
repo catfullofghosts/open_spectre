@@ -556,7 +556,15 @@ static void MidiMapCc(u8 cc, u8 val)
 		MidiRegFld(REG_FX_CTRL, 0x1U, 8U, (val >= 64U) ? 1U : 0U);
 		break;
 	case 67:
-		MidiRegFld(REG_FX_CTRL, 0x3U, 9U, (u32)val >> 5);
+		{
+			u32 scanDelay = (u32)val >> 3;
+
+			if (scanDelay > 8U)
+			{
+				scanDelay = 8U;
+			}
+			MidiRegFld(REG_FX_CTRL, 0xFU, 13U, scanDelay);
+		}
 		break;
 	case 68:
 		MidiRegFld(REG_FX_CTRL, 0x3U, 11U, (u32)val >> 5);
@@ -604,10 +612,26 @@ static void MidiMapCc(u8 cc, u8 val)
 		MidiRegFld(REG_FX_CHROMA, 0x1U, 0U, (val >= 64U) ? 1U : 0U);
 		break;
 	case 81:
-		MidiRegFld(REG_FX_CHROMA, 0x7U, 1U, (u32)val >> 4);
+		{
+			u32 chromaDelay = (u32)val >> 3;
+
+			if (chromaDelay > 8U)
+			{
+				chromaDelay = 8U;
+			}
+			MidiRegFld(REG_FX_CHROMA, 0xFU, 1U, chromaDelay);
+		}
 		break;
 	case 82:
-		MidiRegFld(REG_FX_CHROMA, 0x7U, 4U, (u32)val >> 4);
+		{
+			u32 chromaDelay = (u32)val >> 3;
+
+			if (chromaDelay > 8U)
+			{
+				chromaDelay = 8U;
+			}
+			MidiRegFld(REG_FX_CHROMA, 0xFU, 5U, chromaDelay);
+		}
 		break;
 
 	case 83:
@@ -621,6 +645,21 @@ static void MidiMapCc(u8 cc, u8 val)
 		break;
 	case 86:
 		MidiRegFld(REG_FX_EMBOSS, 0xFFU, 16U, MidiScale(val, 255U));
+		break;
+	case 87:
+		MidiRegFld(REG_FX_EMBOSS, 0x1U, 24U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 88:
+		MidiRegFld(REG_FX_EMBOSS, 0xFU, 25U, (u32)val >> 3);
+		break;
+	case 89:
+		MidiRegFld(REG_FX_DITH, 0x7U, 3U, (u32)val >> 4);
+		break;
+	case 90:
+		MidiRegFld(REG_FX_CTRL, 0x3U, 17U, (u32)val >> 5);
+		break;
+	case 91:
+		MidiRegFld(REG_FX_CTRL, 0x1U, 19U, (val >= 64U) ? 1U : 0U);
 		break;
 
 	default:

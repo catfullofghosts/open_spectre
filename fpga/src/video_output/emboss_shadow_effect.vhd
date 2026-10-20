@@ -15,6 +15,10 @@ entity emboss_shadow_effect is
     shadow_en   : in  std_logic;
     threshold   : in  std_logic_vector(7 downto 0);
     strength    : in  std_logic_vector(7 downto 0);
+    fringe_en   : in  std_logic;
+    fringe_r    : in  std_logic_vector(7 downto 0);
+    fringe_g    : in  std_logic_vector(7 downto 0);
+    fringe_b    : in  std_logic_vector(7 downto 0);
     r_in        : in  std_logic_vector(7 downto 0);
     g_in        : in  std_logic_vector(7 downto 0);
     b_in        : in  std_logic_vector(7 downto 0);
@@ -61,6 +65,24 @@ architecture rtl of emboss_shadow_effect is
     end if;
     return v - amt;
   end function f_sat_sub;
+
+  -- out = pix + (color - pix) * amt / 256, clamped.
+  function f_mix (pix, col, amt : unsigned(7 downto 0)) return unsigned is
+    variable diff : signed(9 downto 0);
+    variable prod : signed(18 downto 0);
+    variable sum  : signed(10 downto 0);
+  begin
+    diff := signed(resize(col, 10)) - signed(resize(pix, 10));
+    prod := diff * signed(resize(amt, 9));
+    sum  := signed(resize(pix, 11)) + resize(prod(18 downto 8), 11);
+    if sum < 0 then
+      return to_unsigned(0, 8);
+    elsif sum > 255 then
+      return to_unsigned(255, 8);
+    else
+      return unsigned(sum(7 downto 0));
+    end if;
+  end function f_mix;
 
 begin
 
@@ -140,7 +162,7 @@ begin
           delta := signed(resize(luma_d, 9)) - signed(resize(luma_prev, 9));
 
           if line_start = '0' then
-            if (emboss_en = '1') and (delta > signed(resize(thr, 9))) then
+            if ((emboss_en = '1') or (fringe_en = '1')) and (delta > signed(resize(thr, 9))) then
               e_cnt := C_STREAK;
             end if;
             if (shadow_en = '1') and (delta < -signed(resize(thr, 9))) then
@@ -149,9 +171,15 @@ begin
           end if;
 
           if e_cnt /= 0 then
-            vr := f_sat_add(vr, str);
-            vg := f_sat_add(vg, str);
-            vb := f_sat_add(vb, str);
+            if fringe_en = '1' then
+              vr := f_mix(vr, unsigned(fringe_r), str);
+              vg := f_mix(vg, unsigned(fringe_g), str);
+              vb := f_mix(vb, unsigned(fringe_b), str);
+            else
+              vr := f_sat_add(vr, str);
+              vg := f_sat_add(vg, str);
+              vb := f_sat_add(vb, str);
+            end if;
             e_cnt := e_cnt - 1;
           end if;
           if s_cnt /= 0 then

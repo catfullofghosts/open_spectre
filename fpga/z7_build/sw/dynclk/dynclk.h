@@ -95,6 +95,8 @@
 #define OFST_DYNCLK_DIV 0x14
 #define OFST_DYNCLK_LOCK_L 0x18
 #define OFST_DYNCLK_FLTR_LOCK_H 0x1C
+/* CLKOUT1 DRP word. BUFR divides CLKOUT0 by 5; CLKOUT1 must be clkdiv*5 so the global pixel clock matches. */
+#define OFST_DYNCLK_CLK1_L 0x24
 
 #define BIT_DYNCLK_START 0
 #define BIT_DYNCLK_RUNNING 0
@@ -110,6 +112,7 @@ typedef struct {
 		u32 divclk;
 		u32 lockL;
 		u32 fltr_lockH;
+		u32 clk1L;
 } ClkConfig;
 
 typedef struct {

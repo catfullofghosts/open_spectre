@@ -1068,8 +1068,8 @@ begin
     (
       clk                   => pix_clk, --clk_148_5,
       rst                   => reset_n,
-      h_sync                => h_sync, --negated inside the module
-      v_sync                => v_sync, --negated inside the module
+      h_sync                => h_sync_n, -- idle-low, same as shape_gen1; module inverts for the ramp
+      v_sync                => v_sync_n,
       start_of_frame        => start_of_frame_n,
       start_of_active_video => '0',
       video_on              => '0',
@@ -1179,11 +1179,9 @@ begin
         encoder_video := blue & green & red;
       end if;
 
-      if overlay_key = '1' then
-        bg_video_reg1 <= overlay_rgb;
-      else
-        bg_video_reg1 <= encoder_video;
-      end if;
+      -- Overlay sprite is not instantiated. Do not let an undriven key
+      -- replace the encoder picture with a black pixel.
+      bg_video_reg1 <= encoder_video;
 
       bg_video_reg2 <= bg_video_reg1;
       bg_video <= bg_video_reg2;
@@ -1213,7 +1211,9 @@ begin
   video_effects_inst : entity work.video_effects
     port map (
       clk          => pix_clk,
-      rst          => reset,
+      -- reset is MMCM LOCKED, active high while the pixel clock is running.
+      -- video_effects treats rst as active high, so use the inverted lock.
+      rst          => reset_n,
       h_sync       => h_sync_n,
       v_sync       => v_sync_n,
       video_in     => video_pre_fx,

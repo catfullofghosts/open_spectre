@@ -1741,6 +1741,9 @@ static int DemoRunEffectUntilKey(char cmd, int clearFrame, u8 *staticSrc, u32 st
 	{
 		return -1;
 	}
+	/* DemoClearFrame already flushed the blank frame. The effect itself is still
+	 * in the CPU cache, so without this the VDMA keeps scanning the old splash. */
+	Xil_DCacheFlushRange((unsigned int)pFrames[dest], staticHeight * DEMO_STRIDE);
 	DisplayChangeFrame(&dispCtrl, dest);
 	xil_printf("\n\rPress any key to continue, q to quit...\r\n");
 	while (XUartPs_IsReceiveData(UART_BASEADDR))
@@ -3325,6 +3328,36 @@ static char CheckForExit(void)
 	return 0;
 }
 
+/*
+ * The pattern menu reads the selection key, then this runner prints a banner.
+ * Terminals send CR/LF a few milliseconds after that key. The old main-menu
+ * path printed first and flushed after, so the newline never counted as stop.
+ * Eat only CR/LF for a short window. Any other byte still stops the pattern.
+ */
+static void DemoDrainPatternEnter(void)
+{
+	u32 slice;
+
+	for (slice = 0U; slice < 40U; slice++)
+	{
+		TimerDelay(1000);
+		MidiUartPoll();
+		while (XUartPs_IsReceiveData(UART_BASEADDR) != 0)
+		{
+			char rx = (char)XUartPs_ReadReg(UART_BASEADDR, XUARTPS_FIFO_OFFSET);
+
+			if ((rx != '\r') && (rx != '\n'))
+			{
+				g_shouldExitPattern = 1;
+			}
+		}
+		if (g_shouldExitPattern != 0)
+		{
+			return;
+		}
+	}
+}
+
 #define DEMO_BLOCK_COLS 5
 #define DEMO_BLOCK_ROWS 3
 
@@ -3828,6 +3861,7 @@ void DemoRunAnimatedPattern(u8 *frame, u32 width, u32 height, u32 stride, int pa
 		Xil_DCacheFlushRange((unsigned int)dest, height * stride);
 		DisplayChangeFrame(&dispCtrl, destIdx);
 		xil_printf("\n\rRunning accumulating pattern. Press any key to stop\n\r");
+		DemoDrainPatternEnter();
 
 		while (!shouldExit)
 		{
@@ -3886,11 +3920,12 @@ void DemoRunAnimatedPattern(u8 *frame, u32 width, u32 height, u32 stride, int pa
 
 	xil_printf("\n\rRunning animated pattern at %dx%d (scaled from %dx%d)... Press any key to stop\n\r",
 		width, height, lowWidth, lowHeight);
+	DemoDrainPatternEnter();
 
 	while (!shouldExit)
 	{
 		// Check for exit before starting
-		if (CheckForExit())
+		if (CheckForExit() || g_shouldExitPattern)
 		{
 			shouldExit = 1;
 			break;

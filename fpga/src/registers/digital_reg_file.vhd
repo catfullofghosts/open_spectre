@@ -438,17 +438,19 @@ begin
   -- Shape select controls
   regs(ra(x"E0")) <= x"0000" & shape2_b_sel_i & shape2_a_sel_i & shape1_b_sel_i & shape1_a_sel_i;
   -- Video output effects: [0]=inv R, [1]=inv G, [2]=inv B, [4:3]=swap, [7:5]=bit rev,
-  --   [8]=scan en, [10:9]=scan delay, [12:11]=logic w/ prev pixel (01=OR 10=AND 11=XOR)
+  --   [8]=scan en, [12:11]=logic w/ prev pixel (01=OR 10=AND 11=XOR), [16:13]=scan delay 0-8,
+  --   [18:17]=scan band (00=1 line, 01=2, 10=4), [19]=CRT darken
   regs(ra(x"E4")) <= video_fx_ctrl_i;
   -- Bit plane slice: R[3:0] G[7:4] B[11:8]; bit3 per channel = bypass
   regs(ra(x"E8")) <= video_fx_bitplane_i;
-  -- Horizontal ordered dither: [0]=en, [2:1]=depth (6/5/4/3-bit)
+  -- Horizontal ordered dither: [0]=en, [2:1]=depth (6/5/4/3-bit), [5:3]=posterize (0=off, 1=6bit .. 5=2bit)
   regs(ra(x"EC")) <= video_fx_dither_i;
   -- Horizontal mirror: [0]=en, [11:1]=half line width (pixels)
   regs(ra(x"F0")) <= video_fx_mirror_i;
-  -- Chromatic aberration: [0]=en, [3:1]=G delay, [6:4]=B delay (0-5 px)
+  -- Chromatic aberration: [0]=en, [4:1]=G delay, [8:5]=B delay (0-8 px)
   regs(ra(x"F4")) <= video_fx_chromatic_i;
   -- Emboss/shadow: [0]=emboss [1]=shadow [15:8]=threshold [23:16]=strength
+  --   [24]=color fringe [28:25]=fringe color 0-15
   regs(ra(x"F8")) <= video_fx_emboss_i;
   -- Overlay master enable
   regs(ra(x"FC")) <= "0000000000000000000000000000" & overlay_block_div_i & overlay_global_en_i;

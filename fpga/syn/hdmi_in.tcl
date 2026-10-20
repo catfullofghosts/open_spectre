@@ -984,9 +984,9 @@ proc create_root_design { parentCell } {
     CONFIG.M00_HAS_REGSLICE {4} \
     CONFIG.NUM_MI {1} \
     CONFIG.NUM_SI {2} \
-    CONFIG.S00_HAS_DATA_FIFO {2} \
+    CONFIG.S00_HAS_DATA_FIFO {0} \
     CONFIG.S00_HAS_REGSLICE {4} \
-    CONFIG.S01_HAS_DATA_FIFO {2} \
+    CONFIG.S01_HAS_DATA_FIFO {0} \
     CONFIG.S01_HAS_REGSLICE {4} \
     CONFIG.STRATEGY {0} \
     CONFIG.SYNCHRONIZATION_STAGES {2} \
@@ -1004,6 +1004,7 @@ proc create_root_design { parentCell } {
     CONFIG.M04_HAS_REGSLICE {4} \
     CONFIG.M05_HAS_REGSLICE {4} \
     CONFIG.NUM_MI {6} \
+    CONFIG.S00_HAS_DATA_FIFO {1} \
     CONFIG.S00_HAS_REGSLICE {4} \
     CONFIG.SYNCHRONIZATION_STAGES {2} \
   ] $ps7_0_axi_periph2
@@ -1058,14 +1059,15 @@ proc create_root_design { parentCell } {
   [get_bd_pins spector_wrapper_zynq_0/regs_wr_data]
   connect_bd_net -net axi_dynclk_0_LOCKED_O  [get_bd_pins axi_dynclk_0/LOCKED_O] \
   [get_bd_pins rgb2dvi_0/aRst_n] \
-  [get_bd_pins spector_wrapper_zynq_0/reset] \
-  [get_bd_pins video_bufr_reg_0/rst_n]
+  [get_bd_pins video_bufr_reg_0/rst_n] \
+  [get_bd_pins spector_wrapper_zynq_0/reset]
   connect_bd_net -net axi_dynclk_0_PXL_CLK_5X_O  [get_bd_pins axi_dynclk_0/PXL_CLK_5X_O] \
   [get_bd_pins rgb2dvi_0/SerialClk]
   connect_bd_net -net axi_dynclk_0_PXL_CLK_G_O  [get_bd_pins axi_dynclk_0/PXL_CLK_G_O] \
-  [get_bd_pins spector_wrapper_zynq_0/pix_clk] \
   [get_bd_pins v_axi4s_vid_out_0/vid_io_out_clk] \
-  [get_bd_pins v_tc_0/clk]
+  [get_bd_pins v_tc_0/clk] \
+  [get_bd_pins spector_wrapper_zynq_0/pix_clk] \
+  [get_bd_pins video_bufr_reg_0/src_clk]
   connect_bd_net -net axi_dynclk_0_PXL_CLK_O  [get_bd_pins axi_dynclk_0/PXL_CLK_O] \
   [get_bd_pins rgb2dvi_0/PixelClk] \
   [get_bd_pins video_bufr_reg_0/pxl_clk]
@@ -1208,6 +1210,7 @@ proc create_root_design { parentCell } {
   # Restore current instance
   current_bd_instance $oldCurInst
 
+  validate_bd_design
   save_bd_design
 }
 # End of create_root_design()
@@ -1219,6 +1222,4 @@ proc create_root_design { parentCell } {
 
 create_root_design ""
 
-
-common::send_gid_msg -ssname BD::TCL -id 2053 -severity "WARNING" "This Tcl script was generated from a block design that has not been validated. It is possible that design <$design_name> may result in errors during validation."
 

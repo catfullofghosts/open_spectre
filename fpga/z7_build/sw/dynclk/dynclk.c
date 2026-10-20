@@ -139,6 +139,20 @@ u32 ClkFindReg (ClkConfig *regValues, ClkMode *clkParams)
 	regValues->fltr_lockH = (u32) ((lock_lookup[clkParams->fbmult - 1] >> 32) & 0x000000FF);
 	regValues->fltr_lockH |= ((filter_lookup_low[clkParams->fbmult - 1] << 16) & 0x03FF0000);
 
+	/*
+	 * CLKOUT0 is the 5x serializer clock (BUFR divides it by 5 for the HDMI pixel clock).
+	 * CLKOUT1 is the global fabric pixel clock and has to be that same 1x rate, so its
+	 * integer divider is five times the CLKOUT0 divider. Left at the power-on /10, 720p
+	 * happens to match but 1080p and 640x480 do not, and the Spectron image is sampled
+	 * onto the wrong clock.
+	 */
+	if ((clkParams->clkdiv > 25U) || ((clkParams->clkdiv * 5U) > 128U))
+		return 0;
+
+	regValues->clk1L = ClkCountCalc(clkParams->clkdiv * 5U);
+	if (regValues->clk1L == ERR_CLKCOUNTCALC)
+		return 0;
+
 	return 1;
 }
 
@@ -150,6 +164,7 @@ void ClkWriteReg (ClkConfig *regValues, u32 dynClkAddr)
 	Xil_Out32(dynClkAddr + OFST_DYNCLK_DIV, regValues->divclk);
 	Xil_Out32(dynClkAddr + OFST_DYNCLK_LOCK_L, regValues->lockL);
 	Xil_Out32(dynClkAddr + OFST_DYNCLK_FLTR_LOCK_H, regValues->fltr_lockH);
+	Xil_Out32(dynClkAddr + OFST_DYNCLK_CLK1_L, regValues->clk1L);
 }
 
 /*

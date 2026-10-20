@@ -15,9 +15,11 @@ use ieee.numeric_std.all;
 --   [5]     bit-reverse R (MSB<->LSB within byte)
 --   [6]     bit-reverse G
 --   [7]     bit-reverse B
---   [8]     scanline effect enable (odd lines delayed)
---   [10:9]  scanline delay: 01=1 pixel, 10=2 pixels
+--   [8]     scanline effect enable (selected lines delayed)
 --   [12:11] logic with previous pixel: 01=OR, 10=AND, 11=XOR, 00=off
+--   [16:13] scanline delay 0-8 pixels
+--   [18:17] scanline band: 00=1 line, 01=2 lines, 10/11=4 lines
+--   [19]    CRT darken (every other line at half brightness)
 --
 -- video_fx_bitplane @ 0xE8 — per channel (R/G/B), 4 bits each:
 --   [3]    1=bypass (full 8-bit), 0=slice selected bit plane
@@ -26,6 +28,7 @@ use ieee.numeric_std.all;
 -- video_fx_dither @ 0xEC — horizontal ordered dither (no line memory):
 --   [0]    1=enable, 0=bypass
 --   [2:1]  depth: 00=6-bit, 01=5-bit, 10=4-bit, 11=3-bit output per channel
+--   [5:3]  posterize: 000=off, 001=6-bit, 010=5, 011=4, 100=3, 101..=2-bit
 --
 -- video_fx_mirror @ 0xF0 — horizontal mirror (half-line BRAM, no full frame):
 --   [0]      1=enable, 0=bypass
@@ -34,14 +37,16 @@ use ieee.numeric_std.all;
 --
 -- video_fx_chromatic @ 0xF4 — RGB channel delay (chromatic aberration):
 --   [0]    1=enable
---   [3:1]  green delay 0-5 pixels
---   [6:4]  blue delay 0-5 pixels (red undelayed)
+--   [4:1]  green delay 0-8 pixels
+--   [8:5]  blue delay 0-8 pixels (red undelayed)
 --
 -- video_fx_emboss @ 0xF8 — horizontal luma edge relief:
 --   [0]     1=emboss (rising luma: brighten 5 px)
 --   [1]     1=shadow (falling luma: darken 5 px)
 --   [15:8]  delta threshold (0 = default 32)
 --   [23:16] add/sub strength (0 = default 80)
+--   [24]    1=color fringe (emboss edge painted, not whitened)
+--   [28:25] fringe color 0-15 (black, grey, white, then hues)
 
 entity video_effects is
   port (
@@ -82,7 +87,7 @@ architecture rtl of video_effects is
 
   signal h_sync_d  : std_logic;
   signal v_sync_d  : std_logic;
-  signal line_odd  : std_logic := '0';
+  signal line_idx  : unsigned(2 downto 0) := (others => '0');
   signal x_count   : unsigned(15 downto 0) := (others => '0');
 
   signal r_in  : std_logic_vector(7 downto 0);
@@ -99,8 +104,8 @@ architecture rtl of video_effects is
   signal pixel_logic    : std_logic_vector(23 downto 0);
   signal pixel_logic_r  : std_logic_vector(23 downto 0);
   signal pixel_filtered : std_logic_vector(23 downto 0);
-  signal pixel_d1         : std_logic_vector(23 downto 0);
-  signal pixel_d2         : std_logic_vector(23 downto 0);
+  type t_scan_dly is array (0 to 7) of std_logic_vector(23 downto 0);
+  signal scan_dly : t_scan_dly := (others => (others => '0'));
 
   signal r_post_logic : std_logic_vector(7 downto 0);
   signal g_post_logic : std_logic_vector(7 downto 0);
@@ -111,6 +116,7 @@ architecture rtl of video_effects is
   signal r_edge       : std_logic_vector(7 downto 0);
   signal g_edge       : std_logic_vector(7 downto 0);
   signal b_edge       : std_logic_vector(7 downto 0);
+  signal fringe_rgb   : std_logic_vector(23 downto 0);
 
   function f_reverse_byte (b : std_logic_vector(7 downto 0)) return std_logic_vector is
     variable v : std_logic_vector(7 downto 0);
@@ -213,6 +219,74 @@ architecture rtl of video_effects is
     return result;
   end function f_horiz_dither;
 
+  function f_posterize (
+    v    : std_logic_vector(7 downto 0);
+    mode : std_logic_vector(2 downto 0)
+  ) return std_logic_vector is
+    variable bits  : integer;
+    variable shift : integer;
+    variable q     : unsigned(7 downto 0);
+  begin
+    case mode is
+      when "001" => bits := 6;
+      when "010" => bits := 5;
+      when "011" => bits := 4;
+      when "100" => bits := 3;
+      when "101" => bits := 2;
+      when "110" => bits := 2;
+      when "111" => bits := 2;
+      when others => return v;
+    end case;
+    shift := 8 - bits;
+    q := shift_left(shift_right(unsigned(v), shift), shift);
+    q := q or shift_right(q, bits);
+    if bits <= 4 then
+      q := q or shift_right(q, bits * 2);
+    end if;
+    return std_logic_vector(q);
+  end function f_posterize;
+
+  -- R in [7:0], G in [15:8], B in [23:16].
+  function f_fringe_rgb (idx : std_logic_vector(3 downto 0)) return std_logic_vector is
+  begin
+    case idx is
+      when x"0" => return x"000000"; -- black
+      when x"1" => return x"808080"; -- grey
+      when x"2" => return x"FFFFFF"; -- white
+      when x"3" => return x"0000FF"; -- red
+      when x"4" => return x"00FF00"; -- green
+      when x"5" => return x"FF0000"; -- blue
+      when x"6" => return x"00FFFF"; -- yellow
+      when x"7" => return x"FFFF00"; -- cyan
+      when x"8" => return x"FF00FF"; -- magenta
+      when x"9" => return x"0080FF"; -- orange
+      when x"A" => return x"8040FF"; -- rose
+      when x"B" => return x"FF0080"; -- purple
+      when x"C" => return x"00FF80"; -- lime
+      when x"D" => return x"808000"; -- teal
+      when x"E" => return x"004080"; -- brown
+      when others => return x"404040"; -- dark grey
+    end case;
+  end function f_fringe_rgb;
+
+  function f_scan_band (
+    idx  : unsigned(2 downto 0);
+    mode : std_logic_vector(1 downto 0)
+  ) return std_logic is
+  begin
+    case mode is
+      when "01" => return idx(1);
+      when "10" => return idx(2);
+      when "11" => return idx(2);
+      when others => return idx(0);
+    end case;
+  end function f_scan_band;
+
+  function f_crt_half (pix : std_logic_vector(23 downto 0)) return std_logic_vector is
+  begin
+    return '0' & pix(23 downto 17) & '0' & pix(15 downto 9) & '0' & pix(7 downto 1);
+  end function f_crt_half;
+
 begin
 
   r_in <= video_in(7 downto 0);
@@ -234,13 +308,13 @@ begin
       fx_emboss_r    <= fx_emboss;
 
       if rst = '1' then
-        line_odd <= '0';
+        line_idx <= (others => '0');
         x_count  <= (others => '0');
       else
         if v_sync = '1' and v_sync_d = '0' then
-          line_odd <= '0';
+          line_idx <= (others => '0');
         elsif h_sync = '1' and h_sync_d = '0' then
-          line_odd <= not line_odd;
+          line_idx <= line_idx + 1;
         end if;
 
         if h_sync = '1' and h_sync_d = '0' then
@@ -311,6 +385,12 @@ begin
         vg := pixel_color_s1(15 downto 8);
         vb := pixel_color_s1(23 downto 16);
 
+        if fx_dither_r(5 downto 3) /= "000" then
+          vr := f_posterize(vr, fx_dither_r(5 downto 3));
+          vg := f_posterize(vg, fx_dither_r(5 downto 3));
+          vb := f_posterize(vb, fx_dither_r(5 downto 3));
+        end if;
+
         if fx_dither_r(0) = '1' then
           vr := f_horiz_dither(vr, x_count(1 downto 0), fx_dither_r(2 downto 1));
           vg := f_horiz_dither(vg, x_count(1 downto 0), fx_dither_r(2 downto 1));
@@ -379,8 +459,8 @@ begin
       clk       => clk,
       rst       => rst,
       enable    => fx_chromatic_r(0),
-      delay_g   => fx_chromatic_r(3 downto 1),
-      delay_b   => fx_chromatic_r(6 downto 4),
+      delay_g   => fx_chromatic_r(4 downto 1),
+      delay_b   => fx_chromatic_r(8 downto 5),
       r_in      => r_post_logic,
       g_in      => g_post_logic,
       b_in      => b_post_logic,
@@ -395,6 +475,8 @@ begin
       de_out    => open
     );
 
+  fringe_rgb <= f_fringe_rgb(fx_emboss_r(28 downto 25));
+
   emboss_shadow_inst : entity work.emboss_shadow_effect
     port map (
       clk        => clk,
@@ -403,6 +485,10 @@ begin
       shadow_en  => fx_emboss_r(1),
       threshold  => fx_emboss_r(15 downto 8),
       strength   => fx_emboss_r(23 downto 16),
+      fringe_en  => fx_emboss_r(24),
+      fringe_r   => fringe_rgb(7 downto 0),
+      fringe_g   => fringe_rgb(15 downto 8),
+      fringe_b   => fringe_rgb(23 downto 16),
       r_in       => r_chrom,
       g_in       => g_chrom,
       b_in       => b_chrom,
@@ -416,6 +502,8 @@ begin
   pixel_filtered <= b_edge & g_edge & r_edge;
 
   p_output : process (clk) is
+    variable v_scan : integer;
+    variable v_pix  : std_logic_vector(23 downto 0);
   begin
     if rising_edge(clk) then
       if h_sync = '1' and h_sync_d = '0' then
@@ -424,18 +512,27 @@ begin
         pixel_prev <= pixel_mirrored;
       end if;
 
-      pixel_d1 <= pixel_filtered;
-      pixel_d2 <= pixel_d1;
+      scan_dly(0) <= pixel_filtered;
+      for i in 1 to 7 loop
+        scan_dly(i) <= scan_dly(i - 1);
+      end loop;
 
-      if fx_ctrl_r(8) = '1' and line_odd = '1' then
-        case fx_ctrl_r(10 downto 9) is
-          when "01"   => video_out <= pixel_d1;
-          when "10"   => video_out <= pixel_d2;
-          when others => video_out <= pixel_filtered;
-        end case;
-      else
-        video_out <= pixel_filtered;
+      v_pix := pixel_filtered;
+      if fx_ctrl_r(8) = '1' and f_scan_band(line_idx, fx_ctrl_r(18 downto 17)) = '1' then
+        v_scan := to_integer(unsigned(fx_ctrl_r(16 downto 13)));
+        if v_scan <= 0 then
+          v_pix := pixel_filtered;
+        elsif v_scan >= 8 then
+          v_pix := scan_dly(7);
+        else
+          v_pix := scan_dly(v_scan - 1);
+        end if;
       end if;
+
+      if fx_ctrl_r(19) = '1' and line_idx(0) = '1' then
+        v_pix := f_crt_half(v_pix);
+      end if;
+      video_out <= v_pix;
     end if;
   end process p_output;
 

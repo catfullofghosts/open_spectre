@@ -251,7 +251,14 @@ class MidiGUIApp(QMainWindow):
         group = QGroupBox("Scanline and previous pixel")
         layout = QVBoxLayout(group)
         self._add_toggle(layout, "Scanlines", False, lambda on: self.queue_cc(66, gate_to_cc(on)))
-        self._add_slider(layout, "Scan delay", 0, 2, 0, lambda v: self.queue_cc(67, enum_to_cc(v, 2)))
+        self._add_slider(layout, "Scan delay", 0, 8, 0, lambda v: self.queue_cc(67, enum_to_cc(v, 4)))
+        self._add_choice(
+            layout,
+            "Shifted lines",
+            ["Single lines", "Groups of 2", "Groups of 4"],
+            lambda i: self.queue_cc(90, enum_to_cc(i, 2)),
+        )
+        self._add_toggle(layout, "CRT darken", False, lambda on: self.queue_cc(91, gate_to_cc(on)))
         self._add_choice(
             layout,
             "With previous",
@@ -282,6 +289,12 @@ class MidiGUIApp(QMainWindow):
             ["6-bit", "5-bit", "4-bit", "3-bit"],
             lambda i: self.queue_cc(76, enum_to_cc(i, 2)),
         )
+        self._add_choice(
+            layout,
+            "Posterize",
+            ["Off", "6-bit", "5-bit", "4-bit", "3-bit", "2-bit"],
+            lambda i: self.queue_cc(89, enum_to_cc(i, 3)),
+        )
         return group
 
     def _fx_mirror_group(self):
@@ -295,8 +308,8 @@ class MidiGUIApp(QMainWindow):
         group = QGroupBox("Chromatic aberration")
         layout = QVBoxLayout(group)
         self._add_toggle(layout, "Enable", False, lambda on: self.queue_cc(80, gate_to_cc(on)))
-        self._add_slider(layout, "Green delay", 0, 5, 0, lambda v: self.queue_cc(81, enum_to_cc(v, 3)))
-        self._add_slider(layout, "Blue delay", 0, 5, 0, lambda v: self.queue_cc(82, enum_to_cc(v, 3)))
+        self._add_slider(layout, "Green delay", 0, 8, 0, lambda v: self.queue_cc(81, enum_to_cc(v, 4)))
+        self._add_slider(layout, "Blue delay", 0, 8, 0, lambda v: self.queue_cc(82, enum_to_cc(v, 4)))
         return group
 
     def _fx_emboss_group(self):
@@ -307,6 +320,17 @@ class MidiGUIApp(QMainWindow):
         self._add_toggle(layout, "Shadow", False, lambda on: self.queue_cc(84, gate_to_cc(on)))
         self._add_slider(layout, "Threshold", 0, 255, 0, lambda v: self.queue_cc(85, scale_to_cc(v, 255)))
         self._add_slider(layout, "Strength", 0, 255, 0, lambda v: self.queue_cc(86, scale_to_cc(v, 255)))
+        self._add_toggle(layout, "Color fringe", False, lambda on: self.queue_cc(87, gate_to_cc(on)))
+        self._add_combo(
+            layout,
+            "Fringe color",
+            [
+                "Black", "Grey", "White", "Red", "Green", "Blue",
+                "Yellow", "Cyan", "Magenta", "Orange", "Rose",
+                "Purple", "Lime", "Teal", "Brown", "Dark grey",
+            ],
+            lambda i: self.queue_cc(88, enum_to_cc(i, 4)),
+        )
         return group
 
     def _osc_group(self, title, base_cc):
@@ -466,6 +490,20 @@ class MidiGUIApp(QMainWindow):
         group.idClicked.connect(changed)
         parent.addWidget(row)
         self._senders.append(lambda fn=on_index, g=group: fn(g.checkedId() if g.checkedId() >= 0 else 0))
+
+    def _add_combo(self, parent, label, names, on_index):
+        row = QWidget()
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        name = QLabel(f"{label}:")
+        name.setMinimumWidth(120)
+        layout.addWidget(name)
+        combo = QComboBox()
+        combo.addItems(names)
+        combo.currentIndexChanged.connect(on_index)
+        layout.addWidget(combo)
+        parent.addWidget(row)
+        self._senders.append(lambda fn=on_index, box=combo: fn(box.currentIndex()))
 
     def _add_toggle(self, parent, label, initial, on_toggle):
         row = QWidget()
