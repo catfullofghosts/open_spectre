@@ -2230,6 +2230,74 @@ void DemoScaleFrame(u8 *srcFrame, u8 *destFrame, u32 srcWidth, u32 srcHeight, u3
 	return;
 }
 
+void DemoClearFrame(u8 *frame, u32 width, u32 height, u32 stride)
+{
+	u32 y;
+	u32 rowBytes;
+
+	if ((frame == NULL) || (height == 0U) || (stride == 0U))
+	{
+		return;
+	}
+
+	rowBytes = width * 3U;
+	if ((rowBytes == 0U) || (rowBytes > stride))
+	{
+		rowBytes = stride;
+	}
+	for (y = 0U; y < height; y++)
+	{
+		memset(frame + (y * stride), 0, rowBytes);
+	}
+	Xil_DCacheFlushRange((unsigned int)frame, height * stride);
+}
+
+void DemoBlitSplash(u8 *frame, u32 width, u32 height, u32 stride)
+{
+	u32 splashW;
+	u32 splashH;
+	u32 x0;
+	u32 y0;
+	u32 sx;
+	u32 sy;
+
+	DemoClearFrame(frame, width, height, stride);
+	if ((frame == NULL) || (width == 0U) || (height == 0U) || (stride < 3U))
+	{
+		return;
+	}
+
+	splashW = SPLASH_WIDTH;
+	splashH = SPLASH_HEIGHT;
+	if (splashW > width)
+	{
+		splashW = width;
+	}
+	if (splashH > height)
+	{
+		splashH = height;
+	}
+	x0 = (width - splashW) / 2U;
+	y0 = (height - splashH) / 2U;
+
+	for (sy = 0U; sy < splashH; sy++)
+	{
+		const u8 *row = splash_bits + (sy * SPLASH_ROW_BYTES);
+		u8 *dst = frame + ((y0 + sy) * stride) + (x0 * 3U);
+
+		for (sx = 0U; sx < splashW; sx++)
+		{
+			if ((row[sx >> 3] & (u8)(0x80U >> (sx & 7U))) != 0U)
+			{
+				dst[sx * 3U] = 0xFFU;
+				dst[(sx * 3U) + 1U] = 0xFFU;
+				dst[(sx * 3U) + 2U] = 0xFFU;
+			}
+		}
+	}
+	Xil_DCacheFlushRange((unsigned int)frame, height * stride);
+}
+
 void DemoPrintTest(u8 *frame, u32 width, u32 height, u32 stride, int pattern)
 {
 	u32 xcoi, ycoi;
