@@ -7,7 +7,7 @@ end entity tb_mix_wipe_bus;
 
 architecture sim of tb_mix_wipe_bus is
 
-  constant C_LAT   : integer := 9;
+  constant C_LAT   : integer := 13;
   constant C_FRAME : integer := 100;
 
   -- Repeating raster. Sync idles low and pulses high, same as the wrapper.
@@ -190,7 +190,7 @@ begin
     rst <= '0';
     clocks(2);
 
-    -- One red A pixel, mix at 0. Output should be that pixel 8 clocks later.
+    -- One red A pixel, mix at 0. Output should be that pixel C_LAT clocks later.
     active  <= '1';
     video_a <= x"0000FF";
     video_b <= x"00FF00";
@@ -198,7 +198,7 @@ begin
     wait until rising_edge(clk);
     video_a <= (others => '0');
     seen := -1;
-    for i in 1 to 16 loop
+    for i in 1 to 32 loop
       wait until rising_edge(clk);
       if video_o = x"0000FF" then
         seen := i;
@@ -210,18 +210,18 @@ begin
     video_a <= x"0000FF";
     video_b <= x"00FF00";
     pos     <= std_logic_vector(to_unsigned(4095, 13));
-    clocks(10);
+    clocks(C_LAT + 1);
     check(video_o = x"00FF00", "full B mix");
 
     invert <= '1';
-    clocks(10);
+    clocks(C_LAT + 1);
     check(video_o = x"0000FF", "invert swaps full B back to A");
     invert <= '0';
 
     video_a <= x"000000";
     video_b <= x"FFFFFF";
     pos     <= std_logic_vector(to_unsigned(2048, 13));
-    clocks(10);
+    clocks(C_LAT + 1);
     check(video_o = x"7F7F7F", "half mix got " & integer'image(to_integer(unsigned(video_o))));
 
     loop
@@ -230,7 +230,7 @@ begin
     end loop;
     wait until rising_edge(clk);
     seen := -1;
-    for i in 1 to 16 loop
+    for i in 1 to 32 loop
       wait until rising_edge(clk);
       if h_sync_o = '1' then
         seen := i;

@@ -293,10 +293,10 @@ architecture rtl of spector_wrapper_zynq is
 
   -- Align H/V/SOF with video_fx_out path (encoder mode):
   -- dirt(1) + color_mult(3) + encoder_out(1) + bg_regs(3) = 8 to bg_video
-  -- mix_wipe_bus = 9, and it replaces the old pre-FX register
-  -- fx: color(2)+mirror(1)+logic(1)+chromatic(1)+emboss(2)+out(1) = 8
-  -- total 25. Pipe length 24 + registered MSB tap = 25 cycles.
-  constant C_OUT_PIPE_LAT : natural := 24;
+  -- mix_wipe_bus = 13, and it replaces the old pre-FX register
+  -- fx: color(2)+mirror(1)+logic(1)+chromatic(1)+emboss(4)+out(1) = 10
+  -- total 31. Pipe length 30 + registered MSB tap = 31 cycles.
+  constant C_OUT_PIPE_LAT : natural := 30;
   -- bg_video is this many clocks behind h_sync_n. External video and the
   -- sync used by the mixer are delayed to match, so the wipe lands on the
   -- spectron pixels.

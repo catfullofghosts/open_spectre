@@ -4,7 +4,7 @@ use ieee.numeric_std.all;
 
 -- Pipeline (registered stages for timing):
 --   color stage1/2 (+2) -> mirror BRAM (+1) -> logic prev (+1)
---   -> chromatic (+1) -> emboss/shadow (+2)
+--   -> chromatic (+1) -> emboss/shadow (+4)
 -- video_in / video_out packing: B(23:16) & G(15:8) & R(7:0) — matches spector_wrapper bg path.
 --
 -- video_fx_ctrl bit map:

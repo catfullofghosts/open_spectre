@@ -5,7 +5,8 @@ use ieee.numeric_std.all;
 -- Horizontal luma-edge relief. No line memory, no divides.
 --   emboss: large rising luma  -> brighten this pixel and the next 4 (5 total)
 --   shadow: large falling luma -> darken this pixel and the next 4 (5 total)
--- Pipelined: luma (1) -> detect/apply (1). Safe at 720p / 1080p pixel clocks.
+-- Pipelined: luma (1) -> detect (1) -> multiply (1) -> add (1).
+-- The fringe mix used to be a subtract, multiply and add in one clock.
 
 entity emboss_shadow_effect is
   port (
@@ -48,6 +49,30 @@ architecture rtl of emboss_shadow_effect is
   signal shadow_left  : unsigned(2 downto 0) := (others => '0');
   signal line_start   : std_logic := '1';
 
+  -- Detect stage. Flags travel with the pixel; the multiply is the next clock.
+  signal d_r    : unsigned(7 downto 0) := (others => '0');
+  signal d_g    : unsigned(7 downto 0) := (others => '0');
+  signal d_b    : unsigned(7 downto 0) := (others => '0');
+  signal d_cr   : unsigned(7 downto 0) := (others => '0');
+  signal d_cg   : unsigned(7 downto 0) := (others => '0');
+  signal d_cb   : unsigned(7 downto 0) := (others => '0');
+  signal d_str  : unsigned(7 downto 0) := (others => '0');
+  signal d_mix  : std_logic := '0';
+  signal d_add  : std_logic := '0';
+  signal d_sub  : std_logic := '0';
+
+  -- Multiply stage. Product is (color - pix) * strength, 19 bits, /256 later.
+  signal m_r      : unsigned(7 downto 0) := (others => '0');
+  signal m_g      : unsigned(7 downto 0) := (others => '0');
+  signal m_b      : unsigned(7 downto 0) := (others => '0');
+  signal m_str    : unsigned(7 downto 0) := (others => '0');
+  signal m_prod_r : signed(18 downto 0) := (others => '0');
+  signal m_prod_g : signed(18 downto 0) := (others => '0');
+  signal m_prod_b : signed(18 downto 0) := (others => '0');
+  signal m_mix    : std_logic := '0';
+  signal m_add    : std_logic := '0';
+  signal m_sub    : std_logic := '0';
+
   function f_sat_add (v, amt : unsigned(7 downto 0)) return unsigned is
     variable s : unsigned(8 downto 0);
   begin
@@ -66,15 +91,11 @@ architecture rtl of emboss_shadow_effect is
     return v - amt;
   end function f_sat_sub;
 
-  -- out = pix + (color - pix) * amt / 256, clamped.
-  function f_mix (pix, col, amt : unsigned(7 downto 0)) return unsigned is
-    variable diff : signed(9 downto 0);
-    variable prod : signed(18 downto 0);
-    variable sum  : signed(10 downto 0);
+  -- pix + prod/256, clamped. prod is (color - pix) * strength from the previous clock.
+  function f_apply_prod (pix : unsigned(7 downto 0); prod : signed(18 downto 0)) return unsigned is
+    variable sum : signed(10 downto 0);
   begin
-    diff := signed(resize(col, 10)) - signed(resize(pix, 10));
-    prod := diff * signed(resize(amt, 9));
-    sum  := signed(resize(pix, 11)) + resize(prod(18 downto 8), 11);
+    sum := signed(resize(pix, 11)) + resize(prod(18 downto 8), 11);
     if sum < 0 then
       return to_unsigned(0, 8);
     elsif sum > 255 then
@@ -82,7 +103,7 @@ architecture rtl of emboss_shadow_effect is
     else
       return unsigned(sum(7 downto 0));
     end if;
-  end function f_mix;
+  end function f_apply_prod;
 
 begin
 
@@ -113,15 +134,16 @@ begin
     end if;
   end process p_luma;
 
+  -- Decide the streak and park the pixel. No multiply on this clock.
   p_edge : process (clk) is
-    variable thr   : unsigned(7 downto 0);
-    variable str   : unsigned(7 downto 0);
-    variable delta : signed(8 downto 0);
-    variable e_cnt : unsigned(2 downto 0);
-    variable s_cnt : unsigned(2 downto 0);
-    variable vr    : unsigned(7 downto 0);
-    variable vg    : unsigned(7 downto 0);
-    variable vb    : unsigned(7 downto 0);
+    variable thr    : unsigned(7 downto 0);
+    variable str    : unsigned(7 downto 0);
+    variable delta  : signed(8 downto 0);
+    variable e_cnt  : unsigned(2 downto 0);
+    variable s_cnt  : unsigned(2 downto 0);
+    variable do_mix : std_logic;
+    variable do_add : std_logic;
+    variable do_sub : std_logic;
   begin
     if rising_edge(clk) then
       if rst = '1' then
@@ -129,9 +151,16 @@ begin
         emboss_left <= (others => '0');
         shadow_left <= (others => '0');
         line_start  <= '1';
-        r_out       <= (others => '0');
-        g_out       <= (others => '0');
-        b_out       <= (others => '0');
+        d_r         <= (others => '0');
+        d_g         <= (others => '0');
+        d_b         <= (others => '0');
+        d_cr        <= (others => '0');
+        d_cg        <= (others => '0');
+        d_cb        <= (others => '0');
+        d_str       <= (others => '0');
+        d_mix       <= '0';
+        d_add       <= '0';
+        d_sub       <= '0';
       else
         if unsigned(threshold) = 0 then
           thr := C_DEF_THR;
@@ -144,20 +173,17 @@ begin
           str := unsigned(strength);
         end if;
 
-        vr := r_d;
-        vg := g_d;
-        vb := b_d;
-        e_cnt := emboss_left;
-        s_cnt := shadow_left;
+        e_cnt  := emboss_left;
+        s_cnt  := shadow_left;
+        do_mix := '0';
+        do_add := '0';
+        do_sub := '0';
 
         if hsync_d = '1' then
           luma_prev   <= (others => '0');
           emboss_left <= (others => '0');
           shadow_left <= (others => '0');
           line_start  <= '1';
-          r_out       <= std_logic_vector(r_d);
-          g_out       <= std_logic_vector(g_d);
-          b_out       <= std_logic_vector(b_d);
         elsif de_d = '1' then
           delta := signed(resize(luma_d, 9)) - signed(resize(luma_prev, 9));
 
@@ -172,20 +198,14 @@ begin
 
           if e_cnt /= 0 then
             if fringe_en = '1' then
-              vr := f_mix(vr, unsigned(fringe_r), str);
-              vg := f_mix(vg, unsigned(fringe_g), str);
-              vb := f_mix(vb, unsigned(fringe_b), str);
+              do_mix := '1';
             else
-              vr := f_sat_add(vr, str);
-              vg := f_sat_add(vg, str);
-              vb := f_sat_add(vb, str);
+              do_add := '1';
             end if;
             e_cnt := e_cnt - 1;
           end if;
           if s_cnt /= 0 then
-            vr := f_sat_sub(vr, str);
-            vg := f_sat_sub(vg, str);
-            vb := f_sat_sub(vb, str);
+            do_sub := '1';
             s_cnt := s_cnt - 1;
           end if;
 
@@ -193,16 +213,90 @@ begin
           emboss_left <= e_cnt;
           shadow_left <= s_cnt;
           line_start  <= '0';
-          r_out       <= std_logic_vector(vr);
-          g_out       <= std_logic_vector(vg);
-          b_out       <= std_logic_vector(vb);
-        else
-          r_out <= std_logic_vector(r_d);
-          g_out <= std_logic_vector(g_d);
-          b_out <= std_logic_vector(b_d);
         end if;
+
+        d_r   <= r_d;
+        d_g   <= g_d;
+        d_b   <= b_d;
+        d_cr  <= unsigned(fringe_r);
+        d_cg  <= unsigned(fringe_g);
+        d_cb  <= unsigned(fringe_b);
+        d_str <= str;
+        d_mix <= do_mix;
+        d_add <= do_add;
+        d_sub <= do_sub;
       end if;
     end if;
   end process p_edge;
+
+  -- (color - pix) * strength. Registered on its own so the multiply is not
+  -- chained into the add.
+  p_mul : process (clk) is
+  begin
+    if rising_edge(clk) then
+      if rst = '1' then
+        m_r      <= (others => '0');
+        m_g      <= (others => '0');
+        m_b      <= (others => '0');
+        m_str    <= (others => '0');
+        m_prod_r <= (others => '0');
+        m_prod_g <= (others => '0');
+        m_prod_b <= (others => '0');
+        m_mix    <= '0';
+        m_add    <= '0';
+        m_sub    <= '0';
+      else
+        m_r      <= d_r;
+        m_g      <= d_g;
+        m_b      <= d_b;
+        m_str    <= d_str;
+        m_mix    <= d_mix;
+        m_add    <= d_add;
+        m_sub    <= d_sub;
+        m_prod_r <= (signed(resize(d_cr, 10)) - signed(resize(d_r, 10)))
+                    * signed(resize(d_str, 9));
+        m_prod_g <= (signed(resize(d_cg, 10)) - signed(resize(d_g, 10)))
+                    * signed(resize(d_str, 9));
+        m_prod_b <= (signed(resize(d_cb, 10)) - signed(resize(d_b, 10)))
+                    * signed(resize(d_str, 9));
+      end if;
+    end if;
+  end process p_mul;
+
+  -- Fringe mix, then brighten, then darken. Same order as the old single cycle.
+  p_apply : process (clk) is
+    variable vr : unsigned(7 downto 0);
+    variable vg : unsigned(7 downto 0);
+    variable vb : unsigned(7 downto 0);
+  begin
+    if rising_edge(clk) then
+      if rst = '1' then
+        r_out <= (others => '0');
+        g_out <= (others => '0');
+        b_out <= (others => '0');
+      else
+        vr := m_r;
+        vg := m_g;
+        vb := m_b;
+        if m_mix = '1' then
+          vr := f_apply_prod(vr, m_prod_r);
+          vg := f_apply_prod(vg, m_prod_g);
+          vb := f_apply_prod(vb, m_prod_b);
+        elsif m_add = '1' then
+          vr := f_sat_add(vr, m_str);
+          vg := f_sat_add(vg, m_str);
+          vb := f_sat_add(vb, m_str);
+        end if;
+        if m_sub = '1' then
+          vr := f_sat_sub(vr, m_str);
+          vg := f_sat_sub(vg, m_str);
+          vb := f_sat_sub(vb, m_str);
+        end if;
+        r_out <= std_logic_vector(vr);
+        g_out <= std_logic_vector(vg);
+        b_out <= std_logic_vector(vb);
+      end if;
+    end if;
+  end process p_apply;
 
 end architecture rtl;
