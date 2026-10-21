@@ -7,8 +7,8 @@ entity chromatic_abrasion_effect is
         clk : in STD_LOGIC;
         rst : in STD_LOGIC;
         enable : in STD_LOGIC;
-        delay_g : in STD_LOGIC_VECTOR(3 downto 0); -- 0-8 pixel clocks for green
-        delay_b : in STD_LOGIC_VECTOR(3 downto 0); -- 0-8 pixel clocks for blue
+        delay_g : in STD_LOGIC_VECTOR(5 downto 0); -- 0-32 pixel clocks for green
+        delay_b : in STD_LOGIC_VECTOR(5 downto 0); -- 0-32 pixel clocks for blue
         r_in : in STD_LOGIC_VECTOR(7 downto 0);
         g_in : in STD_LOGIC_VECTOR(7 downto 0);
         b_in : in STD_LOGIC_VECTOR(7 downto 0);
@@ -26,7 +26,7 @@ end chromatic_abrasion_effect;
 
 architecture Behavioral of chromatic_abrasion_effect is
 
-    constant C_DLY_MAX : natural := 8;
+    constant C_DLY_MAX : natural := 32;
 
     type delay_line_t is array (0 to C_DLY_MAX - 1) of STD_LOGIC_VECTOR(7 downto 0);
     type sync_delay_line_t is array (0 to C_DLY_MAX - 1) of STD_LOGIC;
@@ -37,10 +37,10 @@ architecture Behavioral of chromatic_abrasion_effect is
     signal vsync_delay_line : sync_delay_line_t;
     signal de_delay_line : sync_delay_line_t;
 
-    signal delay_g_unsigned : UNSIGNED(3 downto 0);
-    signal delay_b_unsigned : UNSIGNED(3 downto 0);
+    signal delay_g_unsigned : UNSIGNED(5 downto 0);
+    signal delay_b_unsigned : UNSIGNED(5 downto 0);
 
-    function f_clamp_dly (d : unsigned(3 downto 0)) return integer is
+    function f_clamp_dly (d : unsigned(5 downto 0)) return integer is
         variable n : integer;
     begin
         n := to_integer(d);

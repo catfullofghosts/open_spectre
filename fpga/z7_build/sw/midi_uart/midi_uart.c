@@ -76,6 +76,8 @@
 #define REG_FX_MIRROR 0xF0U
 #define REG_FX_CHROMA 0xF4U
 #define REG_FX_EMBOSS 0xF8U
+#define REG_WIPE_CTRL  0x1A0U
+#define REG_WIPE_POS   0x1A4U
 #define SHAPE_SLIDER_MAX 1000U
 
 static XUartPs MidiUart;
@@ -98,6 +100,7 @@ static u8 g_y_msb, g_y_lsb;
 static u8 g_cr_msb, g_cr_lsb;
 static u8 g_cb_msb, g_cb_lsb;
 static u8 g_mirror_msb, g_mirror_lsb;
+static u8 g_wipe_pos_msb, g_wipe_pos_lsb;
 
 #define MIDI_SYSEX_MAX 24U
 #define MIDI_DIG_OUTS  57U
@@ -557,13 +560,13 @@ static void MidiMapCc(u8 cc, u8 val)
 		break;
 	case 67:
 		{
-			u32 scanDelay = (u32)val >> 3;
+			u32 scanDelay = (u32)val >> 2;
 
-			if (scanDelay > 8U)
+			if (scanDelay > 16U)
 			{
-				scanDelay = 8U;
+				scanDelay = 16U;
 			}
-			MidiRegFld(REG_FX_CTRL, 0xFU, 13U, scanDelay);
+			MidiRegFld(REG_FX_CTRL, 0x1FU, 13U, scanDelay);
 		}
 		break;
 	case 68:
@@ -613,24 +616,24 @@ static void MidiMapCc(u8 cc, u8 val)
 		break;
 	case 81:
 		{
-			u32 chromaDelay = (u32)val >> 3;
+			u32 chromaDelay = (u32)val >> 1;
 
-			if (chromaDelay > 8U)
+			if (chromaDelay > 32U)
 			{
-				chromaDelay = 8U;
+				chromaDelay = 32U;
 			}
-			MidiRegFld(REG_FX_CHROMA, 0xFU, 1U, chromaDelay);
+			MidiRegFld(REG_FX_CHROMA, 0x3FU, 1U, chromaDelay);
 		}
 		break;
 	case 82:
 		{
-			u32 chromaDelay = (u32)val >> 3;
+			u32 chromaDelay = (u32)val >> 1;
 
-			if (chromaDelay > 8U)
+			if (chromaDelay > 32U)
 			{
-				chromaDelay = 8U;
+				chromaDelay = 32U;
 			}
-			MidiRegFld(REG_FX_CHROMA, 0xFU, 5U, chromaDelay);
+			MidiRegFld(REG_FX_CHROMA, 0x3FU, 7U, chromaDelay);
 		}
 		break;
 
@@ -656,10 +659,100 @@ static void MidiMapCc(u8 cc, u8 val)
 		MidiRegFld(REG_FX_DITH, 0x7U, 3U, (u32)val >> 4);
 		break;
 	case 90:
-		MidiRegFld(REG_FX_CTRL, 0x3U, 17U, (u32)val >> 5);
+		MidiRegFld(REG_FX_CTRL, 0x7U, 20U, (u32)val >> 4);
 		break;
 	case 91:
 		MidiRegFld(REG_FX_CTRL, 0x1U, 19U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 92:
+		{
+			u32 rot = (u32)val >> 3;
+
+			if (rot > 14U)
+			{
+				rot = 14U;
+			}
+			MidiRegFld(REG_FX_BIT, 0xFU, 12U, rot);
+		}
+		break;
+	case 93:
+		{
+			u32 rot = (u32)val >> 3;
+
+			if (rot > 14U)
+			{
+				rot = 14U;
+			}
+			MidiRegFld(REG_FX_BIT, 0xFU, 16U, rot);
+		}
+		break;
+	case 94:
+		{
+			u32 rot = (u32)val >> 3;
+
+			if (rot > 14U)
+			{
+				rot = 14U;
+			}
+			MidiRegFld(REG_FX_BIT, 0xFU, 20U, rot);
+		}
+		break;
+	case 95:
+		{
+			u32 rep = val;
+
+			if (rep > 64U)
+			{
+				rep = 64U;
+			}
+			MidiRegFld(REG_FX_CTRL, 0x7FU, 23U, rep);
+		}
+		break;
+	case 96:
+		MidiRegFld(REG_FX_DITH, 0xFFU, 6U, MidiScale(val, 255U));
+		break;
+	case 97:
+		MidiRegFld(REG_FX_DITH, 0xFFU, 14U, MidiScale(val, 255U));
+		break;
+	case 98:
+		MidiRegFld(REG_FX_DITH, 0xFFU, 22U, MidiScale(val, 255U));
+		break;
+
+	case 99:
+		MidiRegFld(REG_WIPE_CTRL, 0xFU, 0U, (u32)val >> 3);
+		break;
+	case 100:
+		MidiRegFld(REG_WIPE_CTRL, 0x1U, 8U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 101:
+		MidiRegFld(REG_WIPE_CTRL, 0xFU, 4U, (u32)val >> 3);
+		break;
+	case 102:
+		MidiRegFld(REG_WIPE_CTRL, 0xFFFU, 9U, MidiScale(val, 255U));
+		break;
+	case 103:
+		g_wipe_pos_msb = val;
+		{
+			u32 pos = MidiU14(g_wipe_pos_msb, g_wipe_pos_lsb);
+
+			if (pos > 8191U)
+			{
+				pos = 8191U;
+			}
+			MidiRegFld(REG_WIPE_POS, 0x1FFFU, 0U, pos);
+		}
+		break;
+	case 104:
+		g_wipe_pos_lsb = val;
+		{
+			u32 pos = MidiU14(g_wipe_pos_msb, g_wipe_pos_lsb);
+
+			if (pos > 8191U)
+			{
+				pos = 8191U;
+			}
+			MidiRegFld(REG_WIPE_POS, 0x1FFFU, 0U, pos);
+		}
 		break;
 
 	default:

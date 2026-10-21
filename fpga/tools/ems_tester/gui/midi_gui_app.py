@@ -79,6 +79,18 @@ def gate_to_cc(on):
     return 127 if on else 0
 
 
+def rot_to_cc(steps):
+    """0 = none, +1..+7 toward MSB, -1..-7 toward LSB."""
+    steps = int(steps)
+    if steps > 0:
+        code = min(7, steps)
+    elif steps < 0:
+        code = min(14, 7 - steps)
+    else:
+        code = 0
+    return enum_to_cc(code, 4)
+
+
 class MidiGUIApp(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -122,7 +134,7 @@ class MidiGUIApp(QMainWindow):
         self.status_label = QLabel("Not connected")
         self.status_label.setStyleSheet("color: red; font-weight: bold;")
         midi_layout.addWidget(self.status_label)
-        midi_layout.addWidget(QLabel("Channel 1  ·  CCs 1–86"))
+        midi_layout.addWidget(QLabel("Channel 1  ·  CCs 1–104"))
         midi_layout.addWidget(QLabel("Matrix  ·  SysEx 7D 53 50"))
 
         self.send_all_btn = QPushButton("Send all")
@@ -145,6 +157,7 @@ class MidiGUIApp(QMainWindow):
         tabs = QTabWidget()
         tabs.addTab(self._cc_panel(), "CC Controls")
         tabs.addTab(self._video_fx_panel(), "Video FX")
+        tabs.addTab(self._wipe_panel(), "Mix / Wipe")
 
         self.digital_grid = MatrixGridWidget(
             DIGITAL_GRID_ROWS,
@@ -216,8 +229,10 @@ class MidiGUIApp(QMainWindow):
         body_layout = QHBoxLayout(body)
         col_a = QVBoxLayout()
         col_b = QVBoxLayout()
+        col_a.addWidget(self._fx_rot_group())
         col_a.addWidget(self._fx_color_group())
         col_a.addWidget(self._fx_scan_group())
+        col_a.addWidget(self._fx_smear_group())
         col_a.addWidget(self._fx_bitplane_group())
         col_a.addStretch()
         col_b.addWidget(self._fx_dither_group())
@@ -229,6 +244,105 @@ class MidiGUIApp(QMainWindow):
         body_layout.addLayout(col_b)
         scroll.setWidget(body)
         return scroll
+
+    def _wipe_panel(self):
+        self._wipe_dir = 0
+        self._wipe_band = 0
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        body = QWidget()
+        layout = QVBoxLayout(body)
+        layout.addWidget(QLabel(
+            "A is the spectron picture. B is the external input. "
+            "Mix position 0 shows the spectron; 4095 shows the external input."
+        ))
+        self._add_combo(
+            layout,
+            "Mode",
+            [
+                "Mix",
+                "Horizontal",
+                "Vertical",
+                "Square",
+                "Diagonal",
+                "Diamond",
+                "Cross",
+                "Barn doors",
+                "Blinds",
+            ],
+            lambda i: self.queue_cc(99, enum_to_cc(i, 4)),
+        )
+        self._add_slider(
+            layout,
+            "Position",
+            0,
+            4095,
+            0,
+            lambda v: self.send_u14(103, 104, v),
+        )
+        self._add_slider(
+            layout,
+            "Soft edge",
+            0,
+            255,
+            0,
+            lambda v: self.queue_cc(102, scale_to_cc(v, 255)),
+        )
+        self._add_toggle(layout, "Invert", False, lambda on: self.queue_cc(100, gate_to_cc(on)))
+        layout.addWidget(QLabel(
+            "Direction 0–3 picks an edge. Compass points are for square, diamond and cross. "
+            "Barn doors use 0 for left/right and 1 for up/down. "
+            "Blinds use direction 0–3 (columns, rows, diagonal, other diagonal) plus the band."
+        ))
+        self._add_combo(
+            layout,
+            "Direction",
+            [
+                "0 centre / left / top / TL",
+                "1 north / right / bottom / TR",
+                "2 east / BL",
+                "3 south / BR",
+                "4 west",
+                "5 NE",
+                "6 SE",
+                "7 SW",
+                "8 NW",
+            ],
+            self._wipe_set_dir,
+        )
+        self._add_combo(
+            layout,
+            "Blinds band",
+            ["4 px", "8 px", "16 px", "32 px"],
+            self._wipe_set_band,
+        )
+        layout.addStretch()
+        scroll.setWidget(body)
+        return scroll
+
+    def _wipe_set_dir(self, index):
+        self._wipe_dir = index
+        self._wipe_send_origin()
+
+    def _wipe_set_band(self, index):
+        self._wipe_band = index
+        self._wipe_send_origin()
+
+    def _wipe_send_origin(self):
+        if self._wipe_dir <= 3:
+            code = (self._wipe_band << 2) | self._wipe_dir
+        else:
+            code = self._wipe_dir
+        self.queue_cc(101, enum_to_cc(code, 4))
+
+    def _fx_rot_group(self):
+        group = QGroupBox("Bit rotate")
+        layout = QVBoxLayout(group)
+        layout.addWidget(QLabel("Runs first. Negative rotates toward the LSB, positive toward the MSB, with wrap."))
+        self._add_slider(layout, "R rotate", -7, 7, 0, lambda v: self.queue_cc(92, rot_to_cc(v)))
+        self._add_slider(layout, "G rotate", -7, 7, 0, lambda v: self.queue_cc(93, rot_to_cc(v)))
+        self._add_slider(layout, "B rotate", -7, 7, 0, lambda v: self.queue_cc(94, rot_to_cc(v)))
+        return group
 
     def _fx_color_group(self):
         group = QGroupBox("Color")
@@ -251,12 +365,12 @@ class MidiGUIApp(QMainWindow):
         group = QGroupBox("Scanline and previous pixel")
         layout = QVBoxLayout(group)
         self._add_toggle(layout, "Scanlines", False, lambda on: self.queue_cc(66, gate_to_cc(on)))
-        self._add_slider(layout, "Scan delay", 0, 8, 0, lambda v: self.queue_cc(67, enum_to_cc(v, 4)))
-        self._add_choice(
+        self._add_slider(layout, "Scan delay", 0, 16, 0, lambda v: self.queue_cc(67, enum_to_cc(v, 5)))
+        self._add_combo(
             layout,
             "Shifted lines",
-            ["Single lines", "Groups of 2", "Groups of 4"],
-            lambda i: self.queue_cc(90, enum_to_cc(i, 2)),
+            ["Single lines", "Groups of 2", "Groups of 4", "Groups of 8", "Groups of 16"],
+            lambda i: self.queue_cc(90, enum_to_cc(i, 3)),
         )
         self._add_toggle(layout, "CRT darken", False, lambda on: self.queue_cc(91, gate_to_cc(on)))
         self._add_choice(
@@ -265,6 +379,16 @@ class MidiGUIApp(QMainWindow):
             ["Off", "OR", "AND", "XOR"],
             lambda i: self.queue_cc(68, enum_to_cc(i, 2)),
         )
+        return group
+
+    def _fx_smear_group(self):
+        group = QGroupBox("Smear")
+        layout = QVBoxLayout(group)
+        layout.addWidget(QLabel("Repeat 0 is off. A channel above its threshold is drawn that many pixels in a row."))
+        self._add_slider(layout, "Repeat", 0, 64, 0, lambda v: self.queue_cc(95, v))
+        self._add_slider(layout, "R threshold", 0, 255, 128, lambda v: self.queue_cc(96, scale_to_cc(v, 255)))
+        self._add_slider(layout, "G threshold", 0, 255, 128, lambda v: self.queue_cc(97, scale_to_cc(v, 255)))
+        self._add_slider(layout, "B threshold", 0, 255, 128, lambda v: self.queue_cc(98, scale_to_cc(v, 255)))
         return group
 
     def _fx_bitplane_group(self):
@@ -289,10 +413,10 @@ class MidiGUIApp(QMainWindow):
             ["6-bit", "5-bit", "4-bit", "3-bit"],
             lambda i: self.queue_cc(76, enum_to_cc(i, 2)),
         )
-        self._add_choice(
+        self._add_combo(
             layout,
             "Posterize",
-            ["Off", "6-bit", "5-bit", "4-bit", "3-bit", "2-bit"],
+            ["Off", "7-bit", "6-bit", "5-bit", "4-bit", "3-bit", "2-bit", "1-bit"],
             lambda i: self.queue_cc(89, enum_to_cc(i, 3)),
         )
         return group
@@ -308,8 +432,8 @@ class MidiGUIApp(QMainWindow):
         group = QGroupBox("Chromatic aberration")
         layout = QVBoxLayout(group)
         self._add_toggle(layout, "Enable", False, lambda on: self.queue_cc(80, gate_to_cc(on)))
-        self._add_slider(layout, "Green delay", 0, 8, 0, lambda v: self.queue_cc(81, enum_to_cc(v, 4)))
-        self._add_slider(layout, "Blue delay", 0, 8, 0, lambda v: self.queue_cc(82, enum_to_cc(v, 4)))
+        self._add_slider(layout, "Green delay", 0, 32, 0, lambda v: self.queue_cc(81, enum_to_cc(v, 6)))
+        self._add_slider(layout, "Blue delay", 0, 32, 0, lambda v: self.queue_cc(82, enum_to_cc(v, 6)))
         return group
 
     def _fx_emboss_group(self):

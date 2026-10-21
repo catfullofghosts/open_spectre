@@ -164,6 +164,12 @@ entity digital_reg_file is
     video_fx_mirror   : out std_logic_vector(31 downto 0);
     video_fx_chromatic : out std_logic_vector(31 downto 0);
     video_fx_emboss    : out std_logic_vector(31 downto 0);
+    -- Mix / wipe bus, before the video FX chain.
+    --   0x1A0 [3:0]=mode [7:4]=origin [8]=invert [20:9]=softness
+    --   0x1A4 [12:0]=position (mix: 0=A, 4095=B)
+    -- The raster is fixed at 720p in the wrapper.
+    mix_wipe_ctrl  : out std_logic_vector(31 downto 0);
+    mix_wipe_pos   : out std_logic_vector(31 downto 0);
     -- Overlay sprites (shared BRAM atlas, up to C_NUM_SPRITES slots)
     overlay_global_en : out std_logic;
     overlay_block_div : out std_logic_vector(2 downto 0); -- 0=/1 1=/2 2=/4 3=/8 4=/16
@@ -334,6 +340,9 @@ architecture RTL of digital_reg_file is
   signal video_fx_mirror_i   : std_logic_vector(31 downto 0) := x"000002D0"; -- half=360px, disabled
   signal video_fx_chromatic_i : std_logic_vector(31 downto 0) := (others => '0');
   signal video_fx_emboss_i    : std_logic_vector(31 downto 0) := (others => '0');
+  -- Power-up is mix, position 0: spectron (A) straight through.
+  signal mix_wipe_ctrl_i  : std_logic_vector(31 downto 0) := (others => '0');
+  signal mix_wipe_pos_i   : std_logic_vector(31 downto 0) := (others => '0');
   signal overlay_global_en_i : std_logic := '0';
   signal overlay_block_div_i : std_logic_vector(2 downto 0) := "000";
   signal overlay_sprites_i   : t_sprite_array := (others => (
@@ -438,20 +447,27 @@ begin
   -- Shape select controls
   regs(ra(x"E0")) <= x"0000" & shape2_b_sel_i & shape2_a_sel_i & shape1_b_sel_i & shape1_a_sel_i;
   -- Video output effects: [0]=inv R, [1]=inv G, [2]=inv B, [4:3]=swap, [7:5]=bit rev,
-  --   [8]=scan en, [12:11]=logic w/ prev pixel (01=OR 10=AND 11=XOR), [16:13]=scan delay 0-8,
-  --   [18:17]=scan band (00=1 line, 01=2, 10=4), [19]=CRT darken
+  --   [8]=scan en, [12:11]=logic w/ prev pixel (01=OR 10=AND 11=XOR), [17:13]=scan delay 0-16,
+  --   [19]=CRT darken, [22:20]=scan band (0=1 line, 1=2, 2=4, 3=8, 4=16),
+  --   [29:23]=smear repeat 0-64 (0=off)
   regs(ra(x"E4")) <= video_fx_ctrl_i;
   -- Bit plane slice: R[3:0] G[7:4] B[11:8]; bit3 per channel = bypass
+  --   rotate (0=none, 1-7 left, 8-14 right by 1-7): R[15:12] G[19:16] B[23:20]
   regs(ra(x"E8")) <= video_fx_bitplane_i;
-  -- Horizontal ordered dither: [0]=en, [2:1]=depth (6/5/4/3-bit), [5:3]=posterize (0=off, 1=6bit .. 5=2bit)
+  -- Horizontal ordered dither: [0]=en, [2:1]=depth (6/5/4/3-bit),
+  --   [5:3]=posterize (0=off, 1=7bit .. 7=1bit),
+  --   smear threshold R[13:6] G[21:14] B[29:22]
   regs(ra(x"EC")) <= video_fx_dither_i;
   -- Horizontal mirror: [0]=en, [11:1]=half line width (pixels)
   regs(ra(x"F0")) <= video_fx_mirror_i;
-  -- Chromatic aberration: [0]=en, [4:1]=G delay, [8:5]=B delay (0-8 px)
+  -- Chromatic aberration: [0]=en, [6:1]=G delay, [12:7]=B delay (0-32 px)
   regs(ra(x"F4")) <= video_fx_chromatic_i;
   -- Emboss/shadow: [0]=emboss [1]=shadow [15:8]=threshold [23:16]=strength
   --   [24]=color fringe [28:25]=fringe color 0-15
   regs(ra(x"F8")) <= video_fx_emboss_i;
+  -- Mix/wipe. Mode 0 and position 0 pass the spectron picture.
+  regs(ra(x"1A0")) <= mix_wipe_ctrl_i;
+  regs(ra(x"1A4")) <= mix_wipe_pos_i;
   -- Overlay master enable
   regs(ra(x"FC")) <= "0000000000000000000000000000" & overlay_block_div_i & overlay_global_en_i;
 
@@ -585,6 +601,16 @@ begin
         elsif addr_reg(11 downto 8) = x"1"
               and unsigned(addr_reg(7 downto 4)) <= C_NUM_SPRITES - 1 then
           null; -- sprite descriptor writes handled by p_sprite_decode/p_sprite_apply
+        elsif addr_reg(11 downto 8) = x"1" and addr_reg(7 downto 4) = x"A" then
+          -- 0x1A0 and 0x1A4. Low byte alone would collide with 0x0A0.
+          case addr_reg(3 downto 0) is
+            when x"0" =>
+              mix_wipe_ctrl_i <= write_reg;
+            when x"4" =>
+              mix_wipe_pos_i <= write_reg;
+            when others =>
+              null;
+          end case;
         else
         case addr_reg(7 downto 0) is
           when x"04" =>
@@ -840,6 +866,8 @@ begin
   video_fx_mirror   <= video_fx_mirror_i;
   video_fx_chromatic <= video_fx_chromatic_i;
   video_fx_emboss <= video_fx_emboss_i;
+  mix_wipe_ctrl  <= mix_wipe_ctrl_i;
+  mix_wipe_pos   <= mix_wipe_pos_i;
 
   overlay_global_en <= overlay_global_en_i;
   overlay_block_div <= overlay_block_div_i;
