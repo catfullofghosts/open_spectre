@@ -34,6 +34,8 @@ architecture sim of tb_mix_wipe_bus is
   signal invert   : std_logic := '0';
   signal pos      : std_logic_vector(12 downto 0) := (others => '0');
   signal soft     : std_logic_vector(11 downto 0) := (others => '0');
+  signal border_w : std_logic_vector(6 downto 0) := (others => '0');
+  signal border_c : std_logic_vector(3 downto 0) := (others => '0');
   signal frame_w  : std_logic_vector(11 downto 0) := std_logic_vector(to_unsigned(C_FRAME, 12));
   signal frame_h  : std_logic_vector(11 downto 0) := std_logic_vector(to_unsigned(C_FRAME, 12));
   signal video_o  : std_logic_vector(23 downto 0);
@@ -104,6 +106,8 @@ begin
       invert   => invert,
       pos      => pos,
       soft     => soft,
+      border_w => border_w,
+      border_c => border_c,
       frame_w  => frame_w,
       frame_h  => frame_h,
       video_o  => video_o,
@@ -421,33 +425,63 @@ begin
       end loop;
     end loop;
 
-    -- Vertical blinds, 16-pixel bands, first half of each band is B.
-    mode   <= "1000";
-    origin <= "1000";
-    pos    <= std_logic_vector(to_unsigned(8, 13));
+    -- Venetian blinds: horizontal bands of 64, first 32 rows of each band are B.
+    mode     <= "1000";
+    origin   <= "0000";
+    pos      <= std_logic_vector(to_unsigned(32, 13));
+    frame_reset;
+    for line in 0 to C_FRAME - 1 loop
+      grab(C_FRAME);
+      for x in 0 to C_FRAME - 1 loop
+        if (line mod 64) < 32 then
+          check(got(x) = x"FFFFFF", "venetian B");
+        else
+          check(got(x) = x"000000", "venetian A");
+        end if;
+      end loop;
+    end loop;
+
+    -- Vertical blinds, 64-pixel columns, first 32 of each column are B.
+    mode   <= "1001";
+    origin <= "0000";
     frame_reset;
     grab(C_FRAME);
     for x in 0 to C_FRAME - 1 loop
-      if (x mod 16) < 8 then
-        check(got(x) = x"FFFFFF", "blinds column B");
+      if (x mod 64) < 32 then
+        check(got(x) = x"FFFFFF", "vertical blinds B");
       else
-        check(got(x) = x"000000", "blinds column A");
+        check(got(x) = x"000000", "vertical blinds A");
       end if;
     end loop;
 
-    -- Diagonal blinds, (x + y) mod 16. Check the second line.
-    origin <= "1010";
+    -- 2x64 = 128. Wider than this frame, so it does not wrap at 64.
+    origin <= "0100";
+    pos    <= std_logic_vector(to_unsigned(40, 13));
     frame_reset;
-    for line in 0 to 1 loop
-      grab(C_FRAME);
-      if line = 1 then
-        for x in 0 to C_FRAME - 1 loop
-          if ((x + 1) mod 16) < 8 then
-            check(got(x) = x"FFFFFF", "blinds diagonal B");
-          else
-            check(got(x) = x"000000", "blinds diagonal A");
-          end if;
-        end loop;
+    grab(C_FRAME);
+    for x in 0 to C_FRAME - 1 loop
+      if x < 40 then
+        check(got(x) = x"FFFFFF", "vertical blinds 128 B");
+      else
+        check(got(x) = x"000000", "vertical blinds 128 A");
+      end if;
+    end loop;
+
+    -- Coloured border, 4 pixels centred on x = 50. Colour 3 is red.
+    mode     <= "0001";
+    origin   <= "0000";
+    pos      <= std_logic_vector(to_unsigned(50, 13));
+    border_w <= std_logic_vector(to_unsigned(4, 7));
+    border_c <= x"3";
+    frame_reset;
+    grab(C_FRAME);
+    for x in 0 to C_FRAME - 1 loop
+      if (x >= 48) and (x <= 51) then
+        check(got(x) = x"0000FF", "border red");
+      elsif x < 48 then
+        check(got(x) = x"FFFFFF", "border B side");
+      else
+        check(got(x) = x"000000", "border A side");
       end if;
     end loop;
 

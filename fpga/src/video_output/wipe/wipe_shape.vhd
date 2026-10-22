@@ -15,7 +15,8 @@ use ieee.numeric_std.all;
 --   0101 diamond     |dx| + |dy| from an origin
 --   0110 cross       min(|dx|, |dy|) from an origin (a plus)
 --   0111 barn doors  distance from the centre line
---   1000 blinds      repeating band; position wipes inside each band
+--   1000 venetian    horizontal bands; position wipes inside each band
+--   1001 vertical blinds  vertical bands; position wipes inside each band
 --
 -- square, diamond and cross origin:
 --   0 centre
@@ -27,9 +28,8 @@ use ieee.numeric_std.all;
 --
 -- barn doors: origin(0) = 0 opens left/right, 1 opens up/down
 --
--- blinds:
---   origin(1 downto 0): 00 = x, 01 = y, 10 = x+y, 11 = x+(height-1-y)
---   origin(3 downto 2): band size 00 = 4 px, 01 = 8, 10 = 16, 11 = 32
+-- venetian and vertical blinds, origin(3 downto 2):
+--   00 = 64 px, 01 = 128 (2x64), 10 = 256 (4x64), 11 = 512 (8x64)
 
 entity wipe_shape is
   port (
@@ -74,7 +74,7 @@ architecture rtl of wipe_shape is
     end if;
   end function f_absdiff;
 
-  -- Power-of-two band: 4, 8, 16 or 32 pixels. Low bits are the modulus.
+  -- 64, 128, 256 or 512 pixels. Low bits are the modulus.
   function f_mod_band (
     v    : u13;
     code : std_logic_vector(1 downto 0)
@@ -83,13 +83,13 @@ architecture rtl of wipe_shape is
   begin
     case code is
       when "01" =>
-        m := to_unsigned(7, 13);
+        m := to_unsigned(127, 13);
       when "10" =>
-        m := to_unsigned(15, 13);
+        m := to_unsigned(255, 13);
       when "11" =>
-        m := to_unsigned(31, 13);
+        m := to_unsigned(511, 13);
       when others =>
-        m := to_unsigned(3, 13);
+        m := to_unsigned(63, 13);
     end case;
     return v and m;
   end function f_mod_band;
@@ -210,20 +210,10 @@ begin
         end if;
 
       when "1000" =>
-        case origin(1 downto 0) is
-          when "01" =>
-            acc := f_mod_band(resize(yv, 13), origin(3 downto 2));
-          when "10" =>
-            acc := f_mod_band(resize(xv, 13) + resize(yv, 13), origin(3 downto 2));
-          when "11" =>
-            acc := f_mod_band(
-              resize(xv, 13) + resize(hv - 1 - yv, 13),
-              origin(3 downto 2)
-            );
-          when others =>
-            acc := f_mod_band(resize(xv, 13), origin(3 downto 2));
-        end case;
-        coord <= std_logic_vector(acc);
+        coord <= std_logic_vector(f_mod_band(resize(yv, 13), origin(3 downto 2)));
+
+      when "1001" =>
+        coord <= std_logic_vector(f_mod_band(resize(xv, 13), origin(3 downto 2)));
 
       when "0100" =>
         acc := (others => '0');

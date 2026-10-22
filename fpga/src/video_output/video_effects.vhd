@@ -48,8 +48,8 @@ use ieee.numeric_std.all;
 -- video_fx_emboss @ 0xF8 — horizontal luma edge relief:
 --   [0]     1=emboss (rising luma: brighten 5 px)
 --   [1]     1=shadow (falling luma: darken 5 px)
---   [15:8]  delta threshold (0 = default 32)
---   [23:16] add/sub strength (0 = default 80)
+--   [15:8]  delta threshold (1-255, a stored 0 is treated as 1)
+--   [23:16] add/sub strength (1-255, a stored 0 is treated as 1)
 --   [24]    1=color fringe (emboss edge painted, not whitened)
 --   [28:25] fringe color 0-15 (black, grey, white, then hues)
 

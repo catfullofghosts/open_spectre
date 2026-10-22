@@ -166,6 +166,7 @@ entity digital_reg_file is
     video_fx_emboss    : out std_logic_vector(31 downto 0);
     -- Mix / wipe bus, before the video FX chain.
     --   0x1A0 [3:0]=mode [7:4]=origin [8]=invert [20:9]=softness
+    --         [27:21]=border width (0=off) [31:28]=border colour
     --   0x1A4 [12:0]=position (mix: 0=A, 4095=B)
     -- The raster is fixed at 720p in the wrapper.
     mix_wipe_ctrl  : out std_logic_vector(31 downto 0);
@@ -463,6 +464,7 @@ begin
   -- Chromatic aberration: [0]=en, [6:1]=G delay, [12:7]=B delay (0-32 px)
   regs(ra(x"F4")) <= video_fx_chromatic_i;
   -- Emboss/shadow: [0]=emboss [1]=shadow [15:8]=threshold [23:16]=strength
+  --   both are 1-255; the effect treats a stored 0 as 1
   --   [24]=color fringe [28:25]=fringe color 0-15
   regs(ra(x"F8")) <= video_fx_emboss_i;
   -- Mix/wipe. Mode 0 and position 0 pass the spectron picture.

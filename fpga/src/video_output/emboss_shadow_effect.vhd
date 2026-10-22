@@ -34,8 +34,6 @@ end entity emboss_shadow_effect;
 architecture rtl of emboss_shadow_effect is
 
   constant C_STREAK : unsigned(2 downto 0) := to_unsigned(5, 3);
-  constant C_DEF_THR : unsigned(7 downto 0) := to_unsigned(32, 8);
-  constant C_DEF_STR : unsigned(7 downto 0) := to_unsigned(80, 8);
 
   signal r_d     : unsigned(7 downto 0) := (others => '0');
   signal g_d     : unsigned(7 downto 0) := (others => '0');
@@ -162,13 +160,14 @@ begin
         d_add       <= '0';
         d_sub       <= '0';
       else
+        -- A stored 0 is the floor of 1. Zero threshold matches every edge.
         if unsigned(threshold) = 0 then
-          thr := C_DEF_THR;
+          thr := to_unsigned(1, 8);
         else
           thr := unsigned(threshold);
         end if;
         if unsigned(strength) = 0 then
-          str := C_DEF_STR;
+          str := to_unsigned(1, 8);
         else
           str := unsigned(strength);
         end if;

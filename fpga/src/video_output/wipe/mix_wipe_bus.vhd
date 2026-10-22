@@ -15,11 +15,13 @@ use ieee.numeric_std.all;
 --
 -- Controls:
 --   mode   see wipe_shape (mix, H, V, square, diagonal, diamond, cross,
---          barn doors, blinds)
+--          barn doors, venetian blinds, vertical blinds)
 --   origin see wipe_shape
 --   pos    mix: 0 = all A, 4095 = all B. wipes: edge position in pixels
 --   soft   soft-edge width in pixels, 0 = hard cut
 --   invert swaps A and B
+--   border_w  coloured edge thickness in pixels, 0 = no border
+--   border_c  border colour, same 16 colours as the emboss fringe
 --   frame_w / frame_h  counted raster the shaped wipes use
 --
 -- Output video and sync are delayed together by 13 clocks.
@@ -39,6 +41,8 @@ entity mix_wipe_bus is
     invert   : in  std_logic;
     pos      : in  std_logic_vector(12 downto 0);
     soft     : in  std_logic_vector(11 downto 0);
+    border_w : in  std_logic_vector(6 downto 0);
+    border_c : in  std_logic_vector(3 downto 0);
     frame_w  : in  std_logic_vector(11 downto 0);
     frame_h  : in  std_logic_vector(11 downto 0);
     video_o  : out std_logic_vector(23 downto 0);
@@ -78,9 +82,12 @@ architecture rtl of mix_wipe_bus is
   signal mix_e     : std_logic := '0';
   signal pos_e     : std_logic_vector(12 downto 0) := (others => '0');
   signal soft_e    : std_logic_vector(11 downto 0) := (others => '0');
-  signal inv_e     : std_logic := '0';
+  signal inv_e    : std_logic := '0';
+  signal bw_e     : std_logic_vector(6 downto 0) := (others => '0');
   signal alpha     : std_logic_vector(11 downto 0);
   signal alpha_r   : std_logic_vector(11 downto 0) := (others => '0');
+  signal border    : std_logic;
+  signal border_r  : std_logic := '0';
   signal a_at_mix  : std_logic_vector(23 downto 0);
   signal b_at_mix  : std_logic_vector(23 downto 0);
 
@@ -91,6 +98,31 @@ architecture rtl of mix_wipe_bus is
   signal hs_pipe : std_logic_vector(C_SYNC_DLY - 1 downto 0) := (others => '0');
   signal vs_pipe : std_logic_vector(C_SYNC_DLY - 1 downto 0) := (others => '0');
   signal ac_pipe : std_logic_vector(C_SYNC_DLY - 1 downto 0) := (others => '0');
+
+  subtype t_pix is std_logic_vector(23 downto 0);
+
+  -- Same 16 colours as video_effects f_fringe_rgb. R is in [7:0].
+  function f_border_rgb (idx : std_logic_vector(3 downto 0)) return t_pix is
+  begin
+    case idx is
+      when x"0" => return x"000000";
+      when x"1" => return x"808080";
+      when x"2" => return x"FFFFFF";
+      when x"3" => return x"0000FF";
+      when x"4" => return x"00FF00";
+      when x"5" => return x"FF0000";
+      when x"6" => return x"00FFFF";
+      when x"7" => return x"FFFF00";
+      when x"8" => return x"FF00FF";
+      when x"9" => return x"0080FF";
+      when x"A" => return x"8040FF";
+      when x"B" => return x"FF0080";
+      when x"C" => return x"00FF80";
+      when x"D" => return x"808000";
+      when x"E" => return x"004080";
+      when others => return x"404040";
+    end case;
+  end function f_border_rgb;
 
 begin
 
@@ -173,7 +205,9 @@ begin
         pos_e    <= (others => '0');
         soft_e   <= (others => '0');
         inv_e    <= '0';
+        bw_e     <= (others => '0');
         alpha_r  <= (others => '0');
+        border_r <= '0';
       else
         x_s      <= x_d;
         y_s      <= y_d;
@@ -190,8 +224,10 @@ begin
         pos_e   <= pos;
         soft_e  <= soft;
         inv_e   <= invert;
+        bw_e    <= border_w;
 
-        alpha_r <= alpha;
+        alpha_r  <= alpha;
+        border_r <= border;
       end if;
     end if;
   end process p_io;
@@ -217,7 +253,9 @@ begin
       soft     => soft_e,
       mix_mode => mix_e,
       invert   => inv_e,
-      alpha    => alpha
+      border_w => bw_e,
+      alpha    => alpha,
+      border   => border
     );
 
   a_at_mix <= a_pipe(C_VID_DLY - 1);
@@ -228,8 +266,10 @@ begin
       clk     => clk,
       video_a => a_at_mix,
       video_b => b_at_mix,
-      alpha   => alpha_r,
-      video_o => video_o
+      alpha      => alpha_r,
+      border     => border_r,
+      border_rgb => f_border_rgb(border_c),
+      video_o    => video_o
     );
 
   h_sync_o <= hs_pipe(C_SYNC_DLY - 1);

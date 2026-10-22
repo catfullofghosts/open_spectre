@@ -17,6 +17,8 @@ entity video_ab_mix is
     video_a : in  std_logic_vector(23 downto 0);
     video_b : in  std_logic_vector(23 downto 0);
     alpha   : in  std_logic_vector(11 downto 0);
+    border  : in  std_logic;
+    border_rgb : in  std_logic_vector(23 downto 0);
     video_o : out std_logic_vector(23 downto 0)
   );
 end entity video_ab_mix;
@@ -31,6 +33,8 @@ architecture rtl of video_ab_mix is
   signal a0, a1, a2, a3, a4 : std_logic_vector(23 downto 0) := (others => '0');
   signal b0, b1, b2, b3, b4 : std_logic_vector(23 downto 0) := (others => '0');
   signal p0, p1, p2, p3, p4 : std_logic_vector(11 downto 0) := (others => '0');
+  signal k0, k1, k2, k3, k4 : std_logic := '0';
+  signal c0, c1, c2, c3, c4 : std_logic_vector(23 downto 0) := (others => '0');
 
 begin
 
@@ -54,6 +58,18 @@ begin
       p2 <= p1;
       p3 <= p2;
       p4 <= p3;
+
+      k0 <= border;
+      k1 <= k0;
+      k2 <= k1;
+      k3 <= k2;
+      k4 <= k3;
+
+      c0 <= border_rgb;
+      c1 <= c0;
+      c2 <= c1;
+      c3 <= c2;
+      c4 <= c3;
     end if;
   end process p_align;
 
@@ -78,7 +94,8 @@ begin
 
   blended <= yb(11 downto 4) & yg(11 downto 4) & yr(11 downto 4);
 
-  video_o <= a4 when p4 = x"000" else
+  video_o <= c4 when k4 = '1' else
+             a4 when p4 = x"000" else
              b4 when p4 = x"FFF" else
              blended;
 

@@ -102,7 +102,11 @@ static u8 g_cb_msb, g_cb_lsb;
 static u8 g_mirror_msb, g_mirror_lsb;
 static u8 g_wipe_pos_msb, g_wipe_pos_lsb;
 
-#define MIDI_SYSEX_MAX 24U
+#define MIDI_SYSEX_MAX 64U
+#define MIDI_CELL_BASE 0x00002400U
+#define MIDI_CELL_COLS 80U
+#define MIDI_CELL_ROWS 45U
+#define MIDI_CELL_WORDS (MIDI_CELL_COLS * MIDI_CELL_ROWS)
 #define MIDI_DIG_OUTS  57U
 #define MIDI_ANA_OUTS  20U
 
@@ -284,6 +288,85 @@ static void MidiAnaReset(u8 out)
 	MidiAnaCommit(out);
 }
 
+static void MidiCellWr(u32 index, u8 ch, u8 colour)
+{
+	if (index >= MIDI_CELL_WORDS)
+	{
+		return;
+	}
+	MidiRegWr(MIDI_CELL_BASE + (index << 2),
+		((u32)(colour & 0x0FU) << 8) | (u32)ch);
+}
+
+static void MidiSysexText(void)
+{
+	u32 index;
+	u8 count;
+	u32 i;
+	u32 pos;
+	u8 ch;
+	u8 attr;
+
+	if (g_sysexLen < 7U)
+	{
+		return;
+	}
+	index = (u32)(g_sysex[4] & 0x7FU) | ((u32)(g_sysex[5] & 0x7FU) << 7);
+	count = (u8)(g_sysex[6] & 0x7FU);
+	if ((u32)g_sysexLen < (7U + ((u32)count * 2U)))
+	{
+		return;
+	}
+	for (i = 0U; i < (u32)count; i++)
+	{
+		pos = 7U + (i * 2U);
+		ch = (u8)(g_sysex[pos] & 0x7FU);
+		attr = g_sysex[pos + 1U];
+		ch |= (u8)((attr & 0x01U) << 7);
+		MidiCellWr(index + i, ch, (u8)((attr >> 1) & 0x0FU));
+	}
+	g_msgCount++;
+	g_lastStatus = 0xF0U;
+	g_lastData1 = 0x33U;
+	g_lastData2 = count;
+}
+
+static void MidiSysexTextClear(void)
+{
+	u8 row;
+	u32 begin;
+	u32 end;
+	u32 i;
+
+	if (g_sysexLen < 5U)
+	{
+		return;
+	}
+	row = (u8)(g_sysex[4] & 0x7FU);
+	if (row == 127U)
+	{
+		begin = 0U;
+		end = MIDI_CELL_WORDS;
+	}
+	else if (row < MIDI_CELL_ROWS)
+	{
+		begin = (u32)row * MIDI_CELL_COLS;
+		end = begin + MIDI_CELL_COLS;
+	}
+	else
+	{
+		return;
+	}
+	for (i = begin; i < end; i++)
+	{
+		MidiCellWr(i, 0U, 0U);
+	}
+	g_msgCount++;
+	g_lastStatus = 0xF0U;
+	g_lastData1 = 0x34U;
+	g_lastData2 = row;
+}
+
 static void MidiSysexEnd(void)
 {
 	u8 cmd;
@@ -330,6 +413,14 @@ static void MidiSysexEnd(void)
 		g_lastStatus = 0xF0U;
 		g_lastData1 = cmd;
 		g_lastData2 = g_sysex[5];
+	}
+	else if (cmd == 0x33U)
+	{
+		MidiSysexText();
+	}
+	else if (cmd == 0x34U)
+	{
+		MidiSysexTextClear();
 	}
 }
 
@@ -644,10 +735,26 @@ static void MidiMapCc(u8 cc, u8 val)
 		MidiRegFld(REG_FX_EMBOSS, 0x1U, 1U, (val >= 64U) ? 1U : 0U);
 		break;
 	case 85:
-		MidiRegFld(REG_FX_EMBOSS, 0xFFU, 8U, MidiScale(val, 255U));
+		{
+			u32 level = MidiScale(val, 255U);
+
+			if (level == 0U)
+			{
+				level = 1U;
+			}
+			MidiRegFld(REG_FX_EMBOSS, 0xFFU, 8U, level);
+		}
 		break;
 	case 86:
-		MidiRegFld(REG_FX_EMBOSS, 0xFFU, 16U, MidiScale(val, 255U));
+		{
+			u32 level = MidiScale(val, 255U);
+
+			if (level == 0U)
+			{
+				level = 1U;
+			}
+			MidiRegFld(REG_FX_EMBOSS, 0xFFU, 16U, level);
+		}
 		break;
 	case 87:
 		MidiRegFld(REG_FX_EMBOSS, 0x1U, 24U, (val >= 64U) ? 1U : 0U);
@@ -753,6 +860,12 @@ static void MidiMapCc(u8 cc, u8 val)
 			}
 			MidiRegFld(REG_WIPE_POS, 0x1FFFU, 0U, pos);
 		}
+		break;
+	case 105:
+		MidiRegFld(REG_WIPE_CTRL, 0xFU, 28U, (u32)val >> 3);
+		break;
+	case 106:
+		MidiRegFld(REG_WIPE_CTRL, 0x7FU, 21U, MidiScale(val, 127U));
 		break;
 
 	default:

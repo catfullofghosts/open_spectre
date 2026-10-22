@@ -1066,8 +1066,8 @@ proc create_root_design { parentCell } {
   connect_bd_net -net axi_dynclk_0_PXL_CLK_G_O  [get_bd_pins axi_dynclk_0/PXL_CLK_G_O] \
   [get_bd_pins v_axi4s_vid_out_0/vid_io_out_clk] \
   [get_bd_pins v_tc_0/clk] \
-  [get_bd_pins spector_wrapper_zynq_0/pix_clk] \
-  [get_bd_pins video_bufr_reg_0/src_clk]
+  [get_bd_pins video_bufr_reg_0/src_clk] \
+  [get_bd_pins spector_wrapper_zynq_0/pix_clk]
   connect_bd_net -net axi_dynclk_0_PXL_CLK_O  [get_bd_pins axi_dynclk_0/PXL_CLK_O] \
   [get_bd_pins rgb2dvi_0/PixelClk] \
   [get_bd_pins video_bufr_reg_0/pxl_clk]
@@ -1197,7 +1197,7 @@ proc create_root_design { parentCell } {
   [get_bd_pins v_axi4s_vid_out_0/aresetn]
 
   # Create address segments
-  assign_bd_address -offset 0x40000000 -range 0x00002000 -target_address_space [get_bd_addr_spaces processing_system7_0/Data] [get_bd_addr_segs axi_bram_ctrl_0/S_AXI/Mem0] -force
+  assign_bd_address -offset 0x40000000 -range 0x00010000 -target_address_space [get_bd_addr_spaces processing_system7_0/Data] [get_bd_addr_segs axi_bram_ctrl_0/S_AXI/Mem0] -force
   assign_bd_address -offset 0x43C00000 -range 0x00010000 -target_address_space [get_bd_addr_spaces processing_system7_0/Data] [get_bd_addr_segs axi_dynclk_0/S_AXI_LITE/S_AXI_LITE_reg] -force
   assign_bd_address -offset 0x41200000 -range 0x00010000 -target_address_space [get_bd_addr_spaces processing_system7_0/Data] [get_bd_addr_segs axi_gpio_video/S_AXI/Reg] -force
   assign_bd_address -offset 0x43000000 -range 0x00010000 -target_address_space [get_bd_addr_spaces processing_system7_0/Data] [get_bd_addr_segs axi_vdma_0/S_AXI_LITE/Reg] -force

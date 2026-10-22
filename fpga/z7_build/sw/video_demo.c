@@ -298,6 +298,11 @@ static float fast_log2(float x)
 
 #define OVERLAY_BRAM_BYTE_BASE        0x00000400U
 #define OVERLAY_BRAM_WORDS            2048U
+/* Text plane: one 16-bit value in the low half of each 32-bit word. */
+#define CHAR_CELL_BYTE_BASE           0x00002400U
+#define CHAR_CELL_WORDS               3600U
+#define CHAR_FONT_BYTE_BASE           0x00005C40U
+#define CHAR_FONT_WORDS               4096U
 #define OVERLAY_REG_GLOBAL_ENABLE     0x000000FCU
 #define OVERLAY_REG_SPRITE_BASE       0x00000100U
 #define OVERLAY_REG_SPRITE_STRIDE     0x00000010U

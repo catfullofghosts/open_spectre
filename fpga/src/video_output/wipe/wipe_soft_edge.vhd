@@ -23,7 +23,9 @@ entity wipe_soft_edge is
     soft     : in  std_logic_vector(11 downto 0);
     mix_mode : in  std_logic;
     invert   : in  std_logic;
-    alpha    : out std_logic_vector(11 downto 0)
+    border_w : in  std_logic_vector(6 downto 0);
+    alpha    : out std_logic_vector(11 downto 0);
+    border   : out std_logic
   );
 end entity wipe_soft_edge;
 
@@ -45,6 +47,7 @@ architecture rtl of wipe_soft_edge is
   signal s1_full   : std_logic := '0';
   signal s1_zero   : std_logic := '0';
   signal s1_inv    : std_logic := '0';
+  signal s1_hit    : std_logic := '0';
 
   signal s2_prod   : unsigned(36 downto 0) := (others => '0');
   signal s2_mix_a  : unsigned(11 downto 0) := (others => '0');
@@ -54,6 +57,7 @@ architecture rtl of wipe_soft_edge is
   signal s2_full   : std_logic := '0';
   signal s2_zero   : std_logic := '0';
   signal s2_inv    : std_logic := '0';
+  signal s2_hit    : std_logic := '0';
 
   function f_apply_inv (a : unsigned(11 downto 0); inv : std_logic) return unsigned is
   begin
@@ -140,6 +144,11 @@ begin
     variable co_u   : unsigned(12 downto 0);
     variable mag    : unsigned(12 downto 0);
     variable out_a  : unsigned(11 downto 0);
+    variable bw_v   : unsigned(6 downto 0);
+    variable half_v : unsigned(6 downto 0);
+    variable lo_v   : unsigned(12 downto 0);
+    variable hi_v   : unsigned(13 downto 0);
+    variable hit_v  : std_logic;
   begin
     if rising_edge(clk) then
       if rst = '1' then
@@ -151,6 +160,7 @@ begin
         s1_full   <= '0';
         s1_zero   <= '1';
         s1_inv    <= '0';
+        s1_hit    <= '0';
         s2_prod   <= (others => '0');
         s2_mix_a  <= (others => '0');
         s2_hard_a <= (others => '0');
@@ -159,7 +169,9 @@ begin
         s2_full   <= '0';
         s2_zero   <= '1';
         s2_inv    <= '0';
+        s2_hit    <= '0';
         alpha     <= (others => '0');
+        border    <= '0';
       else
         soft_u := unsigned(soft);
         pos_u  := unsigned(pos);
@@ -184,6 +196,23 @@ begin
         s1_zero <= '0';
         s1_span <= (others => '0');
 
+        -- Border is border_w pixels centred on pos. Width 0 paints nothing.
+        hit_v  := '0';
+        bw_v   := unsigned(border_w);
+        half_v := '0' & bw_v(6 downto 1);
+        if (mix_mode = '0') and (bw_v /= 0) then
+          if pos_u >= resize(half_v, 13) then
+            lo_v := pos_u - resize(half_v, 13);
+          else
+            lo_v := (others => '0');
+          end if;
+          hi_v := resize(lo_v, 14) + resize(bw_v, 14);
+          if (resize(co_u, 14) >= resize(lo_v, 14)) and (resize(co_u, 14) < hi_v) then
+            hit_v := '1';
+          end if;
+        end if;
+        s1_hit <= hit_v;
+
         if (mix_mode = '1') or (soft_u = 0) or (recip = 0) then
           s1_hard <= '1';
         else
@@ -206,6 +235,7 @@ begin
         s2_full   <= s1_full;
         s2_zero   <= s1_zero;
         s2_inv    <= s1_inv;
+        s2_hit    <= s1_hit;
 
         mag := s2_prod(24 downto 12);
         if s2_mix = '1' then
@@ -219,7 +249,8 @@ begin
         else
           out_a := mag(11 downto 0);
         end if;
-        alpha <= std_logic_vector(f_apply_inv(out_a, s2_inv));
+        alpha  <= std_logic_vector(f_apply_inv(out_a, s2_inv));
+        border <= s2_hit;
       end if;
     end if;
   end process p_edge;

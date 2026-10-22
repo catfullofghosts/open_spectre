@@ -38,7 +38,7 @@ entity spector_wrapper_zynq is
     regs_clk     : in std_logic;
     regs_en      : in std_logic;
     regs_wen     : in std_logic_vector(3 downto 0);
-    regs_addr    : in std_logic_vector(12 downto 0);
+    regs_addr    : in std_logic_vector(15 downto 0);
     regs_wr_data : in std_logic_vector(31 downto 0);
     regs_rd_data : out std_logic_vector(31 downto 0);
     video_out    : out std_logic_vector(23 downto 0);
@@ -293,10 +293,10 @@ architecture rtl of spector_wrapper_zynq is
 
   -- Align H/V/SOF with video_fx_out path (encoder mode):
   -- dirt(1) + color_mult(3) + encoder_out(1) + bg_regs(3) = 8 to bg_video
-  -- mix_wipe_bus = 13, and it replaces the old pre-FX register
+  -- mix_wipe_bus = 13, vdp = 9, and the mixer replaces the old pre-FX register
   -- fx: color(2)+mirror(1)+logic(1)+chromatic(1)+emboss(4)+out(1) = 10
-  -- total 31. Pipe length 30 + registered MSB tap = 31 cycles.
-  constant C_OUT_PIPE_LAT : natural := 30;
+  -- total 40. Pipe length 39 + registered MSB tap = 40 cycles.
+  constant C_OUT_PIPE_LAT : natural := 39;
   -- bg_video is this many clocks behind h_sync_n. External video and the
   -- sync used by the mixer are delayed to match, so the wipe lands on the
   -- spectron pixels.
@@ -373,8 +373,6 @@ architecture rtl of spector_wrapper_zynq is
   signal overlay_global_en  : std_logic;
   signal overlay_block_div  : std_logic_vector(2 downto 0);
   signal overlay_sprites      : t_sprite_array;
-  signal overlay_key        : std_logic;
-  signal overlay_rgb        : std_logic_vector(23 downto 0);
 
   signal reg_en               : std_logic;
   signal reg_we               : std_logic_vector(3 downto 0);
@@ -386,6 +384,14 @@ architecture rtl of spector_wrapper_zynq is
   signal overlay_bram_addr    : std_logic_vector(10 downto 0);
   signal overlay_bram_wdata   : std_logic_vector(31 downto 0);
   signal overlay_bram_rdata   : std_logic_vector(31 downto 0);
+  signal char_cell_we         : std_logic;
+  signal char_cell_addr       : std_logic_vector(11 downto 0);
+  signal char_cell_din        : std_logic_vector(15 downto 0);
+  signal char_cell_dout       : std_logic_vector(15 downto 0);
+  signal char_font_we         : std_logic;
+  signal char_font_addr       : std_logic_vector(11 downto 0);
+  signal char_font_din        : std_logic_vector(15 downto 0);
+  signal char_font_dout       : std_logic_vector(15 downto 0);
 
   -- Background video signals (for compositing)
   signal bg_video            : std_logic_vector(23 downto 0);
@@ -405,6 +411,10 @@ architecture rtl of spector_wrapper_zynq is
   signal video_mix    : std_logic_vector(23 downto 0);
   signal mix_hs       : std_logic;
   signal mix_vs       : std_logic;
+  signal mix_act      : std_logic;
+  signal video_vdp    : std_logic_vector(23 downto 0);
+  signal vdp_hs       : std_logic;
+  signal vdp_vs       : std_logic;
 
   type t_ext_aln is array (0 to C_SRC_ALIGN - 1) of std_logic_vector(23 downto 0);
   signal ext_aln : t_ext_aln := (others => (others => '0'));
@@ -515,7 +525,6 @@ begin
   -- Address muxer to split the bram incomng bram based on address 
   overlay_cpu_mux_inst : entity work.overlay_cpu_mux
     generic map (
-      G_BYTE_BASE  => std_logic_vector(to_unsigned(16#400#, 13)),
       G_ADDR_WIDTH => 11
     )
     port map (
@@ -534,7 +543,15 @@ begin
       bram_we     => overlay_bram_we,
       bram_addr   => overlay_bram_addr,
       bram_wdata  => overlay_bram_wdata,
-      bram_rdata  => overlay_bram_rdata
+      bram_rdata  => overlay_bram_rdata,
+      cell_we     => char_cell_we,
+      cell_addr   => char_cell_addr,
+      cell_din    => char_cell_din,
+      cell_dout   => char_cell_dout,
+      font_we     => char_font_we,
+      font_addr   => char_font_addr,
+      font_din    => char_font_din,
+      font_dout   => char_font_dout
     );
 
   cpu_reg_wrapper_inst : entity work.cpu_reg_wrapper
@@ -667,29 +684,7 @@ begin
       audio_mag_pre         => audio_mag_pre
     );
 
-    --- Buffer overlay and sprite generator
---  overlay_framebuffer_inst : entity work.overlay_framebuffer
---    generic map (
---      G_DEPTH      => 2048,
---      G_ADDR_WIDTH => 11
---    )
---    port map (
---      cpu_clk    => regs_clk,
---      cpu_en     => overlay_bram_en,
---      cpu_we     => overlay_bram_we,
---      cpu_addr   => overlay_bram_addr,
---      cpu_wdata  => overlay_bram_wdata,
---      cpu_rdata  => overlay_bram_rdata,
---      pix_clk    => pix_clk,
---      pix_rst    => reset_n,
---      h_sync     => h_sync_n,
---      v_sync     => v_sync_n,
---      global_enable => overlay_global_en,
---      block_div     => overlay_block_div,
---      sprites       => overlay_sprites,
---      overlay_key => overlay_key,
---      overlay_rgb => overlay_rgb
---    );
+    --- Sprites, patterns and text live in vdp, between the mix and the effects.
 
   -------------------------------------------
   -- Digital Side
@@ -1308,12 +1303,45 @@ begin
       invert   => mix_wipe_ctrl(8),
       pos      => mix_wipe_pos(12 downto 0),
       soft     => mix_wipe_ctrl(20 downto 9),
+      border_w => mix_wipe_ctrl(27 downto 21),
+      border_c => mix_wipe_ctrl(31 downto 28),
       frame_w  => std_logic_vector(to_unsigned(C_H_ACTIVE, 12)),
       frame_h  => std_logic_vector(to_unsigned(C_V_ACTIVE, 12)),
       video_o  => video_mix,
       h_sync_o => mix_hs,
       v_sync_o => mix_vs,
-      active_o => open
+      active_o => mix_act
+    );
+
+  -- Text under the sprites. Effects see this picture and its delayed sync.
+  vdp_inst : entity work.vdp
+    port map (
+      clk           => pix_clk,
+      rst           => reset_n,
+      h_sync        => mix_hs,
+      v_sync        => mix_vs,
+      active        => mix_act,
+      video_in      => video_mix,
+      video_o       => video_vdp,
+      h_sync_o      => vdp_hs,
+      v_sync_o      => vdp_vs,
+      cpu_clk       => regs_clk,
+      cpu_en        => overlay_bram_en,
+      cpu_we        => overlay_bram_we,
+      cpu_addr      => overlay_bram_addr,
+      cpu_wdata     => overlay_bram_wdata,
+      cpu_rdata     => overlay_bram_rdata,
+      global_enable => overlay_global_en,
+      block_div     => overlay_block_div,
+      sprites       => overlay_sprites,
+      cpu_cell_we   => char_cell_we,
+      cpu_cell_addr => char_cell_addr,
+      cpu_cell_din  => char_cell_din,
+      cpu_cell_dout => char_cell_dout,
+      cpu_font_we   => char_font_we,
+      cpu_font_addr => char_font_addr,
+      cpu_font_din  => char_font_din,
+      cpu_font_dout => char_font_dout
     );
 
   video_effects_inst : entity work.video_effects
@@ -1322,9 +1350,9 @@ begin
       -- reset is MMCM LOCKED, active high while the pixel clock is running.
       -- video_effects treats rst as active high, so use the inverted lock.
       rst          => reset_n,
-      h_sync       => mix_hs,
-      v_sync       => mix_vs,
-      video_in     => video_mix,
+      h_sync       => vdp_hs,
+      v_sync       => vdp_vs,
+      video_in     => video_vdp,
       fx_ctrl      => video_fx_ctrl,
       fx_bitplane  => video_fx_bitplane,
       fx_dither    => video_fx_dither,
