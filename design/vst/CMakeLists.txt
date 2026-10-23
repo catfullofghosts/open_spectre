@@ -62,6 +62,12 @@ target_sources(OpenSpectre
         Source/MatrixGrid.cpp
         Source/MatrixGrid.h
         Source/MatrixNames.h
+        Source/OutputFx.h
+        Source/FxPage.cpp
+        Source/FxPage.h
+        Source/MixWipe.h
+        Source/ExtPage.cpp
+        Source/ExtPage.h
 )
 
 target_link_libraries(OpenSpectre

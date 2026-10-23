@@ -147,6 +147,8 @@ OpenSpectreAudioProcessorEditor::OpenSpectreAudioProcessorEditor(OpenSpectreAudi
       currentPage(processor.getPage()),
       digitalGrid(processor, OpenSpectreAudioProcessor::kMatrixDigital),
       analogGrid(processor, OpenSpectreAudioProcessor::kMatrixAnalog),
+      fxPage(processor),
+      extPage(processor),
       tooltipWindow(this, 0)
 {
     background = juce::ImageFileFormat::loadFrom(BinaryData::blank_VST_BG_png,
@@ -183,6 +185,8 @@ OpenSpectreAudioProcessorEditor::OpenSpectreAudioProcessorEditor(OpenSpectreAudi
     addAndMakeVisible(modernTabs);
     addAndMakeVisible(digitalGrid);
     addAndMakeVisible(analogGrid);
+    addAndMakeVisible(fxPage);
+    addAndMakeVisible(extPage);
 
     audioProcessor.addChangeListener(this);
 
@@ -219,6 +223,8 @@ void OpenSpectreAudioProcessorEditor::resized()
 
     digitalGrid.setBounds(inclusiveRect(64, 89, 524, 480));
     analogGrid.setBounds(inclusiveRect(567, 89, 857, 297));
+    fxPage.setBounds(32, 48, 836, 659);
+    extPage.setBounds(32, 48, 836, 659);
     updatePageVisibility();
 }
 
@@ -227,6 +233,8 @@ void OpenSpectreAudioProcessorEditor::changeListenerCallback(juce::ChangeBroadca
     juce::ignoreUnused(source);
     currentPage = audioProcessor.getPage();
     pageTabs.setActiveIndex((int) currentPage);
+    fxPage.syncFromProcessor();
+    extPage.syncFromProcessor();
     updatePageVisibility();
     repaint();
 }
@@ -244,9 +252,13 @@ void OpenSpectreAudioProcessorEditor::updatePageVisibility()
 {
     const bool classic = currentPage == OpenSpectreAudioProcessor::Page::classic;
     const bool modern = currentPage == OpenSpectreAudioProcessor::Page::modern;
+    const bool fx = currentPage == OpenSpectreAudioProcessor::Page::fx;
+    const bool ext = currentPage == OpenSpectreAudioProcessor::Page::ext;
     digitalGrid.setVisible(classic);
     analogGrid.setVisible(classic);
     modernTabs.setVisible(modern);
+    fxPage.setVisible(fx);
+    extPage.setVisible(ext);
 
     if (! classic)
         tooltipWindow.hideTip();

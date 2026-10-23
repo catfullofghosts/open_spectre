@@ -1,6 +1,9 @@
 #pragma once
 
 #include <juce_audio_processors/juce_audio_processors.h>
+#include "OutputFx.h"
+#include "MixWipe.h"
+
 #include <array>
 #include <cstdint>
 
@@ -72,8 +75,19 @@ public:
     std::array<uint8_t, kDigitalBytes> copyDigitalBits() const;
     std::array<uint8_t, kAnalogBytes> copyAnalogBits() const;
 
+    int getOutputFx (int index) const;
+    void setOutputFx (int index, int value);
+
+    int getMixWipe (int index) const;
+    void setMixWipe (int index, int value);
+
 private:
     void enqueueSysEx(const juce::uint8* data, int size);
+    void sendCC(int controller, int value);
+    void sendOutputFxIndex(int index, int value);
+    void publishOutputFx();
+    void sendMixWipeIndex (int index, int value);
+    void publishMixWipe();
     void sendMatrixCell(int matrixId, int outputIndex, int inputIndex, bool on);
     void sendMatrixReset(int matrixId);
     void publishMatrix(int matrixId);
@@ -85,6 +99,8 @@ private:
     Page page = Page::classic;
     std::array<uint8_t, kDigitalBytes> digitalBits {};
     std::array<uint8_t, kAnalogBytes> analogBits {};
+    std::array<int, kOutputFxCount> outputFxValues {};
+    std::array<int, kMixWipeCount> mixWipeValues {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(OpenSpectreAudioProcessor)
 };

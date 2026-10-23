@@ -3,6 +3,8 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "PluginProcessor.h"
 #include "MatrixGrid.h"
+#include "FxPage.h"
+#include "ExtPage.h"
 
 #include <functional>
 #include <vector>
@@ -62,6 +64,8 @@ private:
     PageTabs modernTabs;
     MatrixGrid digitalGrid;
     MatrixGrid analogGrid;
+    FxPage fxPage;
+    ExtPage extPage;
     juce::TooltipWindow tooltipWindow;
     int modernSection = 0;
 

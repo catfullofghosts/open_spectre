@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "OutputFx.h"
 
 #include <cstring>
 
@@ -38,6 +39,11 @@ OpenSpectreAudioProcessor::OpenSpectreAudioProcessor()
       )
 #endif
 {
+    for (int index = 0; index < kOutputFxCount; ++index)
+        outputFxValues[(size_t) index] = kOutputFx[index].defaultValue;
+
+    for (int index = 0; index < kMixWipeCount; ++index)
+        mixWipeValues[(size_t) index] = kMixWipe[index].defaultValue;
 }
 
 OpenSpectreAudioProcessor::~OpenSpectreAudioProcessor()
@@ -188,17 +194,36 @@ void OpenSpectreAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
     juce::MemoryBlock analogBlock;
     Page savedPage = Page::classic;
 
+    juce::String fxValues;
+    juce::String mixValues;
+
     {
         const juce::ScopedLock lock(matrixLock);
         savedPage = page;
         digitalBlock.append(digitalBits.data(), digitalBits.size());
         analogBlock.append(analogBits.data(), analogBits.size());
+
+        for (int index = 0; index < kOutputFxCount; ++index)
+        {
+            if (index > 0)
+                fxValues << ",";
+            fxValues << outputFxValues[(size_t) index];
+        }
+
+        for (int index = 0; index < kMixWipeCount; ++index)
+        {
+            if (index > 0)
+                mixValues << ",";
+            mixValues << mixWipeValues[(size_t) index];
+        }
     }
 
     juce::XmlElement xml("OpenSpectre");
     xml.setAttribute("page", getPageName(savedPage));
     xml.setAttribute("digital", digitalBlock.toBase64Encoding());
     xml.setAttribute("analog", analogBlock.toBase64Encoding());
+    xml.setAttribute("outputFx", fxValues);
+    xml.setAttribute("mixWipe", mixValues);
     copyXmlToBinary(xml, destData);
 }
 
@@ -214,6 +239,8 @@ void OpenSpectreAudioProcessor::setStateInformation(const void* data, int sizeIn
 
     bool digitalChanged = false;
     bool analogChanged = false;
+    bool outputFxChanged = false;
+    bool mixWipeChanged = false;
 
     {
         const juce::ScopedLock lock(matrixLock);
@@ -242,6 +269,42 @@ void OpenSpectreAudioProcessor::setStateInformation(const void* data, int sizeIn
             analogChanged = next != analogBits;
             analogBits = next;
         }
+
+        const auto fxParts = juce::StringArray::fromTokens(xml->getStringAttribute("outputFx"), ",", "");
+
+        if (fxParts.size() == kOutputFxCount)
+        {
+            for (int index = 0; index < kOutputFxCount; ++index)
+            {
+                const int loaded = fxClamp(fxParts[index].getIntValue(),
+                                           kOutputFx[index].minimum,
+                                           kOutputFx[index].maximum);
+
+                if (outputFxValues[(size_t) index] != loaded)
+                {
+                    outputFxValues[(size_t) index] = loaded;
+                    outputFxChanged = true;
+                }
+            }
+        }
+
+        const auto mixParts = juce::StringArray::fromTokens(xml->getStringAttribute("mixWipe"), ",", "");
+
+        if (mixParts.size() == kMixWipeCount)
+        {
+            for (int index = 0; index < kMixWipeCount; ++index)
+            {
+                const int loaded = fxClamp(mixParts[index].getIntValue(),
+                                           kMixWipe[index].minimum,
+                                           kMixWipe[index].maximum);
+
+                if (mixWipeValues[(size_t) index] != loaded)
+                {
+                    mixWipeValues[(size_t) index] = loaded;
+                    mixWipeChanged = true;
+                }
+            }
+        }
     }
 
     if (digitalChanged)
@@ -249,6 +312,12 @@ void OpenSpectreAudioProcessor::setStateInformation(const void* data, int sizeIn
 
     if (analogChanged)
         publishMatrix(kMatrixAnalog);
+
+    if (outputFxChanged)
+        publishOutputFx();
+
+    if (mixWipeChanged)
+        publishMixWipe();
 
     sendChangeMessage();
 }
@@ -329,6 +398,156 @@ std::array<uint8_t, OpenSpectreAudioProcessor::kAnalogBytes> OpenSpectreAudioPro
 {
     const juce::ScopedLock lock(matrixLock);
     return analogBits;
+}
+
+void OpenSpectreAudioProcessor::sendCC(int controller, int value)
+{
+    const auto message = juce::MidiMessage::controllerEvent(1, controller, fxClamp(value, 0, 127));
+    const juce::ScopedLock lock(midiLock);
+    midiOutput.addEvent(message, 0);
+}
+
+void OpenSpectreAudioProcessor::sendOutputFxIndex(int index, int value)
+{
+    if (index < 0 || index >= kOutputFxCount)
+        return;
+
+    dispatchOutputFx(kOutputFx[index], value, [this](int controller, int controllerValue)
+    {
+        sendCC(controller, controllerValue);
+    });
+}
+
+void OpenSpectreAudioProcessor::publishOutputFx()
+{
+    std::array<int, kOutputFxCount> values {};
+
+    {
+        const juce::ScopedLock lock(matrixLock);
+        values = outputFxValues;
+    }
+
+    for (int index = 0; index < kOutputFxCount; ++index)
+        sendOutputFxIndex(index, values[(size_t) index]);
+}
+
+int OpenSpectreAudioProcessor::getOutputFx(int index) const
+{
+    if (index < 0 || index >= kOutputFxCount)
+        return 0;
+
+    const juce::ScopedLock lock(matrixLock);
+    return outputFxValues[(size_t) index];
+}
+
+void OpenSpectreAudioProcessor::setOutputFx(int index, int value)
+{
+    if (index < 0 || index >= kOutputFxCount)
+        return;
+
+    value = fxClamp(value, kOutputFx[index].minimum, kOutputFx[index].maximum);
+
+    {
+        const juce::ScopedLock lock(matrixLock);
+
+        if (outputFxValues[(size_t) index] == value)
+            return;
+
+        outputFxValues[(size_t) index] = value;
+    }
+
+    sendOutputFxIndex(index, value);
+}
+
+void OpenSpectreAudioProcessor::sendMixWipeIndex(int index, int value)
+{
+    if (index < 0 || index >= kMixWipeCount)
+        return;
+
+    const auto& spec = kMixWipe[index];
+
+    if (spec.encode == MixEncode::direction || spec.encode == MixEncode::band)
+    {
+        int direction = 0;
+        int band = 0;
+
+        {
+            const juce::ScopedLock lock(matrixLock);
+
+            for (int control = 0; control < kMixWipeCount; ++control)
+            {
+                if (kMixWipe[control].encode == MixEncode::direction)
+                    direction = mixWipeValues[(size_t) control];
+                else if (kMixWipe[control].encode == MixEncode::band)
+                    band = mixWipeValues[(size_t) control];
+            }
+        }
+
+        sendCC(spec.cc, fxEnumToCc(mixWipeOriginCode(direction, band), spec.encodeParam));
+        return;
+    }
+
+    dispatchMixWipe(spec, value, [this](int controller, int controllerValue)
+    {
+        sendCC(controller, controllerValue);
+    });
+}
+
+void OpenSpectreAudioProcessor::publishMixWipe()
+{
+    std::array<int, kMixWipeCount> values {};
+    bool sentOrigin = false;
+
+    {
+        const juce::ScopedLock lock(matrixLock);
+        values = mixWipeValues;
+    }
+
+    for (int index = 0; index < kMixWipeCount; ++index)
+    {
+        const auto encode = kMixWipe[index].encode;
+
+        if (encode == MixEncode::direction || encode == MixEncode::band)
+        {
+            if (! sentOrigin)
+            {
+                sendMixWipeIndex(index, values[(size_t) index]);
+                sentOrigin = true;
+            }
+
+            continue;
+        }
+
+        sendMixWipeIndex(index, values[(size_t) index]);
+    }
+}
+
+int OpenSpectreAudioProcessor::getMixWipe(int index) const
+{
+    if (index < 0 || index >= kMixWipeCount)
+        return 0;
+
+    const juce::ScopedLock lock(matrixLock);
+    return mixWipeValues[(size_t) index];
+}
+
+void OpenSpectreAudioProcessor::setMixWipe(int index, int value)
+{
+    if (index < 0 || index >= kMixWipeCount)
+        return;
+
+    value = fxClamp(value, kMixWipe[index].minimum, kMixWipe[index].maximum);
+
+    {
+        const juce::ScopedLock lock(matrixLock);
+
+        if (mixWipeValues[(size_t) index] == value)
+            return;
+
+        mixWipeValues[(size_t) index] = value;
+    }
+
+    sendMixWipeIndex(index, value);
 }
 
 void OpenSpectreAudioProcessor::enqueueSysEx(const juce::uint8* data, int size)
