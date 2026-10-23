@@ -20,12 +20,13 @@ Open to donations and contributors with FPGA experience.
 | digital matrix | done |  |
 | analog matrix | done | need to merge signed branch in. |
 | oscillators | done | vert sync still a bit blocky, why? |
-| shape gen | wip | needs compare with original|
+| shape gen | almost done | needs compare with original|
 | colour encode | done | |
 | audio in | wip | working, but needs propper testing|
 | Vitis test software | done | video in works, frame buffer works, midi parsing works |
 | Pico Based midi usb in | done | is just a bridge (computer -> pico (usb midi) -> uart -> zynq |
 | hardware interface | not started | still software controlled |
+| VST software for control | just  started |  |
 
 ## Aim
 
