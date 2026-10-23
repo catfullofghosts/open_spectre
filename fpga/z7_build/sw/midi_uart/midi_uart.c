@@ -1,0 +1,1209 @@
+#include "midi_uart.h"
+
+#include "xil_io.h"
+#include "xil_printf.h"
+#include "xparameters.h"
+#include "xuartps.h"
+
+/* Zynq-7000 UART1 is always at this address when enabled in the PS. */
+#ifndef MIDI_UART1_BASE
+#if defined(XPAR_XUARTPS_1_BASEADDR)
+#define MIDI_UART1_BASE XPAR_XUARTPS_1_BASEADDR
+#elif defined(XPAR_PS7_UART_1_BASEADDR)
+#define MIDI_UART1_BASE XPAR_PS7_UART_1_BASEADDR
+#else
+#define MIDI_UART1_BASE 0xE0001000U
+#endif
+#endif
+
+#ifndef MIDI_UART1_CLK_HZ
+#if defined(XPAR_XUARTPS_1_UART_CLK_FREQ_HZ)
+#define MIDI_UART1_CLK_HZ XPAR_XUARTPS_1_UART_CLK_FREQ_HZ
+#elif defined(XPAR_XUARTPS_1_CLOCK_FREQ)
+#define MIDI_UART1_CLK_HZ XPAR_XUARTPS_1_CLOCK_FREQ
+#elif defined(XPAR_UART1_CLOCK_FREQ)
+#define MIDI_UART1_CLK_HZ XPAR_UART1_CLOCK_FREQ
+#elif defined(XPAR_PS7_UART_1_UART_CLK_FREQ_HZ)
+#define MIDI_UART1_CLK_HZ XPAR_PS7_UART_1_UART_CLK_FREQ_HZ
+#else
+#define MIDI_UART1_CLK_HZ 100000000U
+#endif
+#endif
+
+#if defined(XPAR_AXI_BRAM_CTRL_0_S_AXI_BASEADDR)
+#define MIDI_REGS_BASE XPAR_AXI_BRAM_CTRL_0_S_AXI_BASEADDR
+#elif defined(XPAR_AXI_BRAM_CTRL_0_BASEADDR)
+#define MIDI_REGS_BASE XPAR_AXI_BRAM_CTRL_0_BASEADDR
+#else
+#define MIDI_REGS_BASE 0x40000000U
+#endif
+
+#define REG_MX_OUT    0x04U
+#define REG_MX_LOAD   0x08U
+#define REG_MX_MASKL  0x10U
+#define REG_MX_MASKH  0x14U
+#define REG_AN_OUT    0x28U
+#define REG_AN_MASK   0x30U
+#define REG_AN_LOAD   0x34U
+#define REG_AUDIO     0x0CU
+#define REG_CA        0x18U
+#define REG_VID_SPAN  0x24U
+#define REG_YUV_YCR   0x58U
+#define REG_YUV_CB    0x5CU
+#define REG_NOISE     0x60U
+#define REG_NOISE_CTL 0x64U
+#define REG_OSC1      0x68U
+#define REG_OSC2      0x6CU
+#define REG_OSC1_PWM  0x70U
+#define REG_OSC2_PWM  0x74U
+#define REG_VIDEO     0x78U
+#define REG_CLASSIC   0x7CU
+#define REG_POS_H     0x38U
+#define REG_POS_V     0x3CU
+#define REG_ZOOM_H    0x40U
+#define REG_ZOOM_V    0x44U
+#define REG_CIRCLE    0x48U
+#define REG_GEAR      0x4CU
+#define REG_LANTERN   0x50U
+#define REG_FIZZ      0x54U
+#define REG_SHAPE_SEL 0xE0U
+#define REG_OSC1_A    0xCCU
+#define REG_OSC2_A    0xD0U
+#define REG_NOISE_A   0xDCU
+#define REG_FX_CTRL   0xE4U
+#define REG_FX_BIT    0xE8U
+#define REG_FX_DITH   0xECU
+#define REG_FX_MIRROR 0xF0U
+#define REG_FX_CHROMA 0xF4U
+#define REG_FX_EMBOSS 0xF8U
+#define REG_WIPE_CTRL  0x1A0U
+#define REG_WIPE_POS   0x1A4U
+#define SHAPE_SLIDER_MAX 1000U
+
+static XUartPs MidiUart;
+
+static u8 g_runningStatus;
+static u8 g_needed;
+static u8 g_got;
+static u8 g_data[2];
+static u8 g_inSysex;
+static u32 g_byteCount;
+static u32 g_msgCount;
+static u8 g_lastStatus;
+static u8 g_lastData1;
+static u8 g_lastData2;
+
+static u8 g_osc1_f_msb, g_osc1_f_lsb;
+static u8 g_osc2_f_msb, g_osc2_f_lsb;
+static u8 g_noise_f_msb, g_noise_f_lsb;
+static u8 g_y_msb, g_y_lsb;
+static u8 g_cr_msb, g_cr_lsb;
+static u8 g_cb_msb, g_cb_lsb;
+static u8 g_mirror_msb, g_mirror_lsb;
+static u8 g_wipe_pos_msb, g_wipe_pos_lsb;
+
+#define MIDI_SYSEX_MAX 64U
+#define MIDI_CELL_BASE 0x00002400U
+#define MIDI_CELL_COLS 80U
+#define MIDI_CELL_ROWS 45U
+#define MIDI_CELL_WORDS (MIDI_CELL_COLS * MIDI_CELL_ROWS)
+#define MIDI_DIG_OUTS  57U
+#define MIDI_ANA_OUTS  20U
+
+static u8 g_sysex[MIDI_SYSEX_MAX];
+static u8 g_sysexLen;
+static u32 g_dig_lo[MIDI_DIG_OUTS];
+static u32 g_dig_hi[MIDI_DIG_OUTS];
+static u16 g_ana[MIDI_ANA_OUTS];
+
+static u32 MidiRegRd(u32 offset)
+{
+	return Xil_In32(MIDI_REGS_BASE + offset);
+}
+
+static void MidiRegWr(u32 offset, u32 value)
+{
+	Xil_Out32(MIDI_REGS_BASE + offset, value);
+}
+
+static void MidiRegFld(u32 offset, u32 mask, u32 shift, u32 value)
+{
+	u32 word;
+
+	word = MidiRegRd(offset);
+	word &= ~(mask << shift);
+	word |= ((value & mask) << shift);
+	Xil_Out32(MIDI_REGS_BASE + offset, word);
+}
+
+static u32 MidiU14(u8 msb, u8 lsb)
+{
+	return ((u32)msb << 7) | (u32)lsb;
+}
+
+static u32 MidiU12(u8 msb, u8 lsb)
+{
+	return MidiU14(msb, lsb) >> 2;
+}
+
+static void MidiSplit14(u32 value14, u8 *msb, u8 *lsb)
+{
+	*msb = (u8)((value14 >> 7) & 0x7FU);
+	*lsb = (u8)(value14 & 0x7FU);
+}
+
+static void MidiSplit12(u32 value12, u8 *msb, u8 *lsb)
+{
+	MidiSplit14(value12 << 2, msb, lsb);
+}
+
+static u32 MidiScale(u8 val, u32 maxv)
+{
+	return ((u32)val * maxv) / 127U;
+}
+
+static void MidiShapeSlider(u32 offset, u32 shift, u8 val)
+{
+	MidiRegFld(offset, 0xFFFU, shift, MidiScale(val, SHAPE_SLIDER_MAX));
+}
+
+static void MidiShapeSel(u32 shift, u8 val)
+{
+	MidiRegFld(REG_SHAPE_SEL, 0xFU, shift, MidiScale(val, 15U));
+}
+
+static void MidiDigCommit(u8 out)
+{
+	MidiRegWr(REG_MX_OUT, (u32)out);
+	MidiRegWr(REG_MX_MASKL, g_dig_lo[out]);
+	MidiRegWr(REG_MX_MASKH, g_dig_hi[out]);
+	MidiRegWr(REG_MX_LOAD, 1U);
+	MidiRegWr(REG_MX_LOAD, 0U);
+}
+
+static void MidiAnaCommit(u8 out)
+{
+	MidiRegWr(REG_AN_OUT, (u32)out);
+	MidiRegWr(REG_AN_MASK, (u32)g_ana[out]);
+	MidiRegWr(REG_AN_LOAD, 1U);
+	MidiRegWr(REG_AN_LOAD, 0U);
+}
+
+static void MidiDigSet(u8 out, u8 inn, u8 on)
+{
+	u32 bit;
+
+	if ((out >= MIDI_DIG_OUTS) || (inn > 63U))
+	{
+		return;
+	}
+	if (inn < 32U)
+	{
+		bit = 1U << inn;
+		if (on != 0U)
+		{
+			g_dig_lo[out] |= bit;
+		}
+		else
+		{
+			g_dig_lo[out] &= ~bit;
+		}
+	}
+	else
+	{
+		bit = 1U << (inn - 32U);
+		if (on != 0U)
+		{
+			g_dig_hi[out] |= bit;
+		}
+		else
+		{
+			g_dig_hi[out] &= ~bit;
+		}
+	}
+	MidiDigCommit(out);
+}
+
+static void MidiAnaSet(u8 out, u8 inn, u8 on)
+{
+	u16 bit;
+
+	if ((out >= MIDI_ANA_OUTS) || (inn > 15U))
+	{
+		return;
+	}
+	bit = (u16)(1U << inn);
+	if (on != 0U)
+	{
+		g_ana[out] |= bit;
+	}
+	else
+	{
+		g_ana[out] &= (u16)~bit;
+	}
+	MidiAnaCommit(out);
+}
+
+static void MidiDigReset(u8 out)
+{
+	u8 i;
+
+	if (out == 127U)
+	{
+		for (i = 0U; i < MIDI_DIG_OUTS; i++)
+		{
+			g_dig_lo[i] = 0U;
+			g_dig_hi[i] = 0U;
+			MidiDigCommit(i);
+		}
+		return;
+	}
+	if (out >= MIDI_DIG_OUTS)
+	{
+		return;
+	}
+	g_dig_lo[out] = 0U;
+	g_dig_hi[out] = 0U;
+	MidiDigCommit(out);
+}
+
+static void MidiAnaReset(u8 out)
+{
+	u8 i;
+
+	if (out == 127U)
+	{
+		for (i = 0U; i < MIDI_ANA_OUTS; i++)
+		{
+			g_ana[i] = 0U;
+			MidiAnaCommit(i);
+		}
+		return;
+	}
+	if (out >= MIDI_ANA_OUTS)
+	{
+		return;
+	}
+	g_ana[out] = 0U;
+	MidiAnaCommit(out);
+}
+
+static void MidiCellWr(u32 index, u8 ch, u8 colour)
+{
+	if (index >= MIDI_CELL_WORDS)
+	{
+		return;
+	}
+	MidiRegWr(MIDI_CELL_BASE + (index << 2),
+		((u32)(colour & 0x0FU) << 8) | (u32)ch);
+}
+
+static void MidiSysexText(void)
+{
+	u32 index;
+	u8 count;
+	u32 i;
+	u32 pos;
+	u8 ch;
+	u8 attr;
+
+	if (g_sysexLen < 7U)
+	{
+		return;
+	}
+	index = (u32)(g_sysex[4] & 0x7FU) | ((u32)(g_sysex[5] & 0x7FU) << 7);
+	count = (u8)(g_sysex[6] & 0x7FU);
+	if ((u32)g_sysexLen < (7U + ((u32)count * 2U)))
+	{
+		return;
+	}
+	for (i = 0U; i < (u32)count; i++)
+	{
+		pos = 7U + (i * 2U);
+		ch = (u8)(g_sysex[pos] & 0x7FU);
+		attr = g_sysex[pos + 1U];
+		ch |= (u8)((attr & 0x01U) << 7);
+		MidiCellWr(index + i, ch, (u8)((attr >> 1) & 0x0FU));
+	}
+	g_msgCount++;
+	g_lastStatus = 0xF0U;
+	g_lastData1 = 0x33U;
+	g_lastData2 = count;
+}
+
+static void MidiSysexTextClear(void)
+{
+	u8 row;
+	u32 begin;
+	u32 end;
+	u32 i;
+
+	if (g_sysexLen < 5U)
+	{
+		return;
+	}
+	row = (u8)(g_sysex[4] & 0x7FU);
+	if (row == 127U)
+	{
+		begin = 0U;
+		end = MIDI_CELL_WORDS;
+	}
+	else if (row < MIDI_CELL_ROWS)
+	{
+		begin = (u32)row * MIDI_CELL_COLS;
+		end = begin + MIDI_CELL_COLS;
+	}
+	else
+	{
+		return;
+	}
+	for (i = begin; i < end; i++)
+	{
+		MidiCellWr(i, 0U, 0U);
+	}
+	g_msgCount++;
+	g_lastStatus = 0xF0U;
+	g_lastData1 = 0x34U;
+	g_lastData2 = row;
+}
+
+static void MidiSysexEnd(void)
+{
+	u8 cmd;
+	u8 mat;
+
+	if (g_sysexLen < 4U)
+	{
+		return;
+	}
+	if ((g_sysex[0] != 0x7DU) || (g_sysex[1] != 0x53U) || (g_sysex[2] != 0x50U))
+	{
+		return;
+	}
+
+	cmd = g_sysex[3];
+	if ((cmd == 0x20U) && (g_sysexLen >= 8U))
+	{
+		mat = g_sysex[4];
+		if (mat == 0U)
+		{
+			MidiDigSet(g_sysex[5], g_sysex[6], g_sysex[7]);
+		}
+		else if (mat == 1U)
+		{
+			MidiAnaSet(g_sysex[5], g_sysex[6], g_sysex[7]);
+		}
+		g_msgCount++;
+		g_lastStatus = 0xF0U;
+		g_lastData1 = cmd;
+		g_lastData2 = g_sysex[5];
+	}
+	else if ((cmd == 0x21U) && (g_sysexLen >= 6U))
+	{
+		mat = g_sysex[4];
+		if (mat == 0U)
+		{
+			MidiDigReset(g_sysex[5]);
+		}
+		else if (mat == 1U)
+		{
+			MidiAnaReset(g_sysex[5]);
+		}
+		g_msgCount++;
+		g_lastStatus = 0xF0U;
+		g_lastData1 = cmd;
+		g_lastData2 = g_sysex[5];
+	}
+	else if (cmd == 0x33U)
+	{
+		MidiSysexText();
+	}
+	else if (cmd == 0x34U)
+	{
+		MidiSysexTextClear();
+	}
+}
+
+static void MidiMapCc(u8 cc, u8 val)
+{
+	val &= 0x7FU;
+
+	switch (cc)
+	{
+	case 1:
+		g_osc1_f_msb = val;
+		MidiRegFld(REG_OSC1, 0x3FFFU, 0U, MidiU14(g_osc1_f_msb, g_osc1_f_lsb));
+		break;
+	case 2:
+		g_osc1_f_lsb = val;
+		MidiRegFld(REG_OSC1, 0x3FFFU, 0U, MidiU14(g_osc1_f_msb, g_osc1_f_lsb));
+		break;
+	case 3:
+		MidiRegFld(REG_OSC1, 0xFFU, 16U, val);
+		break;
+	case 4:
+		MidiRegFld(REG_OSC1_PWM, 0x1FFU, 0U, MidiScale(val, 360U));
+		break;
+	case 5:
+		MidiRegFld(REG_OSC1_PWM, 0x3U, 10U, (u32)val >> 5);
+		break;
+	case 6:
+		MidiRegFld(REG_OSC1, 0x3U, 30U, (u32)val >> 5);
+		break;
+	case 7:
+		MidiRegFld(REG_OSC1, 0x1U, 28U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 8:
+		MidiRegFld(REG_OSC1_A, 0xFFFU, 0U, MidiScale(val, 4095U));
+		break;
+
+	case 9:
+		g_osc2_f_msb = val;
+		MidiRegFld(REG_OSC2, 0x3FFFU, 0U, MidiU14(g_osc2_f_msb, g_osc2_f_lsb));
+		break;
+	case 10:
+		g_osc2_f_lsb = val;
+		MidiRegFld(REG_OSC2, 0x3FFFU, 0U, MidiU14(g_osc2_f_msb, g_osc2_f_lsb));
+		break;
+	case 11:
+		MidiRegFld(REG_OSC2, 0xFFU, 16U, val);
+		break;
+	case 12:
+		MidiRegFld(REG_OSC2_PWM, 0x1FFU, 0U, MidiScale(val, 360U));
+		break;
+	case 13:
+		MidiRegFld(REG_OSC2_PWM, 0x3U, 10U, (u32)val >> 5);
+		break;
+	case 14:
+		MidiRegFld(REG_OSC2, 0x3U, 30U, (u32)val >> 5);
+		break;
+	case 15:
+		MidiRegFld(REG_OSC2, 0x1U, 28U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 16:
+		MidiRegFld(REG_OSC2_A, 0xFFFU, 0U, MidiScale(val, 4095U));
+		break;
+
+	case 17:
+		g_noise_f_msb = val;
+		MidiRegFld(REG_NOISE, 0x3FFFU, 0U, MidiU14(g_noise_f_msb, g_noise_f_lsb));
+		break;
+	case 18:
+		g_noise_f_lsb = val;
+		MidiRegFld(REG_NOISE, 0x3FFFU, 0U, MidiU14(g_noise_f_msb, g_noise_f_lsb));
+		break;
+	case 19:
+		MidiRegFld(REG_NOISE, 0x7U, 17U, (u32)val >> 4);
+		break;
+	case 20:
+		MidiRegFld(REG_NOISE, 0x3U, 28U, (u32)val >> 5);
+		break;
+	case 21:
+		MidiRegFld(REG_NOISE_CTL, 0x1U, 0U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 22:
+		MidiRegFld(REG_NOISE_A, 0xFFFU, 0U, MidiScale(val, 4095U));
+		break;
+
+	case 23:
+		MidiRegFld(REG_AUDIO, 0xFFU, 0U, MidiScale(val, 255U));
+		break;
+	case 24:
+		MidiRegFld(REG_AUDIO, 0x7U, 11U, (u32)val >> 4);
+		break;
+	case 25:
+		MidiRegFld(REG_AUDIO, 0x7U, 8U, (u32)val >> 4);
+		break;
+
+	case 26:
+		g_y_msb = val;
+		MidiRegFld(REG_YUV_YCR, 0xFFFU, 0U, MidiU12(g_y_msb, g_y_lsb));
+		break;
+	case 27:
+		g_y_lsb = val;
+		MidiRegFld(REG_YUV_YCR, 0xFFFU, 0U, MidiU12(g_y_msb, g_y_lsb));
+		break;
+	case 28:
+		g_cr_msb = val;
+		MidiRegFld(REG_YUV_YCR, 0xFFFU, 16U, MidiU12(g_cr_msb, g_cr_lsb));
+		break;
+	case 29:
+		g_cr_lsb = val;
+		MidiRegFld(REG_YUV_YCR, 0xFFFU, 16U, MidiU12(g_cr_msb, g_cr_lsb));
+		break;
+	case 30:
+		g_cb_msb = val;
+		MidiRegFld(REG_YUV_CB, 0xFFFU, 0U, MidiU12(g_cb_msb, g_cb_lsb));
+		break;
+	case 31:
+		g_cb_lsb = val;
+		MidiRegFld(REG_YUV_CB, 0xFFFU, 0U, MidiU12(g_cb_msb, g_cb_lsb));
+		break;
+
+	case 32:
+		MidiRegFld(REG_VIDEO, 0x3U, 4U, (u32)val >> 5);
+		break;
+	case 33:
+		MidiRegFld(REG_VIDEO, 0x1U, 7U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 34:
+		MidiRegFld(REG_VIDEO, 0x1U, 8U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 35:
+		MidiRegFld(REG_CA, 0xFFU, 0U, val);
+		break;
+
+	case 36:
+		MidiRegFld(REG_CLASSIC, 0xFU, 0U, (val >= 64U) ? 0xFU : 0U);
+		break;
+	case 37:
+		MidiRegFld(REG_NOISE_CTL, 0x1U, 1U, (val >= 64U) ? 1U : 0U);
+		break;
+
+	case 38:
+		MidiShapeSlider(REG_POS_H, 0U, val);
+		break;
+	case 39:
+		MidiShapeSlider(REG_POS_V, 0U, val);
+		break;
+	case 40:
+		MidiShapeSlider(REG_ZOOM_H, 0U, val);
+		break;
+	case 41:
+		MidiShapeSlider(REG_ZOOM_V, 0U, val);
+		break;
+	case 42:
+		MidiShapeSlider(REG_CIRCLE, 0U, val);
+		break;
+	case 43:
+		MidiShapeSlider(REG_GEAR, 0U, val);
+		break;
+	case 44:
+		MidiShapeSlider(REG_LANTERN, 0U, val);
+		break;
+	case 45:
+		MidiShapeSlider(REG_FIZZ, 0U, val);
+		break;
+	case 46:
+		MidiShapeSel(0U, val);
+		break;
+	case 47:
+		MidiShapeSel(4U, val);
+		break;
+
+	case 48:
+		MidiShapeSlider(REG_POS_H, 16U, val);
+		break;
+	case 49:
+		MidiShapeSlider(REG_POS_V, 16U, val);
+		break;
+	case 50:
+		MidiShapeSlider(REG_ZOOM_H, 16U, val);
+		break;
+	case 51:
+		MidiShapeSlider(REG_ZOOM_V, 16U, val);
+		break;
+	case 52:
+		MidiShapeSlider(REG_CIRCLE, 16U, val);
+		break;
+	case 53:
+		MidiShapeSlider(REG_GEAR, 16U, val);
+		break;
+	case 54:
+		MidiShapeSlider(REG_LANTERN, 16U, val);
+		break;
+	case 55:
+		MidiShapeSlider(REG_FIZZ, 16U, val);
+		break;
+	case 56:
+		MidiShapeSel(8U, val);
+		break;
+	case 57:
+		MidiShapeSel(12U, val);
+		break;
+	case 58:
+		MidiRegFld(REG_VID_SPAN, 0xFFU, 0U, MidiScale(val, 255U));
+		break;
+
+	case 59:
+		MidiRegFld(REG_FX_CTRL, 0x1U, 0U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 60:
+		MidiRegFld(REG_FX_CTRL, 0x1U, 1U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 61:
+		MidiRegFld(REG_FX_CTRL, 0x1U, 2U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 62:
+		MidiRegFld(REG_FX_CTRL, 0x3U, 3U, (u32)val >> 5);
+		break;
+	case 63:
+		MidiRegFld(REG_FX_CTRL, 0x1U, 5U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 64:
+		MidiRegFld(REG_FX_CTRL, 0x1U, 6U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 65:
+		MidiRegFld(REG_FX_CTRL, 0x1U, 7U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 66:
+		MidiRegFld(REG_FX_CTRL, 0x1U, 8U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 67:
+		{
+			u32 scanDelay = (u32)val >> 2;
+
+			if (scanDelay > 16U)
+			{
+				scanDelay = 16U;
+			}
+			MidiRegFld(REG_FX_CTRL, 0x1FU, 13U, scanDelay);
+		}
+		break;
+	case 68:
+		MidiRegFld(REG_FX_CTRL, 0x3U, 11U, (u32)val >> 5);
+		break;
+
+	case 69:
+		MidiRegFld(REG_FX_BIT, 0x1U, 3U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 70:
+		MidiRegFld(REG_FX_BIT, 0x7U, 0U, (u32)val >> 4);
+		break;
+	case 71:
+		MidiRegFld(REG_FX_BIT, 0x1U, 7U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 72:
+		MidiRegFld(REG_FX_BIT, 0x7U, 4U, (u32)val >> 4);
+		break;
+	case 73:
+		MidiRegFld(REG_FX_BIT, 0x1U, 11U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 74:
+		MidiRegFld(REG_FX_BIT, 0x7U, 8U, (u32)val >> 4);
+		break;
+
+	case 75:
+		MidiRegFld(REG_FX_DITH, 0x1U, 0U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 76:
+		MidiRegFld(REG_FX_DITH, 0x3U, 1U, (u32)val >> 5);
+		break;
+
+	case 77:
+		MidiRegFld(REG_FX_MIRROR, 0x1U, 0U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 78:
+		g_mirror_msb = val;
+		MidiRegFld(REG_FX_MIRROR, 0x7FFU, 1U, MidiU14(g_mirror_msb, g_mirror_lsb));
+		break;
+	case 79:
+		g_mirror_lsb = val;
+		MidiRegFld(REG_FX_MIRROR, 0x7FFU, 1U, MidiU14(g_mirror_msb, g_mirror_lsb));
+		break;
+
+	case 80:
+		MidiRegFld(REG_FX_CHROMA, 0x1U, 0U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 81:
+		{
+			u32 chromaDelay = (u32)val >> 1;
+
+			if (chromaDelay > 32U)
+			{
+				chromaDelay = 32U;
+			}
+			MidiRegFld(REG_FX_CHROMA, 0x3FU, 1U, chromaDelay);
+		}
+		break;
+	case 82:
+		{
+			u32 chromaDelay = (u32)val >> 1;
+
+			if (chromaDelay > 32U)
+			{
+				chromaDelay = 32U;
+			}
+			MidiRegFld(REG_FX_CHROMA, 0x3FU, 7U, chromaDelay);
+		}
+		break;
+
+	case 83:
+		MidiRegFld(REG_FX_EMBOSS, 0x1U, 0U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 84:
+		MidiRegFld(REG_FX_EMBOSS, 0x1U, 1U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 85:
+		{
+			u32 level = MidiScale(val, 255U);
+
+			if (level == 0U)
+			{
+				level = 1U;
+			}
+			MidiRegFld(REG_FX_EMBOSS, 0xFFU, 8U, level);
+		}
+		break;
+	case 86:
+		{
+			u32 level = MidiScale(val, 255U);
+
+			if (level == 0U)
+			{
+				level = 1U;
+			}
+			MidiRegFld(REG_FX_EMBOSS, 0xFFU, 16U, level);
+		}
+		break;
+	case 87:
+		MidiRegFld(REG_FX_EMBOSS, 0x1U, 24U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 88:
+		MidiRegFld(REG_FX_EMBOSS, 0xFU, 25U, (u32)val >> 3);
+		break;
+	case 89:
+		MidiRegFld(REG_FX_DITH, 0x7U, 3U, (u32)val >> 4);
+		break;
+	case 90:
+		MidiRegFld(REG_FX_CTRL, 0x7U, 20U, (u32)val >> 4);
+		break;
+	case 91:
+		MidiRegFld(REG_FX_CTRL, 0x1U, 19U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 92:
+		{
+			u32 rot = (u32)val >> 3;
+
+			if (rot > 14U)
+			{
+				rot = 14U;
+			}
+			MidiRegFld(REG_FX_BIT, 0xFU, 12U, rot);
+		}
+		break;
+	case 93:
+		{
+			u32 rot = (u32)val >> 3;
+
+			if (rot > 14U)
+			{
+				rot = 14U;
+			}
+			MidiRegFld(REG_FX_BIT, 0xFU, 16U, rot);
+		}
+		break;
+	case 94:
+		{
+			u32 rot = (u32)val >> 3;
+
+			if (rot > 14U)
+			{
+				rot = 14U;
+			}
+			MidiRegFld(REG_FX_BIT, 0xFU, 20U, rot);
+		}
+		break;
+	case 95:
+		{
+			u32 rep = val;
+
+			if (rep > 64U)
+			{
+				rep = 64U;
+			}
+			MidiRegFld(REG_FX_CTRL, 0x7FU, 23U, rep);
+		}
+		break;
+	case 96:
+		MidiRegFld(REG_FX_DITH, 0xFFU, 6U, MidiScale(val, 255U));
+		break;
+	case 97:
+		MidiRegFld(REG_FX_DITH, 0xFFU, 14U, MidiScale(val, 255U));
+		break;
+	case 98:
+		MidiRegFld(REG_FX_DITH, 0xFFU, 22U, MidiScale(val, 255U));
+		break;
+
+	case 99:
+		MidiRegFld(REG_WIPE_CTRL, 0xFU, 0U, (u32)val >> 3);
+		break;
+	case 100:
+		MidiRegFld(REG_WIPE_CTRL, 0x1U, 8U, (val >= 64U) ? 1U : 0U);
+		break;
+	case 101:
+		MidiRegFld(REG_WIPE_CTRL, 0xFU, 4U, (u32)val >> 3);
+		break;
+	case 102:
+		MidiRegFld(REG_WIPE_CTRL, 0xFFFU, 9U, MidiScale(val, 255U));
+		break;
+	case 103:
+		g_wipe_pos_msb = val;
+		{
+			u32 pos = MidiU14(g_wipe_pos_msb, g_wipe_pos_lsb);
+
+			if (pos > 8191U)
+			{
+				pos = 8191U;
+			}
+			MidiRegFld(REG_WIPE_POS, 0x1FFFU, 0U, pos);
+		}
+		break;
+	case 104:
+		g_wipe_pos_lsb = val;
+		{
+			u32 pos = MidiU14(g_wipe_pos_msb, g_wipe_pos_lsb);
+
+			if (pos > 8191U)
+			{
+				pos = 8191U;
+			}
+			MidiRegFld(REG_WIPE_POS, 0x1FFFU, 0U, pos);
+		}
+		break;
+	case 105:
+		MidiRegFld(REG_WIPE_CTRL, 0xFU, 28U, (u32)val >> 3);
+		break;
+	case 106:
+		MidiRegFld(REG_WIPE_CTRL, 0x7FU, 21U, MidiScale(val, 127U));
+		break;
+
+	default:
+		break;
+	}
+}
+
+static void MidiMapSeed(void)
+{
+	u32 w;
+
+	w = MidiRegRd(REG_OSC1);
+	MidiSplit14(w & 0x3FFFU, &g_osc1_f_msb, &g_osc1_f_lsb);
+	w = MidiRegRd(REG_OSC2);
+	MidiSplit14(w & 0x3FFFU, &g_osc2_f_msb, &g_osc2_f_lsb);
+	w = MidiRegRd(REG_NOISE);
+	MidiSplit14(w & 0x3FFFU, &g_noise_f_msb, &g_noise_f_lsb);
+	w = MidiRegRd(REG_YUV_YCR);
+	MidiSplit12(w & 0xFFFU, &g_y_msb, &g_y_lsb);
+	MidiSplit12((w >> 16) & 0xFFFU, &g_cr_msb, &g_cr_lsb);
+	w = MidiRegRd(REG_YUV_CB);
+	MidiSplit12(w & 0xFFFU, &g_cb_msb, &g_cb_lsb);
+	w = MidiRegRd(REG_FX_MIRROR);
+	MidiSplit14((w >> 1) & 0x7FFU, &g_mirror_msb, &g_mirror_lsb);
+}
+
+static u8 MidiDataBytes(u8 status)
+{
+	u8 hi;
+
+	if (status >= 0xF8U)
+	{
+		return 0U;
+	}
+
+	switch (status)
+	{
+	case 0xF1U:
+	case 0xF3U:
+		return 1U;
+	case 0xF2U:
+		return 2U;
+	case 0xF0U:
+	case 0xF4U:
+	case 0xF5U:
+	case 0xF6U:
+	case 0xF7U:
+		return 0U;
+	default:
+		break;
+	}
+
+	hi = status & 0xF0U;
+	if ((hi == 0xC0U) || (hi == 0xD0U))
+	{
+		return 1U;
+	}
+	return 2U;
+}
+
+static void MidiMapApply(u8 status, u8 data1, u8 data2)
+{
+	if ((status & 0xF0U) != 0xB0U)
+	{
+		return;
+	}
+	if ((status & 0x0FU) != 0U)
+	{
+		return;
+	}
+	MidiMapCc(data1, data2);
+}
+
+static void MidiComplete(u8 status, u8 data1, u8 data2)
+{
+	g_lastStatus = status;
+	g_lastData1 = data1;
+	g_lastData2 = data2;
+	g_msgCount++;
+	MidiMapApply(status, data1, data2);
+}
+
+static void MidiByte(u8 byte)
+{
+	u8 status;
+
+	if (byte >= 0xF8U)
+	{
+		/* Realtime: do not disturb running status or sysex. */
+		return;
+	}
+
+	if (byte & 0x80U)
+	{
+		if (byte == 0xF0U)
+		{
+			g_inSysex = 1U;
+			g_sysexLen = 0U;
+			g_runningStatus = 0U;
+			g_needed = 0U;
+			g_got = 0U;
+			return;
+		}
+		if (byte == 0xF7U)
+		{
+			if (g_inSysex != 0U)
+			{
+				MidiSysexEnd();
+			}
+			g_inSysex = 0U;
+			g_sysexLen = 0U;
+			return;
+		}
+		if (g_inSysex)
+		{
+			return;
+		}
+
+		g_runningStatus = byte;
+		g_needed = MidiDataBytes(byte);
+		g_got = 0U;
+		if (g_needed == 0U)
+		{
+			MidiComplete(byte, 0U, 0U);
+			g_runningStatus = 0U;
+		}
+		return;
+	}
+
+	if (g_inSysex)
+	{
+		if (g_sysexLen < MIDI_SYSEX_MAX)
+		{
+			g_sysex[g_sysexLen] = byte;
+			g_sysexLen++;
+		}
+		return;
+	}
+
+	if (g_needed == 0U)
+	{
+		if (g_runningStatus == 0U)
+		{
+			return;
+		}
+		g_needed = MidiDataBytes(g_runningStatus);
+		g_got = 0U;
+	}
+
+	if (g_got < 2U)
+	{
+		g_data[g_got] = byte;
+	}
+	g_got++;
+
+	if (g_got >= g_needed)
+	{
+		status = g_runningStatus;
+		MidiComplete(status, g_data[0], (g_needed > 1U) ? g_data[1] : 0U);
+		g_needed = 0U;
+		g_got = 0U;
+		if ((status & 0xF0U) == 0xF0U)
+		{
+			g_runningStatus = 0U;
+		}
+	}
+}
+
+static XUartPs_Config *MidiLookupUart1(void)
+{
+	XUartPs_Config *cfg;
+
+#ifdef SDT
+	cfg = XUartPs_LookupConfig(MIDI_UART1_BASE);
+	if (cfg != NULL)
+	{
+		return cfg;
+	}
+#else
+	{
+		u16 id;
+
+		for (id = 0U; id < 8U; id++)
+		{
+			cfg = XUartPs_LookupConfig(id);
+			if ((cfg != NULL) && (cfg->BaseAddress == MIDI_UART1_BASE))
+			{
+				return cfg;
+			}
+		}
+	}
+#endif
+
+	return NULL;
+}
+
+static void MidiForceBaud31250(u32 base, u32 clk_hz)
+{
+	u32 cd;
+	u32 bdiv;
+	u32 cr;
+
+	/* baud = clk / (CD * (BDIV + 1)); 100 MHz / 31250 = 3200 = 400 * 8 */
+	bdiv = 7U;
+	cd = clk_hz / (MIDI_UART_BAUD * (bdiv + 1U));
+	if (cd < 1U)
+	{
+		cd = 1U;
+	}
+
+	cr = XUartPs_ReadReg(base, XUARTPS_CR_OFFSET);
+	XUartPs_WriteReg(base, XUARTPS_CR_OFFSET,
+			(cr | XUARTPS_CR_TX_DIS | XUARTPS_CR_RX_DIS) &
+			~(XUARTPS_CR_TX_EN | XUARTPS_CR_RX_EN));
+	XUartPs_WriteReg(base, XUARTPS_BAUDGEN_OFFSET, cd);
+	XUartPs_WriteReg(base, XUARTPS_BAUDDIV_OFFSET, bdiv);
+	XUartPs_WriteReg(base, XUARTPS_CR_OFFSET,
+			(cr | XUARTPS_CR_TX_EN | XUARTPS_CR_RX_EN) &
+			~(XUARTPS_CR_TX_DIS | XUARTPS_CR_RX_DIS));
+}
+
+int MidiUartInit(void)
+{
+	XUartPs_Config *cfg;
+	static XUartPs_Config fallback;
+	int status;
+	u32 base;
+
+	cfg = MidiLookupUart1();
+	if (cfg == NULL)
+	{
+		xil_printf("MIDI UART1: not in BSP xparameters, using %08X clk %u\r\n",
+				(unsigned)MIDI_UART1_BASE, (unsigned)MIDI_UART1_CLK_HZ);
+#ifdef SDT
+		fallback.Name = "uart1";
+#else
+		fallback.DeviceId = (u16)1;
+#endif
+		fallback.BaseAddress = MIDI_UART1_BASE;
+		fallback.InputClockHz = MIDI_UART1_CLK_HZ;
+		cfg = &fallback;
+	}
+
+	status = XUartPs_CfgInitialize(&MidiUart, cfg, cfg->BaseAddress);
+	if (status != XST_SUCCESS)
+	{
+		xil_printf("MIDI UART1: CfgInitialize failed %d base %08X\r\n",
+				status, (unsigned)cfg->BaseAddress);
+		return status;
+	}
+
+	XUartPs_SetOperMode(&MidiUart, XUARTPS_OPER_MODE_NORMAL);
+	status = XUartPs_SetBaudRate(&MidiUart, MIDI_UART_BAUD);
+	if (status != XST_SUCCESS)
+	{
+		xil_printf("MIDI UART1: SetBaudRate(%u) failed %d, forcing divisors\r\n",
+				(unsigned)MIDI_UART_BAUD, status);
+		MidiForceBaud31250(MidiUart.Config.BaseAddress, cfg->InputClockHz);
+	}
+
+	base = MidiUart.Config.BaseAddress;
+	while (XUartPs_IsReceiveData(base) != 0)
+	{
+		(void)XUartPs_ReadReg(base, XUARTPS_FIFO_OFFSET);
+	}
+
+	g_runningStatus = 0U;
+	g_needed = 0U;
+	g_got = 0U;
+	g_inSysex = 0U;
+	g_byteCount = 0U;
+	g_msgCount = 0U;
+	g_lastStatus = 0U;
+	g_lastData1 = 0U;
+	g_lastData2 = 0U;
+
+	MidiMapSeed();
+
+	return XST_SUCCESS;
+}
+
+int MidiUartTryRead(u8 *byte)
+{
+	u32 base;
+	u8 value;
+
+	if (byte == NULL)
+	{
+		return 0;
+	}
+	if (MidiUart.IsReady != XIL_COMPONENT_IS_READY)
+	{
+		return 0;
+	}
+
+	base = MidiUart.Config.BaseAddress;
+	if (XUartPs_IsReceiveData(base) == 0)
+	{
+		return 0;
+	}
+
+	value = (u8)XUartPs_ReadReg(base, XUARTPS_FIFO_OFFSET);
+	g_byteCount++;
+	MidiByte(value);
+	*byte = value;
+	return 1;
+}
+
+void MidiUartPoll(void)
+{
+	u8 unused;
+
+	while (MidiUartTryRead(&unused) != 0)
+	{
+	}
+}
+
+u32 MidiUartByteCount(void)
+{
+	return g_byteCount;
+}
+
+u32 MidiUartMsgCount(void)
+{
+	return g_msgCount;
+}
+
+u8 MidiUartLastStatus(void)
+{
+	return g_lastStatus;
+}
+
+u8 MidiUartLastData1(void)
+{
+	return g_lastData1;
+}
+
+u8 MidiUartLastData2(void)
+{
+	return g_lastData2;
+}

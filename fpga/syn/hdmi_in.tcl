@@ -46,7 +46,7 @@ if { [string first $scripts_vivado_version $current_vivado_version] == -1 } {
 
 # The design that will be created by this Tcl script contains the following 
 # module references:
-# spector_wrapper_zynq
+# spector_wrapper_zynq, video_bufr_reg
 
 # Please add the sources of those modules before sourcing this Tcl script.
 
@@ -56,7 +56,6 @@ if { [string first $scripts_vivado_version $current_vivado_version] == -1 } {
 
 set list_projs [get_projects -quiet]
 if { $list_projs eq "" } {
-   # Part-only fallback if sourced without an open project (no board_part required)
    create_project project_1 myproj -part xc7z020clg400-1
 }
 
@@ -176,6 +175,7 @@ set bCheckModules 1
 if { $bCheckModules == 1 } {
    set list_check_mods "\ 
 spector_wrapper_zynq\
+video_bufr_reg\
 "
 
    set list_mods_missing ""
@@ -253,6 +253,13 @@ proc create_root_design { parentCell } {
 
   # Create ports
   set sw0 [ create_bd_port -dir I sw0 ]
+  set pmod_i2s_sdin [ create_bd_port -dir I pmod_i2s_sdin ]
+  set pmod_i2s_mclk [ create_bd_port -dir O pmod_i2s_mclk ]
+  set pmod_i2s_lrck [ create_bd_port -dir O pmod_i2s_lrck ]
+  set pmod_i2s_bclk [ create_bd_port -dir O pmod_i2s_bclk ]
+  set pmod_i2s_sdout [ create_bd_port -dir O pmod_i2s_sdout ]
+  set UART1_TX [ create_bd_port -dir O UART1_TX ]
+  set UART1_RX [ create_bd_port -dir I UART1_RX ]
 
   # Create instance: axi_dynclk_0, and set properties
   set axi_dynclk_0 [ create_bd_cell -type ip -vlnv digilentinc.com:ip:axi_dynclk:1.2 axi_dynclk_0 ]
@@ -383,7 +390,7 @@ proc create_root_design { parentCell } {
     CONFIG.PCW_EN_EMIO_TTC0 {0} \
     CONFIG.PCW_EN_EMIO_TTC1 {0} \
     CONFIG.PCW_EN_EMIO_UART0 {0} \
-    CONFIG.PCW_EN_EMIO_UART1 {0} \
+    CONFIG.PCW_EN_EMIO_UART1 {1} \
     CONFIG.PCW_EN_EMIO_WDT {0} \
     CONFIG.PCW_EN_EMIO_WP_SDIO0 {1} \
     CONFIG.PCW_EN_EMIO_WP_SDIO1 {0} \
@@ -411,7 +418,7 @@ proc create_root_design { parentCell } {
     CONFIG.PCW_EN_TTC0 {0} \
     CONFIG.PCW_EN_TTC1 {0} \
     CONFIG.PCW_EN_UART0 {1} \
-    CONFIG.PCW_EN_UART1 {0} \
+    CONFIG.PCW_EN_UART1 {1} \
     CONFIG.PCW_EN_USB0 {1} \
     CONFIG.PCW_EN_USB1 {0} \
     CONFIG.PCW_EN_WDT {0} \
@@ -747,7 +754,9 @@ proc create_root_design { parentCell } {
     CONFIG.PCW_UART0_HIGHADDR {0xE0000FFF} \
     CONFIG.PCW_UART0_PERIPHERAL_ENABLE {1} \
     CONFIG.PCW_UART0_UART0_IO {MIO 14 .. 15} \
-    CONFIG.PCW_UART1_PERIPHERAL_ENABLE {0} \
+    CONFIG.PCW_UART1_GRP_FULL_ENABLE {0} \
+    CONFIG.PCW_UART1_PERIPHERAL_ENABLE {1} \
+    CONFIG.PCW_UART1_UART1_IO {EMIO} \
     CONFIG.PCW_UART_PERIPHERAL_CLKSRC {IO PLL} \
     CONFIG.PCW_UART_PERIPHERAL_FREQMHZ {100} \
     CONFIG.PCW_UART_PERIPHERAL_VALID {1} \
@@ -975,9 +984,9 @@ proc create_root_design { parentCell } {
     CONFIG.M00_HAS_REGSLICE {4} \
     CONFIG.NUM_MI {1} \
     CONFIG.NUM_SI {2} \
-    CONFIG.S00_HAS_DATA_FIFO {2} \
+    CONFIG.S00_HAS_DATA_FIFO {0} \
     CONFIG.S00_HAS_REGSLICE {4} \
-    CONFIG.S01_HAS_DATA_FIFO {2} \
+    CONFIG.S01_HAS_DATA_FIFO {0} \
     CONFIG.S01_HAS_REGSLICE {4} \
     CONFIG.STRATEGY {0} \
     CONFIG.SYNCHRONIZATION_STAGES {2} \
@@ -995,11 +1004,23 @@ proc create_root_design { parentCell } {
     CONFIG.M04_HAS_REGSLICE {4} \
     CONFIG.M05_HAS_REGSLICE {4} \
     CONFIG.NUM_MI {6} \
+    CONFIG.S00_HAS_DATA_FIFO {1} \
     CONFIG.S00_HAS_REGSLICE {4} \
     CONFIG.SYNCHRONIZATION_STAGES {2} \
   ] $ps7_0_axi_periph2
 
 
+  # Create instance: video_bufr_reg_0, and set properties
+  set block_name video_bufr_reg
+  set block_cell_name video_bufr_reg_0
+  if { [catch {set video_bufr_reg_0 [create_bd_cell -type module -reference $block_name $block_cell_name] } errmsg] } {
+     catch {common::send_gid_msg -ssname BD::TCL -id 2095 -severity "ERROR" "Unable to add referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
+     return 1
+   } elseif { $video_bufr_reg_0 eq "" } {
+     catch {common::send_gid_msg -ssname BD::TCL -id 2096 -severity "ERROR" "Unable to referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
+     return 1
+   }
+  
   # Create interface connections
   connect_bd_intf_net -intf_net TMDS_2 [get_bd_intf_ports TMDS] [get_bd_intf_pins dvi2rgb_0/TMDS]
   connect_bd_intf_net -intf_net axi_gpio_0_GPIO2 [get_bd_intf_ports hdmi_hpd] [get_bd_intf_pins axi_gpio_video/GPIO]
@@ -1024,6 +1045,8 @@ proc create_root_design { parentCell } {
   connect_bd_intf_net -intf_net v_vid_in_axi4s_0_vtiming_out [get_bd_intf_pins v_tc_1/vtiming_in] [get_bd_intf_pins v_vid_in_axi4s_0/vtiming_out]
 
   # Create port connections
+  connect_bd_net -net UART1_RX_0_1  [get_bd_ports UART1_RX] \
+  [get_bd_pins processing_system7_0/UART1_RX]
   connect_bd_net -net axi_bram_ctrl_0_bram_addr_a  [get_bd_pins axi_bram_ctrl_0/bram_addr_a] \
   [get_bd_pins spector_wrapper_zynq_0/regs_addr]
   connect_bd_net -net axi_bram_ctrl_0_bram_clk_a  [get_bd_pins axi_bram_ctrl_0/bram_clk_a] \
@@ -1036,14 +1059,18 @@ proc create_root_design { parentCell } {
   [get_bd_pins spector_wrapper_zynq_0/regs_wr_data]
   connect_bd_net -net axi_dynclk_0_LOCKED_O  [get_bd_pins axi_dynclk_0/LOCKED_O] \
   [get_bd_pins rgb2dvi_0/aRst_n] \
+  [get_bd_pins video_bufr_reg_0/rst_n] \
   [get_bd_pins spector_wrapper_zynq_0/reset]
   connect_bd_net -net axi_dynclk_0_PXL_CLK_5X_O  [get_bd_pins axi_dynclk_0/PXL_CLK_5X_O] \
   [get_bd_pins rgb2dvi_0/SerialClk]
-  connect_bd_net -net axi_dynclk_0_PXL_CLK_O  [get_bd_pins axi_dynclk_0/PXL_CLK_O] \
-  [get_bd_pins rgb2dvi_0/PixelClk] \
+  connect_bd_net -net axi_dynclk_0_PXL_CLK_G_O  [get_bd_pins axi_dynclk_0/PXL_CLK_G_O] \
   [get_bd_pins v_axi4s_vid_out_0/vid_io_out_clk] \
   [get_bd_pins v_tc_0/clk] \
+  [get_bd_pins video_bufr_reg_0/src_clk] \
   [get_bd_pins spector_wrapper_zynq_0/pix_clk]
+  connect_bd_net -net axi_dynclk_0_PXL_CLK_O  [get_bd_pins axi_dynclk_0/PXL_CLK_O] \
+  [get_bd_pins rgb2dvi_0/PixelClk] \
+  [get_bd_pins video_bufr_reg_0/pxl_clk]
   connect_bd_net -net axi_gpio_video_ip2intc_irpt  [get_bd_pins axi_gpio_video/ip2intc_irpt] \
   [get_bd_pins xlconcat_0/In4]
   connect_bd_net -net axi_vdma_0_mm2s_introut  [get_bd_pins axi_vdma_0/mm2s_introut] \
@@ -1057,6 +1084,8 @@ proc create_root_design { parentCell } {
   connect_bd_net -net dvi2rgb_0_pLocked  [get_bd_pins dvi2rgb_0/pLocked] \
   [get_bd_pins axi_gpio_video/gpio2_io_i] \
   [get_bd_pins proc_sys_reset_0/aux_reset_in]
+  connect_bd_net -net pmod_i2s_sdin_0_1  [get_bd_ports pmod_i2s_sdin] \
+  [get_bd_pins spector_wrapper_zynq_0/pmod_i2s_sdin]
   connect_bd_net -net proc_sys_reset_0_peripheral_aresetn  [get_bd_pins proc_sys_reset_0/peripheral_aresetn] \
   [get_bd_pins v_tc_1/resetn]
   connect_bd_net -net proc_sys_reset_0_peripheral_reset  [get_bd_pins proc_sys_reset_0/peripheral_reset] \
@@ -1098,6 +1127,8 @@ proc create_root_design { parentCell } {
   [get_bd_pins proc_sys_reset_0/ext_reset_in] \
   [get_bd_pins rst_processing_system7_0_100M/ext_reset_in] \
   [get_bd_pins rst_processing_system7_0_150M/ext_reset_in]
+  connect_bd_net -net processing_system7_0_UART1_TX  [get_bd_pins processing_system7_0/UART1_TX] \
+  [get_bd_ports UART1_TX]
   connect_bd_net -net rst_processing_system7_0_100M_interconnect_aresetn  [get_bd_pins rst_processing_system7_0_100M/interconnect_aresetn] \
   [get_bd_pins ps7_0_axi_periph2/ARESETN]
   connect_bd_net -net rst_processing_system7_0_100M_peripheral_aresetn  [get_bd_pins rst_processing_system7_0_100M/peripheral_aresetn] \
@@ -1121,15 +1152,23 @@ proc create_root_design { parentCell } {
   [get_bd_pins axi_mem_intercon5/S00_ARESETN] \
   [get_bd_pins axi_mem_intercon5/ARESETN]
   connect_bd_net -net spector_wrapper_zynq_0_h_sync_o  [get_bd_pins spector_wrapper_zynq_0/h_sync_o] \
-  [get_bd_pins rgb2dvi_0/vid_pHSync]
+  [get_bd_pins video_bufr_reg_0/h_sync]
+  connect_bd_net -net spector_wrapper_zynq_0_pmod_i2s_bclk  [get_bd_pins spector_wrapper_zynq_0/pmod_i2s_bclk] \
+  [get_bd_ports pmod_i2s_bclk]
+  connect_bd_net -net spector_wrapper_zynq_0_pmod_i2s_lrck  [get_bd_pins spector_wrapper_zynq_0/pmod_i2s_lrck] \
+  [get_bd_ports pmod_i2s_lrck]
+  connect_bd_net -net spector_wrapper_zynq_0_pmod_i2s_mclk  [get_bd_pins spector_wrapper_zynq_0/pmod_i2s_mclk] \
+  [get_bd_ports pmod_i2s_mclk]
+  connect_bd_net -net spector_wrapper_zynq_0_pmod_i2s_sdout  [get_bd_pins spector_wrapper_zynq_0/pmod_i2s_sdout] \
+  [get_bd_ports pmod_i2s_sdout]
   connect_bd_net -net spector_wrapper_zynq_0_regs_rd_data  [get_bd_pins spector_wrapper_zynq_0/regs_rd_data] \
   [get_bd_pins axi_bram_ctrl_0/bram_rddata_a]
   connect_bd_net -net spector_wrapper_zynq_0_start_of_frame_o  [get_bd_pins spector_wrapper_zynq_0/start_of_frame_o] \
-  [get_bd_pins rgb2dvi_0/vid_pVDE]
+  [get_bd_pins video_bufr_reg_0/start_of_frame]
   connect_bd_net -net spector_wrapper_zynq_0_v_sync_o  [get_bd_pins spector_wrapper_zynq_0/v_sync_o] \
-  [get_bd_pins rgb2dvi_0/vid_pVSync]
+  [get_bd_pins video_bufr_reg_0/v_sync]
   connect_bd_net -net spector_wrapper_zynq_0_video_out  [get_bd_pins spector_wrapper_zynq_0/video_out] \
-  [get_bd_pins rgb2dvi_0/vid_pData]
+  [get_bd_pins video_bufr_reg_0/video_in]
   connect_bd_net -net v_axi4s_vid_out_0_vid_active_video  [get_bd_pins v_axi4s_vid_out_0/vid_active_video] \
   [get_bd_pins spector_wrapper_zynq_0/start_of_frame]
   connect_bd_net -net v_axi4s_vid_out_0_vid_data  [get_bd_pins v_axi4s_vid_out_0/vid_data] \
@@ -1144,13 +1183,21 @@ proc create_root_design { parentCell } {
   [get_bd_pins xlconcat_0/In3]
   connect_bd_net -net vid_in_mux_0_1  [get_bd_ports sw0] \
   [get_bd_pins spector_wrapper_zynq_0/vid_in_mux]
+  connect_bd_net -net video_bufr_reg_0_vid_pData  [get_bd_pins video_bufr_reg_0/vid_pData] \
+  [get_bd_pins rgb2dvi_0/vid_pData]
+  connect_bd_net -net video_bufr_reg_0_vid_pHSync  [get_bd_pins video_bufr_reg_0/vid_pHSync] \
+  [get_bd_pins rgb2dvi_0/vid_pHSync]
+  connect_bd_net -net video_bufr_reg_0_vid_pVDE  [get_bd_pins video_bufr_reg_0/vid_pVDE] \
+  [get_bd_pins rgb2dvi_0/vid_pVDE]
+  connect_bd_net -net video_bufr_reg_0_vid_pVSync  [get_bd_pins video_bufr_reg_0/vid_pVSync] \
+  [get_bd_pins rgb2dvi_0/vid_pVSync]
   connect_bd_net -net xlconcat_0_dout  [get_bd_pins xlconcat_0/dout] \
   [get_bd_pins processing_system7_0/IRQ_F2P]
   connect_bd_net -net xlconstant_0_dout  [get_bd_pins VCC/dout] \
   [get_bd_pins v_axi4s_vid_out_0/aresetn]
 
   # Create address segments
-  assign_bd_address -offset 0x40000000 -range 0x00002000 -target_address_space [get_bd_addr_spaces processing_system7_0/Data] [get_bd_addr_segs axi_bram_ctrl_0/S_AXI/Mem0] -force
+  assign_bd_address -offset 0x40000000 -range 0x00010000 -target_address_space [get_bd_addr_spaces processing_system7_0/Data] [get_bd_addr_segs axi_bram_ctrl_0/S_AXI/Mem0] -force
   assign_bd_address -offset 0x43C00000 -range 0x00010000 -target_address_space [get_bd_addr_spaces processing_system7_0/Data] [get_bd_addr_segs axi_dynclk_0/S_AXI_LITE/S_AXI_LITE_reg] -force
   assign_bd_address -offset 0x41200000 -range 0x00010000 -target_address_space [get_bd_addr_spaces processing_system7_0/Data] [get_bd_addr_segs axi_gpio_video/S_AXI/Reg] -force
   assign_bd_address -offset 0x43000000 -range 0x00010000 -target_address_space [get_bd_addr_spaces processing_system7_0/Data] [get_bd_addr_segs axi_vdma_0/S_AXI_LITE/Reg] -force

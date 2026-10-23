@@ -42,6 +42,8 @@ MATRIX_IN_MAP = {}
 for i in range(18):
     MATRIX_IN_MAP[f"xy_inv_out_{i}"] = i
 # Individual signals
+# Hz, or frame periods 2/4/8/16/32/64 when 0x78 bit 7 (slow_cnt_frame_sel) is set
+# 0x78 bit 8 (slow_cnt_div4) divides both by 4 (frame periods become 8/16/32/64/128/256)
 MATRIX_IN_MAP["slow_cnt_6"] = 18
 MATRIX_IN_MAP["slow_cnt_3"] = 19
 MATRIX_IN_MAP["slow_cnt_1_5"] = 20
@@ -115,22 +117,23 @@ MATRIX_OUT_MAP["ff_in_a"] = 32
 MATRIX_OUT_MAP["ff_in_b"] = 33
 MATRIX_OUT_MAP["acm_out1"] = 34
 MATRIX_OUT_MAP["acm_out2"] = 35
-# luma_in1 (39 downto 36)
+# luma/chroma: lowest matrix output is MSB
+# luma_in1_3 @ 36 ... luma_in1_0 @ 39
 for i in range(4):
-    MATRIX_OUT_MAP[f"luma_in1_{i}"] = 36 + i
-# chroma_mux_in1 (42 downto 40) and (45 downto 43)
+    MATRIX_OUT_MAP[f"luma_in1_{i}"] = 39 - i
+# chroma_mux_in1 U: _2 @ 40 ... _0 @ 42; V: _5 @ 43 ... _3 @ 45
 for i in range(3):
-    MATRIX_OUT_MAP[f"chroma_mux_in1_{i}"] = 40 + i
+    MATRIX_OUT_MAP[f"chroma_mux_in1_{i}"] = 42 - i
 for i in range(3):
-    MATRIX_OUT_MAP[f"chroma_mux_in1_{i+3}"] = 43 + i
-# luma_in2 (49 downto 46)
+    MATRIX_OUT_MAP[f"chroma_mux_in1_{i+3}"] = 45 - i
+# luma_in2_3 @ 46 ... luma_in2_0 @ 49
 for i in range(4):
-    MATRIX_OUT_MAP[f"luma_in2_{i}"] = 46 + i
-# chroma_mux_in2 (52 downto 50) and (55 downto 53)
+    MATRIX_OUT_MAP[f"luma_in2_{i}"] = 49 - i
+# chroma_mux_in2 U: _2 @ 50 ... _0 @ 52; V: _5 @ 53 ... _3 @ 55
 for i in range(3):
-    MATRIX_OUT_MAP[f"chroma_mux_in2_{i}"] = 50 + i
+    MATRIX_OUT_MAP[f"chroma_mux_in2_{i}"] = 52 - i
 for i in range(3):
-    MATRIX_OUT_MAP[f"chroma_mux_in2_{i+3}"] = 53 + i
+    MATRIX_OUT_MAP[f"chroma_mux_in2_{i+3}"] = 55 - i
 MATRIX_OUT_MAP["chrom_swap"] = 56
 
 def resolve_matrix_out(value):
@@ -329,7 +332,6 @@ OVERLAY_GLOBAL_EN_REG = 0xFC
 CA_CTRL_INJECT_XOR_LUMA = 1 << 8
 CA_CTRL_RULE_XOR_Y = 1 << 9
 CA_CTRL_RULE_XOR_X = 1 << 10
-CA_DIV_ENCODE = {1: 0, 2: 1, 4: 2, 8: 3}
 OVERLAY_BLOCK_DIV_ENCODE = {1: 0, 2: 1, 4: 2, 8: 3, 16: 4}
 _overlay_fc_state = {"enabled": False, "block_div": 1}
 
@@ -345,13 +347,9 @@ def configure_ca(
             rule_xor_y=True,
             rule_xor_x=False,
             inject_xor_luma=False,
-            x_div=8,
-            y_div=8,
     ):
             """Program 1D CA @ 0x18: rule [7:0], inject^luma_msb [8], rule_xor_y [9],
-            rule_xor_x [10], y_div [13:12], x_div [15:14]. x_div/y_div: 1, 2, 4, or 8."""
-            if x_div not in CA_DIV_ENCODE or y_div not in CA_DIV_ENCODE:
-                raise ValueError("x_div and y_div must be one of 1, 2, 4, 8")
+            rule_xor_x [10]."""
             value = int(rule) & 0xFF
             if inject_xor_luma:
                 value |= CA_CTRL_INJECT_XOR_LUMA
@@ -359,8 +357,6 @@ def configure_ca(
                 value |= CA_CTRL_RULE_XOR_Y
             if rule_xor_x:
                 value |= CA_CTRL_RULE_XOR_X
-            value |= CA_DIV_ENCODE[x_div] << 14
-            value |= CA_DIV_ENCODE[y_div] << 12
             wr_reg(CA_RULE_REG, value)
 
 
@@ -389,7 +385,7 @@ def set_audio_digital_thresh(treble=3, bass=3):
 
 
 def set_dirt(depth=0, y_en=False, u_en=False, v_en=False):
-            """Set YUV dirt: depth 0-3 LSB bits, per-channel enables. @ 0x198."""
+            """Set YUV dirt: depth 0=off, 1-3 XOR bits [2]/[3:2]/[4:2], per-channel enables. @ 0x198."""
             value = (int(depth) & 0x3) | ((1 if y_en else 0) << 2) | ((1 if u_en else 0) << 3) | ((1 if v_en else 0) << 4)
             wr_reg(DIRT_CTRL_REG, value)
 

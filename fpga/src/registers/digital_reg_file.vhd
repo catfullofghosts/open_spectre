@@ -131,8 +131,11 @@ entity digital_reg_file is
     pix_clk_div_sel     : out std_logic; -- 0 = /2, 1 = /4 for X and Y digital counters
     ext_vid_in_mux_sel  : out std_logic; -- 0 = luma calc, 1 = y_out
     edge_width_sel      : out std_logic_vector(1 downto 0); -- edge stretch: 00=2px 01=4px 10=6px 11=8px
-    sync_hv_invert      : out std_logic; -- 0=pass incoming syncs, 1=invert incoming H/V syncs
-    ca_cfg              : out std_logic_vector(15 downto 0); -- [7:0] rule, [8] inject^luma_msb, [9] rule^Y, [10] rule^X, [13:12] y_div, [15:14] x_div
+    sync_hv_invert      : out std_logic; -- 1=invert (640x480 neg sync), 0=pass (720p pos sync)
+    slow_cnt_frame_sel  : out std_logic; -- 0=Hz slow counters, 1=frame 2/4/8/16/32/64
+    slow_cnt_div4       : out std_logic; -- 1=/4 on Hz and frame sources
+    classic_mode        : out std_logic_vector(3 downto 0); -- [0]=DAC [1]=X delay [2]=4:3 mask [3]=luma+25
+    ca_cfg              : out std_logic_vector(15 downto 0); -- [7:0] rule, [8] inject^luma_msb, [9] rule^Y, [10] rule^X
     audio_crossover     : out std_logic_vector(7 downto 0); -- T/B split @ 0x0C[7:0]
     audio_t_thresh      : out std_logic_vector(2 downto 0); -- digital T cutoff step 0..7 @ 0x0C[13:11]
     audio_b_thresh      : out std_logic_vector(2 downto 0); -- digital B cutoff step 0..7 @ 0x0C[10:8]
@@ -147,7 +150,7 @@ entity digital_reg_file is
     dsm_hi_alpha   : out std_logic_vector(11 downto 0);
     dsm_lo_alpha   : out std_logic_vector(11 downto 0);
     noise_alpha    : out std_logic_vector(11 downto 0);
-    -- YUV low-bit dirt on analog output
+    -- YUV dirt on analog output bits [4:2]
     dirt_ctrl      : out std_logic_vector(4 downto 0);
     -- Shape select controls
     shape1_a_sel   : out std_logic_vector(3 downto 0);
@@ -160,7 +163,14 @@ entity digital_reg_file is
     video_fx_dither   : out std_logic_vector(31 downto 0);
     video_fx_mirror   : out std_logic_vector(31 downto 0);
     video_fx_chromatic : out std_logic_vector(31 downto 0);
-    video_fx_sharpness : out std_logic_vector(31 downto 0);
+    video_fx_emboss    : out std_logic_vector(31 downto 0);
+    -- Mix / wipe bus, before the video FX chain.
+    --   0x1A0 [3:0]=mode [7:4]=origin [8]=invert [20:9]=softness
+    --         [27:21]=border width (0=off) [31:28]=border colour
+    --   0x1A4 [12:0]=position (mix: 0=A, 4095=B)
+    -- The raster is fixed at 720p in the wrapper.
+    mix_wipe_ctrl  : out std_logic_vector(31 downto 0);
+    mix_wipe_pos   : out std_logic_vector(31 downto 0);
     -- Overlay sprites (shared BRAM atlas, up to C_NUM_SPRITES slots)
     overlay_global_en : out std_logic;
     overlay_block_div : out std_logic_vector(2 downto 0); -- 0=/1 1=/2 2=/4 3=/8 4=/16
@@ -287,18 +297,21 @@ architecture RTL of digital_reg_file is
   signal speed1_i       : std_logic;
   signal speed2_i       : std_logic;
 
-  -- color output levels
+  -- color output levels (0 = unattenuated; digital video passes through)
   signal col_en_bypass_i   : std_logic;
-  signal y_level_i      : std_logic_vector(11 downto 0);
-  signal cr_level_i     : std_logic_vector(11 downto 0);
-  signal cb_level_i     : std_logic_vector(11 downto 0);
+  signal y_level_i      : std_logic_vector(11 downto 0) := (others => '0');
+  signal cr_level_i     : std_logic_vector(11 downto 0) := (others => '0');
+  signal cb_level_i     : std_logic_vector(11 downto 0) := (others => '0');
   signal video_active   : std_logic;
   -- Pixel clock and video input control
   signal pix_clk_div_sel_i    : std_logic;
   signal ext_vid_in_mux_sel_i : std_logic;
   signal edge_width_sel_i     : std_logic_vector(1 downto 0) := "00"; -- default 2px edge width
   signal sync_hv_invert_i     : std_logic := '0';
-  signal ca_cfg_i             : std_logic_vector(15 downto 0) := x"C21E"; -- Rule 30, rule_xor_y, /8 X&Y
+  signal slow_cnt_frame_sel_i : std_logic := '0';
+  signal slow_cnt_div4_i      : std_logic := '0';
+  signal classic_mode_i       : std_logic_vector(3 downto 0) := "0011"; -- DAC+X delay on; 4:3 and luma+25 off
+  signal ca_cfg_i             : std_logic_vector(15 downto 0) := x"021E"; -- Rule 30, rule_xor_y
   signal audio_crossover_i    : std_logic_vector(7 downto 0) := x"80"; -- mid crossover default
   signal audio_crossover_r    : std_logic_vector(7 downto 0) := x"80";
   signal audio_t_thresh_i     : std_logic_vector(2 downto 0) := "011"; -- ~50% default (was MSB)
@@ -327,7 +340,10 @@ architecture RTL of digital_reg_file is
   signal video_fx_dither_i   : std_logic_vector(31 downto 0) := (others => '0'); -- dither bypass
   signal video_fx_mirror_i   : std_logic_vector(31 downto 0) := x"000002D0"; -- half=360px, disabled
   signal video_fx_chromatic_i : std_logic_vector(31 downto 0) := (others => '0');
-  signal video_fx_sharpness_i : std_logic_vector(31 downto 0) := (others => '0');
+  signal video_fx_emboss_i    : std_logic_vector(31 downto 0) := (others => '0');
+  -- Power-up is mix, position 0: spectron (A) straight through.
+  signal mix_wipe_ctrl_i  : std_logic_vector(31 downto 0) := (others => '0');
+  signal mix_wipe_pos_i   : std_logic_vector(31 downto 0) := (others => '0');
   signal overlay_global_en_i : std_logic := '0';
   signal overlay_block_div_i : std_logic_vector(2 downto 0) := "000";
   signal overlay_sprites_i   : t_sprite_array := (others => (
@@ -417,7 +433,9 @@ begin
   -- output y,cr,cb levels (moved to make room for osc registers)
   regs(ra(x"58")) <= x"0" & cr_level_i & x"0" & y_level_i;
   regs(ra(x"5C")) <= x"00000" & cb_level_i;
-  regs(ra(x"78")) <= x"000000" & "0" & sync_hv_invert_i & edge_width_sel_i & ext_vid_in_mux_sel_i & pix_clk_div_sel_i & col_en_bypass_i & video_active;
+  regs(ra(x"78")) <= "00000000000000000000000" & slow_cnt_div4_i & slow_cnt_frame_sel_i & sync_hv_invert_i & edge_width_sel_i & ext_vid_in_mux_sel_i & pix_clk_div_sel_i & col_en_bypass_i & video_active;
+  -- Classic mode: [0]=EMS DAC [1]=X delays [2]=4:3 mask [3]=luma+25
+  regs(ra(x"7C")) <= x"000000" & "0000" & classic_mode_i;
   regs(ra(x"18")) <= x"0000" & ca_cfg_i;
   -- Luma key control
   regs(ra(x"C8")) <= luma_key_enable_i & luma_key_direction_i & "00000000000000" & luma_key_thresh_high_i & luma_key_thresh_low_i;
@@ -430,18 +448,28 @@ begin
   -- Shape select controls
   regs(ra(x"E0")) <= x"0000" & shape2_b_sel_i & shape2_a_sel_i & shape1_b_sel_i & shape1_a_sel_i;
   -- Video output effects: [0]=inv R, [1]=inv G, [2]=inv B, [4:3]=swap, [7:5]=bit rev,
-  --   [8]=scan en, [10:9]=scan delay, [12:11]=logic w/ prev pixel (01=OR 10=AND 11=XOR)
+  --   [8]=scan en, [12:11]=logic w/ prev pixel (01=OR 10=AND 11=XOR), [17:13]=scan delay 0-16,
+  --   [19]=CRT darken, [22:20]=scan band (0=1 line, 1=2, 2=4, 3=8, 4=16),
+  --   [29:23]=smear repeat 0-64 (0=off)
   regs(ra(x"E4")) <= video_fx_ctrl_i;
   -- Bit plane slice: R[3:0] G[7:4] B[11:8]; bit3 per channel = bypass
+  --   rotate (0=none, 1-7 left, 8-14 right by 1-7): R[15:12] G[19:16] B[23:20]
   regs(ra(x"E8")) <= video_fx_bitplane_i;
-  -- Horizontal ordered dither: [0]=en, [2:1]=depth (6/5/4/3-bit)
+  -- Horizontal ordered dither: [0]=en, [2:1]=depth (6/5/4/3-bit),
+  --   [5:3]=posterize (0=off, 1=7bit .. 7=1bit),
+  --   smear threshold R[13:6] G[21:14] B[29:22]
   regs(ra(x"EC")) <= video_fx_dither_i;
   -- Horizontal mirror: [0]=en, [11:1]=half line width (pixels)
   regs(ra(x"F0")) <= video_fx_mirror_i;
-  -- Chromatic aberration: [0]=en, [3:1]=G delay, [6:4]=B delay (0-5 px)
+  -- Chromatic aberration: [0]=en, [6:1]=G delay, [12:7]=B delay (0-32 px)
   regs(ra(x"F4")) <= video_fx_chromatic_i;
-  -- Sharpness/blur: [0]=en, [1]=mode (0=blur 1=sharp), [15:8]=strength
-  regs(ra(x"F8")) <= video_fx_sharpness_i;
+  -- Emboss/shadow: [0]=emboss [1]=shadow [15:8]=threshold [23:16]=strength
+  --   both are 1-255; the effect treats a stored 0 as 1
+  --   [24]=color fringe [28:25]=fringe color 0-15
+  regs(ra(x"F8")) <= video_fx_emboss_i;
+  -- Mix/wipe. Mode 0 and position 0 pass the spectron picture.
+  regs(ra(x"1A0")) <= mix_wipe_ctrl_i;
+  regs(ra(x"1A4")) <= mix_wipe_pos_i;
   -- Overlay master enable
   regs(ra(x"FC")) <= "0000000000000000000000000000" & overlay_block_div_i & overlay_global_en_i;
 
@@ -575,6 +603,16 @@ begin
         elsif addr_reg(11 downto 8) = x"1"
               and unsigned(addr_reg(7 downto 4)) <= C_NUM_SPRITES - 1 then
           null; -- sprite descriptor writes handled by p_sprite_decode/p_sprite_apply
+        elsif addr_reg(11 downto 8) = x"1" and addr_reg(7 downto 4) = x"A" then
+          -- 0x1A0 and 0x1A4. Low byte alone would collide with 0x0A0.
+          case addr_reg(3 downto 0) is
+            when x"0" =>
+              mix_wipe_ctrl_i <= write_reg;
+            when x"4" =>
+              mix_wipe_pos_i <= write_reg;
+            when others =>
+              null;
+          end case;
         else
         case addr_reg(7 downto 0) is
           when x"04" =>
@@ -660,6 +698,8 @@ begin
             ext_vid_in_mux_sel_i <= write_reg(3);
             edge_width_sel_i <= write_reg(5 downto 4);
             sync_hv_invert_i <= write_reg(6);
+            slow_cnt_frame_sel_i <= write_reg(7);
+            slow_cnt_div4_i <= write_reg(8);
           when x"0C" =>
             audio_crossover_i <= write_reg(7 downto 0);
             audio_b_thresh_i  <= write_reg(10 downto 8);
@@ -699,9 +739,10 @@ begin
           when x"F4" =>
             video_fx_chromatic_i <= write_reg;
           when x"F8" =>
-            video_fx_sharpness_i <= write_reg;
+            video_fx_emboss_i <= write_reg;
           when x"7C" =>
-            Rotery_addr_mux_i <= write_reg(3 downto 0);
+            classic_mode_i <= write_reg(3 downto 0);
+            -- [0]=EMS DAC [1]=X delays [2]=4:3 mask [3]=luma+25
             -- Note the Gap in addresses for the read only Rot encoders?
           when x"94" =>
             Rotery_enc_preset_w_i <= write_reg(0);
@@ -796,6 +837,9 @@ begin
   ext_vid_in_mux_sel <= ext_vid_in_mux_sel_i;
   edge_width_sel <= edge_width_sel_i;
   sync_hv_invert <= sync_hv_invert_i;
+  slow_cnt_frame_sel <= slow_cnt_frame_sel_i;
+  slow_cnt_div4      <= slow_cnt_div4_i;
+  classic_mode   <= classic_mode_i;
   ca_cfg         <= ca_cfg_i;
   audio_crossover <= audio_crossover_r;
   audio_t_thresh  <= audio_t_thresh_r;
@@ -823,7 +867,9 @@ begin
   video_fx_dither   <= video_fx_dither_i;
   video_fx_mirror   <= video_fx_mirror_i;
   video_fx_chromatic <= video_fx_chromatic_i;
-  video_fx_sharpness <= video_fx_sharpness_i;
+  video_fx_emboss <= video_fx_emboss_i;
+  mix_wipe_ctrl  <= mix_wipe_ctrl_i;
+  mix_wipe_pos   <= mix_wipe_pos_i;
 
   overlay_global_en <= overlay_global_en_i;
   overlay_block_div <= overlay_block_div_i;

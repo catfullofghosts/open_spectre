@@ -122,6 +122,9 @@ entity cpu_reg_wrapper is
     ext_vid_in_mux_sel  : out std_logic; -- 0 = luma calc, 1 = y_out
     edge_width_sel      : out std_logic_vector(1 downto 0);
     sync_hv_invert      : out std_logic;
+    slow_cnt_frame_sel  : out std_logic; -- 0=Hz slow counters, 1=frame 2/4/8/16/32/64
+    slow_cnt_div4       : out std_logic; -- 1=/4 on Hz and frame sources
+    classic_mode        : out std_logic_vector(3 downto 0); -- [0]=DAC [1]=X delay [2]=4:3 mask [3]=luma+25
     ca_cfg              : out std_logic_vector(15 downto 0);
     audio_crossover     : out std_logic_vector(7 downto 0);
     audio_t_thresh      : out std_logic_vector(2 downto 0);
@@ -148,7 +151,9 @@ entity cpu_reg_wrapper is
     video_fx_dither   : out std_logic_vector(31 downto 0);
     video_fx_mirror   : out std_logic_vector(31 downto 0);
     video_fx_chromatic : out std_logic_vector(31 downto 0);
-    video_fx_sharpness : out std_logic_vector(31 downto 0);
+    video_fx_emboss    : out std_logic_vector(31 downto 0);
+    mix_wipe_ctrl      : out std_logic_vector(31 downto 0);
+    mix_wipe_pos       : out std_logic_vector(31 downto 0);
     overlay_global_en  : out std_logic;
     overlay_block_div  : out std_logic_vector(2 downto 0);
     overlay_sprites    : out t_sprite_array;
@@ -248,6 +253,9 @@ architecture rtl of cpu_reg_wrapper is
   signal  i_ext_vid_in_mux_sel  : std_logic;
   signal  i_edge_width_sel      : std_logic_vector(1 downto 0);
   signal  i_sync_hv_invert      : std_logic;
+  signal  i_slow_cnt_frame_sel  : std_logic;
+  signal  i_slow_cnt_div4       : std_logic;
+  signal  i_classic_mode        : std_logic_vector(3 downto 0);
   signal  i_ca_cfg             : std_logic_vector(15 downto 0);
   signal  i_audio_crossover    : std_logic_vector(7 downto 0);
   signal  i_audio_t_thresh     : std_logic_vector(2 downto 0);
@@ -274,7 +282,9 @@ architecture rtl of cpu_reg_wrapper is
   signal  i_video_fx_dither   : std_logic_vector(31 downto 0);
   signal  i_video_fx_mirror   : std_logic_vector(31 downto 0);
   signal  i_video_fx_chromatic : std_logic_vector(31 downto 0);
-  signal  i_video_fx_sharpness : std_logic_vector(31 downto 0);
+  signal  i_video_fx_emboss    : std_logic_vector(31 downto 0);
+  signal  i_mix_wipe_ctrl      : std_logic_vector(31 downto 0);
+  signal  i_mix_wipe_pos       : std_logic_vector(31 downto 0);
   signal  i_overlay_global_en  : std_logic;
   signal  i_overlay_block_div  : std_logic_vector(2 downto 0);
   signal  i_overlay_sprites     : t_sprite_array;
@@ -364,6 +374,9 @@ begin
       ext_vid_in_mux_sel  => i_ext_vid_in_mux_sel,
       edge_width_sel      => i_edge_width_sel,
       sync_hv_invert      => i_sync_hv_invert,
+      slow_cnt_frame_sel  => i_slow_cnt_frame_sel,
+      slow_cnt_div4       => i_slow_cnt_div4,
+      classic_mode        => i_classic_mode,
       ca_cfg              => i_ca_cfg,
       audio_crossover     => i_audio_crossover,
       audio_t_thresh      => i_audio_t_thresh,
@@ -387,7 +400,9 @@ begin
       video_fx_dither   => i_video_fx_dither,
       video_fx_mirror   => i_video_fx_mirror,
       video_fx_chromatic => i_video_fx_chromatic,
-      video_fx_sharpness => i_video_fx_sharpness,
+      video_fx_emboss    => i_video_fx_emboss,
+      mix_wipe_ctrl      => i_mix_wipe_ctrl,
+      mix_wipe_pos       => i_mix_wipe_pos,
       overlay_global_en  => i_overlay_global_en,
       overlay_block_div  => i_overlay_block_div,
       overlay_sprites    => i_overlay_sprites,
@@ -463,6 +478,9 @@ begin
       ext_vid_in_mux_sel  <= i_ext_vid_in_mux_sel;
       edge_width_sel      <= i_edge_width_sel;
       sync_hv_invert      <= i_sync_hv_invert;
+      slow_cnt_frame_sel  <= i_slow_cnt_frame_sel;
+      slow_cnt_div4       <= i_slow_cnt_div4;
+      classic_mode        <= i_classic_mode;
       ca_cfg              <= i_ca_cfg;
       audio_t_thresh      <= i_audio_t_thresh;
       audio_b_thresh      <= i_audio_b_thresh;
@@ -485,7 +503,9 @@ begin
       video_fx_dither     <= i_video_fx_dither;
       video_fx_mirror     <= i_video_fx_mirror;
       video_fx_chromatic  <= i_video_fx_chromatic;
-      video_fx_sharpness  <= i_video_fx_sharpness;
+      video_fx_emboss     <= i_video_fx_emboss;
+      mix_wipe_ctrl       <= i_mix_wipe_ctrl;
+      mix_wipe_pos        <= i_mix_wipe_pos;
       overlay_global_en   <= i_overlay_global_en;
       overlay_block_div   <= i_overlay_block_div;
       overlay_sprites     <= i_overlay_sprites;

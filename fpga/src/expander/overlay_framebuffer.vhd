@@ -8,7 +8,7 @@ use work.overlay_sprite_pkg.all;
 --
 -- CPU port: writes pixel data anywhere in the shared BRAM (AXI @ byte 0x400+).
 -- Video port: each enabled sprite slot has its own screen position and base;
---             at most one BRAM read per pixel — highest slot index wins on overlap.
+--             at most one BRAM read per pixel. Highest slot index wins on overlap.
 --
 -- Pixel word format:
 --   [31]    1 = opaque overlay pixel, 0 = transparent
@@ -23,7 +23,7 @@ entity overlay_framebuffer is
   generic (
     G_DEPTH       : positive := 2048;
     G_ADDR_WIDTH  : positive := 11;
-    G_VIDEO_LAT   : positive := 9 -- horizontal lookahead (dirt+encoder+bg+pre_fx)
+    G_VIDEO_LAT   : natural := 9 -- horizontal lookahead; 0 when the parent aligns video itself
   );
   port (
     cpu_clk   : in  std_logic;
@@ -210,8 +210,16 @@ begin
   begin
     if rising_edge(pix_clk) then
       global_en_r <= global_enable;
-      h_act_r     <= '1' when h_sync = '0' else '0';
-      v_act_r     <= '1' when v_sync = '0' else '0';
+      if h_sync = '0' then
+        h_act_r <= '1';
+      else
+        h_act_r <= '0';
+      end if;
+      if v_sync = '0' then
+        v_act_r <= '1';
+      else
+        v_act_r <= '0';
+      end if;
       x_pick      <= x_pos + G_VIDEO_LAT;
       y_pick      <= y_pos;
     end if;

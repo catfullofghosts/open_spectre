@@ -7,8 +7,8 @@ entity chromatic_abrasion_effect is
         clk : in STD_LOGIC;
         rst : in STD_LOGIC;
         enable : in STD_LOGIC;
-        delay_g : in STD_LOGIC_VECTOR(2 downto 0); -- 0-5 clock cycles for green
-        delay_b : in STD_LOGIC_VECTOR(2 downto 0); -- 0-5 clock cycles for blue
+        delay_g : in STD_LOGIC_VECTOR(5 downto 0); -- 0-32 pixel clocks for green
+        delay_b : in STD_LOGIC_VECTOR(5 downto 0); -- 0-32 pixel clocks for blue
         r_in : in STD_LOGIC_VECTOR(7 downto 0);
         g_in : in STD_LOGIC_VECTOR(7 downto 0);
         b_in : in STD_LOGIC_VECTOR(7 downto 0);
@@ -26,25 +26,58 @@ end chromatic_abrasion_effect;
 
 architecture Behavioral of chromatic_abrasion_effect is
 
-    -- Delay line types for green and blue channels
-    type delay_line_g is array (0 to 5) of STD_LOGIC_VECTOR(7 downto 0);
-    type delay_line_b is array (0 to 5) of STD_LOGIC_VECTOR(7 downto 0);
-    type sync_delay_line is array (0 to 5) of STD_LOGIC;
-    
-    -- Delay line signals
-    signal g_delay_line : delay_line_g;
-    signal b_delay_line : delay_line_b;
-    signal hsync_delay_line : sync_delay_line;
-    signal vsync_delay_line : sync_delay_line;
-    signal de_delay_line : sync_delay_line;
-    
-    -- Delay control signals
-    signal delay_g_unsigned : UNSIGNED(2 downto 0);
-    signal delay_b_unsigned : UNSIGNED(2 downto 0);
-    
-    -- Output signals
-    signal g_delayed, b_delayed : STD_LOGIC_VECTOR(7 downto 0);
-    signal hsync_delayed, vsync_delayed, de_delayed : STD_LOGIC;
+    constant C_DLY_MAX : natural := 32;
+
+    type delay_line_t is array (0 to C_DLY_MAX - 1) of STD_LOGIC_VECTOR(7 downto 0);
+    type sync_delay_line_t is array (0 to C_DLY_MAX - 1) of STD_LOGIC;
+
+    signal g_delay_line : delay_line_t;
+    signal b_delay_line : delay_line_t;
+    signal hsync_delay_line : sync_delay_line_t;
+    signal vsync_delay_line : sync_delay_line_t;
+    signal de_delay_line : sync_delay_line_t;
+
+    signal delay_g_unsigned : UNSIGNED(5 downto 0);
+    signal delay_b_unsigned : UNSIGNED(5 downto 0);
+
+    function f_clamp_dly (d : unsigned(5 downto 0)) return integer is
+        variable n : integer;
+    begin
+        n := to_integer(d);
+        if n < 0 then
+            return 0;
+        elsif n > C_DLY_MAX then
+            return C_DLY_MAX;
+        else
+            return n;
+        end if;
+    end function f_clamp_dly;
+
+    function f_pick_byte (
+        live : std_logic_vector(7 downto 0);
+        line : delay_line_t;
+        dly  : integer
+    ) return std_logic_vector is
+    begin
+        if dly <= 0 then
+            return live;
+        else
+            return line(dly - 1);
+        end if;
+    end function f_pick_byte;
+
+    function f_pick_bit (
+        live : std_logic;
+        line : sync_delay_line_t;
+        dly  : integer
+    ) return std_logic is
+    begin
+        if dly <= 0 then
+            return live;
+        else
+            return line(dly - 1);
+        end if;
+    end function f_pick_bit;
 
 begin
 
@@ -52,18 +85,20 @@ begin
     delay_b_unsigned <= unsigned(delay_b);
 
     process(clk)
+        variable v_g : integer;
+        variable v_b : integer;
+        variable v_sync : integer;
     begin
         if rising_edge(clk) then
             if rst = '1' then
-                -- Reset all delay lines
-                for i in 0 to 5 loop
+                for i in 0 to C_DLY_MAX - 1 loop
                     g_delay_line(i) <= (others => '0');
                     b_delay_line(i) <= (others => '0');
                     hsync_delay_line(i) <= '0';
                     vsync_delay_line(i) <= '0';
                     de_delay_line(i) <= '0';
                 end loop;
-                
+
                 r_out <= (others => '0');
                 g_out <= (others => '0');
                 b_out <= (others => '0');
@@ -71,119 +106,36 @@ begin
                 vsync_out <= '0';
                 de_out <= '0';
             else
-                -- Shift delay lines
-                for i in 5 downto 1 loop
-                    g_delay_line(i) <= g_delay_line(i-1);
-                    b_delay_line(i) <= b_delay_line(i-1);
-                    hsync_delay_line(i) <= hsync_delay_line(i-1);
-                    vsync_delay_line(i) <= vsync_delay_line(i-1);
-                    de_delay_line(i) <= de_delay_line(i-1);
+                for i in C_DLY_MAX - 1 downto 1 loop
+                    g_delay_line(i) <= g_delay_line(i - 1);
+                    b_delay_line(i) <= b_delay_line(i - 1);
+                    hsync_delay_line(i) <= hsync_delay_line(i - 1);
+                    vsync_delay_line(i) <= vsync_delay_line(i - 1);
+                    de_delay_line(i) <= de_delay_line(i - 1);
                 end loop;
-                
-                -- Input to delay lines
+
                 g_delay_line(0) <= g_in;
                 b_delay_line(0) <= b_in;
                 hsync_delay_line(0) <= hsync_in;
                 vsync_delay_line(0) <= vsync_in;
                 de_delay_line(0) <= de_in;
-                
-                -- Select delayed outputs based on delay settings (0-5 pixel clocks)
-                case delay_g_unsigned is
-                    when "000" => g_delayed <= g_in;
-                    when "001" => g_delayed <= g_delay_line(0);
-                    when "010" => g_delayed <= g_delay_line(1);
-                    when "011" => g_delayed <= g_delay_line(2);
-                    when "100" => g_delayed <= g_delay_line(3);
-                    when "101" => g_delayed <= g_delay_line(4);
-                    when others => g_delayed <= g_delay_line(5);
-                end case;
-                
-                case delay_b_unsigned is
-                    when "000" => b_delayed <= b_in;
-                    when "001" => b_delayed <= b_delay_line(0);
-                    when "010" => b_delayed <= b_delay_line(1);
-                    when "011" => b_delayed <= b_delay_line(2);
-                    when "100" => b_delayed <= b_delay_line(3);
-                    when "101" => b_delayed <= b_delay_line(4);
-                    when others => b_delayed <= b_delay_line(5);
-                end case;
-                
-                -- For sync signals, use the maximum delay to maintain alignment
-                -- This ensures all channels are properly synchronized
-                if delay_g_unsigned > delay_b_unsigned then
-                    case delay_g_unsigned is
-                        when "000" => 
-                            hsync_delayed <= hsync_in;
-                            vsync_delayed <= vsync_in;
-                            de_delayed <= de_in;
-                        when "001" => 
-                            hsync_delayed <= hsync_delay_line(0);
-                            vsync_delayed <= vsync_delay_line(0);
-                            de_delayed <= de_delay_line(0);
-                        when "010" => 
-                            hsync_delayed <= hsync_delay_line(1);
-                            vsync_delayed <= vsync_delay_line(1);
-                            de_delayed <= de_delay_line(1);
-                        when "011" => 
-                            hsync_delayed <= hsync_delay_line(2);
-                            vsync_delayed <= vsync_delay_line(2);
-                            de_delayed <= de_delay_line(2);
-                        when "100" => 
-                            hsync_delayed <= hsync_delay_line(3);
-                            vsync_delayed <= vsync_delay_line(3);
-                            de_delayed <= de_delay_line(3);
-                        when "101" => 
-                            hsync_delayed <= hsync_delay_line(4);
-                            vsync_delayed <= vsync_delay_line(4);
-                            de_delayed <= de_delay_line(4);
-                        when others => 
-                            hsync_delayed <= hsync_delay_line(5);
-                            vsync_delayed <= vsync_delay_line(5);
-                            de_delayed <= de_delay_line(5);
-                    end case;
+
+                v_g := f_clamp_dly(delay_g_unsigned);
+                v_b := f_clamp_dly(delay_b_unsigned);
+                if v_g > v_b then
+                    v_sync := v_g;
                 else
-                    case delay_b_unsigned is
-                        when "000" => 
-                            hsync_delayed <= hsync_in;
-                            vsync_delayed <= vsync_in;
-                            de_delayed <= de_in;
-                        when "001" => 
-                            hsync_delayed <= hsync_delay_line(0);
-                            vsync_delayed <= vsync_delay_line(0);
-                            de_delayed <= de_delay_line(0);
-                        when "010" => 
-                            hsync_delayed <= hsync_delay_line(1);
-                            vsync_delayed <= vsync_delay_line(1);
-                            de_delayed <= de_delay_line(1);
-                        when "011" => 
-                            hsync_delayed <= hsync_delay_line(2);
-                            vsync_delayed <= vsync_delay_line(2);
-                            de_delayed <= de_delay_line(2);
-                        when "100" => 
-                            hsync_delayed <= hsync_delay_line(3);
-                            vsync_delayed <= vsync_delay_line(3);
-                            de_delayed <= de_delay_line(3);
-                        when "101" => 
-                            hsync_delayed <= hsync_delay_line(4);
-                            vsync_delayed <= vsync_delay_line(4);
-                            de_delayed <= de_delay_line(4);
-                        when others => 
-                            hsync_delayed <= hsync_delay_line(5);
-                            vsync_delayed <= vsync_delay_line(5);
-                            de_delayed <= de_delay_line(5);
-                    end case;
+                    v_sync := v_b;
                 end if;
-                
-                -- Apply chromatic abrasion effect if enabled
+
                 if enable = '1' then
-                    r_out <= r_in;  -- Red channel is not delayed
-                    g_out <= g_delayed;
-                    b_out <= b_delayed;
-                    hsync_out <= hsync_delayed;
-                    vsync_out <= vsync_delayed;
-                    de_out <= de_delayed;
+                    r_out <= r_in;
+                    g_out <= f_pick_byte(g_in, g_delay_line, v_g);
+                    b_out <= f_pick_byte(b_in, b_delay_line, v_b);
+                    hsync_out <= f_pick_bit(hsync_in, hsync_delay_line, v_sync);
+                    vsync_out <= f_pick_bit(vsync_in, vsync_delay_line, v_sync);
+                    de_out <= f_pick_bit(de_in, de_delay_line, v_sync);
                 else
-                    -- Pass through if effect disabled
                     r_out <= r_in;
                     g_out <= g_in;
                     b_out <= b_in;

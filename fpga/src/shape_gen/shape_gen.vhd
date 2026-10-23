@@ -124,6 +124,8 @@ begin
 
   cx_pixel <= "0000" & pos_h;
   cy_pixel <= "0000" & pos_v;
+  -- Incoming H/V are polarity-normalized (idle-low, pulse-high), same as digital counters.
+  -- vid_act = not sync: 1 during active video so NCOs run and distance is not held in reset.
   h_sync_n <= not h_sync;
   v_sync_n <= not v_sync;
   rst_n <= rst; -- incoming reset is already inverted so just change its name
@@ -152,9 +154,9 @@ begin
       cx_level => cx_pixel,
       cy_level => cy_pixel,
       -- VGA signals to outside if needed
-      h_sync                => h_sync_n,
-      v_sync                => v_sync_n,
-      start_of_frame        => v_sync_n,--start_of_frame,
+      h_sync                => h_sync,
+      v_sync                => v_sync,
+      start_of_frame        => v_sync,
       start_of_active_video => start_of_active_video,
       -- distance output
       distance => distance
@@ -165,7 +167,7 @@ begin
     (
       i_clk        => clk,
       i_rstb       => rst_n,
-      i_sync_reset => h_sync, -- is one when video is active 0 other wise that means that the ramp restarts at each line
+      i_sync_reset => h_sync_n, -- 1 during active video so the ramp runs; 0 on H sync restarts each line
       i_enable     => '1',
       i_repeat     => '1',
       i_fcw        => zoom_h(8 downto 0),
@@ -177,7 +179,7 @@ begin
     (
       i_clk        => clk,
       i_rstb       => rst_n,
-      i_sync_reset => v_sync, -- is one when video is active 0 other wise that means that the ramp restarts at frame 
+      i_sync_reset => v_sync_n, -- 1 during active video; 0 on V sync restarts the frame ramp 
       i_enable     => vramp_en,
       i_repeat     => '1',
       i_fcw        => zoom_v(8 downto 0),

@@ -94,7 +94,7 @@ proc open_spec_bd_cell_count {bd_file} {
 }
 
 proc open_spec_remove_bd {bd_name bd_file} {
-  puts "Removing incomplete block design: $bd_file"
+  puts "Removing block design: $bd_file"
   catch {close_bd_design [current_bd_design -quiet]}
   catch {export_ip_user_files -of_objects [get_files $bd_file] -no_script -reset -force -quiet}
   catch {remove_files [get_files -quiet ${bd_name}.bd]}
@@ -186,22 +186,19 @@ proc open_spec_create_bd {bd_tcl bd_name} {
 }
 
 # -----------------------------------------------------------------------------
-# Digilent IP repo (dvi2rgb / rgb2dvi / axi_dynclk)
+# Digilent IP repo (vendored: dvi2rgb / rgb2dvi / axi_dynclk + tmds interface)
 # -----------------------------------------------------------------------------
-set digilent_ip_repo ""
-set default_ip_repo [file normalize [file join $fpga_dir "deps" "vivado-library"]]
-if {[info exists ::env(DIGILENT_IP_REPO)] && $::env(DIGILENT_IP_REPO) ne ""} {
-  set digilent_ip_repo [file normalize $::env(DIGILENT_IP_REPO)]
-} elseif {[file isdirectory $default_ip_repo]} {
-  set digilent_ip_repo $default_ip_repo
-} elseif {[file isdirectory "C:/vivado-library"]} {
-  set digilent_ip_repo [file normalize "C:/vivado-library"]
+set default_ip_repo [file normalize [file join $fpga_dir "ip" "digilent"]]
+set digilent_ip_repo $default_ip_repo
+if {[info exists ::env(DIGILENT_IP_REPO)] && $::env(DIGILENT_IP_REPO) ne "" \
+    && [file normalize $::env(DIGILENT_IP_REPO)] ne $default_ip_repo} {
+  puts "NOTE: ignoring DIGILENT_IP_REPO=$::env(DIGILENT_IP_REPO)"
+  puts "  Using the vendored catalog so the IP version stays pinned."
 }
 
 if {$digilent_ip_repo eq "" || ![file isdirectory $digilent_ip_repo]} {
   puts "ERROR: Digilent IP repo not found."
-  puts "  Clone https://github.com/Digilent/vivado-library"
-  puts "  then set DIGILENT_IP_REPO to that folder before running."
+  puts "  Expected the vendored catalog at $default_ip_repo"
   exit 1
 }
 puts "  IP repo   : $digilent_ip_repo"
@@ -260,10 +257,17 @@ foreach r [get_runs -quiet "*spector_wrapper*_synth_1"] {
 }
 
 # -----------------------------------------------------------------------------
-# Block design: reuse only if populated; recreate stub/empty BD
+# Block design: reuse only if populated; recreate stub/empty BD.
+# clean always drops the saved BD so the next create sources fpga/syn/hdmi_in.tcl.
 # -----------------------------------------------------------------------------
 set bd_rebuilt 0
 set bd_file [open_spec_find_bd $bd_name]
+
+if {$do_clean && $bd_file ne ""} {
+  puts "clean: dropping saved block design; recreating from $bd_tcl"
+  open_spec_remove_bd $bd_name $bd_file
+  set bd_file ""
+}
 
 if {$bd_file ne ""} {
   set ncells [open_spec_bd_cell_count $bd_file]
@@ -320,7 +324,7 @@ update_compile_order -fileset sources_1
 # Digilent rgb2dvi/dvi2rgb: disable OOC if possible, and always re-assert
 # after generate_target (which can recreate IP runs).
 update_ip_catalog -rebuild
-foreach ip [get_ips -quiet {*rgb2dvi* *dvi2rgb*}] {
+foreach ip [get_ips -quiet {*rgb2dvi* *dvi2rgb* *axi_dynclk*}] {
   puts "Regenerating Digilent IP: $ip"
   catch {reset_target all $ip}
   catch {generate_target -force all $ip}

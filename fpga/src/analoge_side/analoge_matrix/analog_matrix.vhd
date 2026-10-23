@@ -9,7 +9,8 @@
 --                              |______|                                               
 -- Module Name: analog_matrix by RD Jordan
 -- Created: Early 2023
--- Description: 
+-- Description: 20-column analog matrix. mixer_inputs/outputs are 12-bit
+--              two's-complement, centred on 0. Each column is mixer_11_1. 
 -- Dependencies: 
 -- Additional Comments: You can view the project here: https://github.com/cfoge/OPEN_SPECTRE-
 

@@ -1,6 +1,67 @@
+Todo
+- check midi works, DONE!!!
+- add extra midi controls, only the relevent ones
+- fix ca rules so it is always in the cool mode
+- check audio in
+- debug video in
+- propper debug of dirt
+- look at what i need to do to get the base colour of move we see on the original
+looks like all luma and the mid and top of chorma
+
 !!! REMEMBER IF SOMETHIGN DOESNT WORK CHECK THE REST AND H/Vsync are correct poliarity!!!!
 
+
+
+
+NEXT CHECK!::
+- slow counters should be acurate at 720p50
+    - slow counters tear 1/4 down the frame?!
+- delay should match actual MESS unit, delay now is correxct
+- random voltages should be much slower- with the slow down reg they are clow enough now
+- check DAC favors bit 0 a lot more -- clasic mode dac works!!!
+- classic luma, should be stronger!!
+- 4:3 clasic mode works
+- classic mode x delay needs differecnt delays for each of the delayed x counts
+- noise cycle rexycle doesnt seem to loop correctly
+
+
+
+
+
+
+
 todo:
+- Oscilator other waveforms seem to be lower amplitude? -- fixed all osc same amp!!!
+- ca div, get rid of, they are a pain----check done
+- check audio cuttof of filter
+- check slowcounter speed is acurate, needs a method for slowing these counters by x4? for some really slow stuff -- check these work
+    - 
+
+
+- check dirt -- needs propper debug!!!! not working at all!!!
+
+------------------------------
+
+- 720p counters now working but 640 doesnt anymore (sync poliarity probs?)
+- Shape gen not working in either 640 or 720, probs the flip in poliarity
+
+!!!!! WORKING NOW BUT IT STARTS UP WITH THE INVERT BIT FLIPPED
+
+- annaloge side looks great!!
+
+- ca div, get rid of, they are a pain----check
+- check audio cuttof of filter
+- check slowcounter speed is acurate
+- add reg to get luma input from top bit of luma out on the CA input --- done
+- check dirt
+- check that bipoler signals work on spacing, and shapes !!!!! seems to!!!
+
+
+
+
+------------------------------------------------------------------------------------------------
+
+old!!!!!!!!!!!!!!!
 
 ca div, get rid of, they are a pain
 gear points not sharp enough, slider increases circle size but not gear teeth, why?

@@ -616,15 +616,13 @@ class RegisterControlWidget(QWidget):
         return f"0x{(self.REG_BASE_ADDR + offset):08X}"
 
     def _init_ca_register_defaults(self):
-        """Match FPGA default ca_cfg = 0xC21E (rule 30, rule_xor_y, /8 X&Y)."""
+        """Match FPGA default ca_cfg = 0x021E (rule 30, rule_xor_y)."""
         full_addr = self._resolve_full_addr("0x18")
-        self.register_values[full_addr] = 0xC21E
+        self.register_values[full_addr] = 0x021E
         ca_defaults = {
             "ca_rule": 30,
             "ca_rule_xor_y": 1,
             "ca_rule_xor_x": 0,
-            "ca_x_div": 3,
-            "ca_y_div": 3,
         }
         for name, value in ca_defaults.items():
             slider = self.registers[name]["widget"].findChild(QSlider)
@@ -713,7 +711,13 @@ class RegisterControlWidget(QWidget):
             ("0x78", "pix_clk_div_sel", "Pixel/Line Div Select (/2 or /4)", 1, 0, 1, 2),
             ("0x78", "ext_vid_in_mux_sel", "External Video In Mux Select", 1, 0, 1, 3),
             ("0x78", "edge_width_sel", "Edge Detect Width (2/4/6/8 px)", 2, 0, 3, 4),
-            ("0x78", "sync_hv_invert", "Sync H/V Invert (0=640,1=720)", 1, 0, 1, 6),
+            ("0x78", "sync_hv_invert", "Sync H/V Invert (1=640 neg, 0=720 pos)", 1, 0, 1, 6),
+            ("0x78", "slow_cnt_frame_sel", "Slow Cnt Frame Mode (0=Hz, 1=frame 2/4/8/16/32/64)", 1, 0, 1, 7),
+            ("0x78", "slow_cnt_div4", "Slow Cnt /4 (Hz and frame)", 1, 0, 1, 8),
+            ("0x7C", "classic_dac", "Classic Mode DAC (1=EMS table, 0=linear)", 1, 0, 1, 0),
+            ("0x7C", "classic_x_delay", "Classic Mode X Delay (1=cnt 1/3/4 +1/2/3 clk)", 1, 0, 1, 1),
+            ("0x7C", "classic_43_mask", "Classic Mode 4:3 Mask (720p pillarbox, off at start)", 1, 0, 1, 2),
+            ("0x7C", "classic_luma_lift", "Classic Mode Luma +25 (sat, no overflow)", 1, 0, 1, 3),
             ("0xC8", "luma_key_enable", "Luma Key Enable", 1, 0, 1, 31),
             ("0xC8", "luma_key_direction", "Luma Key Direction", 1, 0, 1, 30),
             ("0xC8", "luma_key_thresh_high", "Luma Key Threshold High", 8, 0, 255, 8),
@@ -721,7 +725,7 @@ class RegisterControlWidget(QWidget):
             ("0xD4", "dsm_hi_alpha", "DSM High Alpha", 12, 0, 4095, 0),
             ("0xD8", "dsm_lo_alpha", "DSM Low Alpha", 12, 0, 4095, 0),
             ("0xDC", "noise_alpha", "Noise Alpha", 12, 0, 4095, 0),
-            ("0x198", "dirt_depth", "Dirt Depth (0=off, 1-3 LSB bits)", 2, 0, 3, 0),
+            ("0x198", "dirt_depth", "Dirt Depth (0=off, 1-3 bits [2]/[3:2]/[4:2])", 2, 0, 3, 0),
             ("0x198", "dirt_y_en", "Dirt Y Enable", 1, 0, 1, 2),
             ("0x198", "dirt_u_en", "Dirt U Enable", 1, 0, 1, 3),
             ("0x198", "dirt_v_en", "Dirt V Enable", 1, 0, 1, 4),
@@ -744,8 +748,6 @@ class RegisterControlWidget(QWidget):
             ("0x18", "ca_inject_xor_luma", "CA Inject XOR Luma MSB (2FF)", 1, 0, 1, 8),
             ("0x18", "ca_rule_xor_y", "CA Rule XOR Y", 1, 0, 1, 9),
             ("0x18", "ca_rule_xor_x", "CA Rule XOR X", 1, 0, 1, 10),
-            ("0x18", "ca_x_div", "CA X Div (0=/1 1=/2 2=/4 3=/8)", 2, 0, 3, 14),
-            ("0x18", "ca_y_div", "CA Y Div (0=/1 1=/2 2=/4 3=/8)", 2, 0, 3, 12),
         ]
 
         self._add_section(scroll_layout, "Shape Gen 1", shape1_defs)

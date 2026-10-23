@@ -38,7 +38,10 @@ end YUV_levels;
 
 architecture Behavioral of YUV_levels is
     component AlphaBlend
-        Port ( 
+        generic (
+          G_SIGNED : boolean := false
+        );
+        Port (
                 clk : in std_logic;
                 signal1 : in STD_LOGIC_VECTOR(11 downto 0);
                signal2 : in STD_LOGIC_VECTOR(11 downto 0);

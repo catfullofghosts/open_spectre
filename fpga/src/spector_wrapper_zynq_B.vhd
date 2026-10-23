@@ -38,7 +38,7 @@ entity spector_wrapper_zynq is
     regs_clk     : in std_logic;
     regs_en      : in std_logic;
     regs_wen     : in std_logic_vector(3 downto 0);
-    regs_addr    : in std_logic_vector(12 downto 0);
+    regs_addr    : in std_logic_vector(15 downto 0);
     regs_wr_data : in std_logic_vector(31 downto 0);
     regs_rd_data : out std_logic_vector(31 downto 0);
     video_out    : out std_logic_vector(23 downto 0);
@@ -290,12 +290,17 @@ architecture rtl of spector_wrapper_zynq is
   signal y_analog : std_logic_vector(7 downto 0);
   signal u_analog : std_logic_vector(7 downto 0);
   signal v_analog : std_logic_vector(7 downto 0);
-  signal noise_dirt : std_logic_vector(4 downto 0);
 
-  -- Align H/V/SOF with video_pre_fx path (encoder mode):
-  -- dirt(1) + color_mult(3) + encoder_out(1) + bg_regs(3) + pre_fx(1) = 9
-  -- Pipe length 8 + registered MSB tap = 9 cycles.
-  constant C_OUT_PIPE_LAT : natural := 8;
+  -- Align H/V/SOF with video_fx_out path (encoder mode):
+  -- dirt(1) + color_mult(3) + encoder_out(1) + bg_regs(3) = 8 to bg_video
+  -- mix_wipe_bus = 13, vdp = 9, and the mixer replaces the old pre-FX register
+  -- fx: color(2)+mirror(1)+logic(1)+chromatic(1)+emboss(4)+out(1) = 10
+  -- total 40. Pipe length 39 + registered MSB tap = 40 cycles.
+  constant C_OUT_PIPE_LAT : natural := 39;
+  -- bg_video is this many clocks behind h_sync_n. External video and the
+  -- sync used by the mixer are delayed to match, so the wipe lands on the
+  -- spectron pixels.
+  constant C_SRC_ALIGN : natural := 8;
   signal h_sync_pipe : std_logic_vector(C_OUT_PIPE_LAT - 1 downto 0) := (others => '0');
   signal v_sync_pipe : std_logic_vector(C_OUT_PIPE_LAT - 1 downto 0) := (others => '0');
   signal sof_pipe    : std_logic_vector(C_OUT_PIPE_LAT - 1 downto 0) := (others => '0');
@@ -305,6 +310,23 @@ architecture rtl of spector_wrapper_zynq is
   signal ext_vid_in_mux_sel : std_logic;
   signal edge_width_sel     : std_logic_vector(1 downto 0);
   signal sync_hv_invert     : std_logic;
+  signal slow_cnt_frame_sel : std_logic;
+  signal slow_cnt_div4      : std_logic;
+  signal classic_mode       : std_logic_vector(3 downto 0);
+  -- 720p CEA: H back porch 220, active 1280. V back porch 20, active 720.
+  -- 4:3 of 720 = 960, so 160 px each side.
+  constant C_H_BACK_PORCH : natural := 220;
+  constant C_H_ACTIVE     : natural := 1280;
+  constant C_V_BACK_PORCH : natural := 20;
+  constant C_V_ACTIVE     : natural := 720;
+  constant C_43_SIDE      : natural := 160; -- (1280 - 960) / 2
+  constant C_43_KEEP_LO   : natural := C_H_BACK_PORCH + C_43_SIDE;           -- 380
+  constant C_43_KEEP_HI   : natural := C_H_BACK_PORCH + C_43_SIDE + 960;     -- 1340
+  signal h_sync_n_d       : std_logic := '0';
+  signal x_line           : unsigned(11 downto 0) := (others => '0');
+  signal y_enc            : std_logic_vector(7 downto 0);
+  signal u_enc            : std_logic_vector(7 downto 0);
+  signal v_enc            : std_logic_vector(7 downto 0);
   signal ca_cfg            : std_logic_vector(15 downto 0);
   signal audio_crossover   : std_logic_vector(7 downto 0);
   signal audio_t_thresh    : std_logic_vector(2 downto 0);
@@ -345,12 +367,12 @@ architecture rtl of spector_wrapper_zynq is
   signal video_fx_dither    : std_logic_vector(31 downto 0);
   signal video_fx_mirror    : std_logic_vector(31 downto 0);
   signal video_fx_chromatic : std_logic_vector(31 downto 0);
-  signal video_fx_sharpness : std_logic_vector(31 downto 0);
+  signal video_fx_emboss    : std_logic_vector(31 downto 0);
+  signal mix_wipe_ctrl      : std_logic_vector(31 downto 0) := (others => '0');
+  signal mix_wipe_pos       : std_logic_vector(31 downto 0) := (others => '0');
   signal overlay_global_en  : std_logic;
   signal overlay_block_div  : std_logic_vector(2 downto 0);
   signal overlay_sprites      : t_sprite_array;
-  signal overlay_key        : std_logic;
-  signal overlay_rgb        : std_logic_vector(23 downto 0);
 
   signal reg_en               : std_logic;
   signal reg_we               : std_logic_vector(3 downto 0);
@@ -362,6 +384,14 @@ architecture rtl of spector_wrapper_zynq is
   signal overlay_bram_addr    : std_logic_vector(10 downto 0);
   signal overlay_bram_wdata   : std_logic_vector(31 downto 0);
   signal overlay_bram_rdata   : std_logic_vector(31 downto 0);
+  signal char_cell_we         : std_logic;
+  signal char_cell_addr       : std_logic_vector(11 downto 0);
+  signal char_cell_din        : std_logic_vector(15 downto 0);
+  signal char_cell_dout       : std_logic_vector(15 downto 0);
+  signal char_font_we         : std_logic;
+  signal char_font_addr       : std_logic_vector(11 downto 0);
+  signal char_font_din        : std_logic_vector(15 downto 0);
+  signal char_font_dout       : std_logic_vector(15 downto 0);
 
   -- Background video signals (for compositing)
   signal bg_video            : std_logic_vector(23 downto 0);
@@ -378,6 +408,22 @@ architecture rtl of spector_wrapper_zynq is
   signal green        : std_logic_vector(7 downto 0);
   signal blue         : std_logic_vector(7 downto 0);
   signal video_pre_fx : std_logic_vector(23 downto 0);
+  signal video_mix    : std_logic_vector(23 downto 0);
+  signal mix_hs       : std_logic;
+  signal mix_vs       : std_logic;
+  signal mix_act      : std_logic;
+  signal video_vdp    : std_logic_vector(23 downto 0);
+  signal vdp_hs       : std_logic;
+  signal vdp_vs       : std_logic;
+
+  type t_ext_aln is array (0 to C_SRC_ALIGN - 1) of std_logic_vector(23 downto 0);
+  signal ext_aln : t_ext_aln := (others => (others => '0'));
+  signal hs_aln  : std_logic_vector(C_SRC_ALIGN - 1 downto 0) := (others => '0');
+  signal vs_aln  : std_logic_vector(C_SRC_ALIGN - 1 downto 0) := (others => '0');
+  signal x_act   : unsigned(11 downto 0) := (others => '0');
+  signal y_act   : unsigned(11 downto 0) := (others => '0');
+  signal h_act_d : std_logic := '0';
+  signal vid_active : std_logic;
   signal video_fx_out : std_logic_vector(23 downto 0);
 
   signal frame_stats_luma_min : std_logic_vector(7 downto 0);
@@ -446,6 +492,8 @@ architecture rtl of spector_wrapper_zynq is
 begin
 
   
+    -- Normalize H/V to idle-low / pulse-high (what the digital X/Y counters expect).
+    -- 640x480 is negative sync → invert=1. 1280x720 is positive sync → invert=0.
     process (h_sync, v_sync, reset, start_of_frame, sync_hv_invert)
   begin
     if sync_hv_invert = '1' then
@@ -477,7 +525,6 @@ begin
   -- Address muxer to split the bram incomng bram based on address 
   overlay_cpu_mux_inst : entity work.overlay_cpu_mux
     generic map (
-      G_BYTE_BASE  => std_logic_vector(to_unsigned(16#400#, 13)),
       G_ADDR_WIDTH => 11
     )
     port map (
@@ -496,7 +543,15 @@ begin
       bram_we     => overlay_bram_we,
       bram_addr   => overlay_bram_addr,
       bram_wdata  => overlay_bram_wdata,
-      bram_rdata  => overlay_bram_rdata
+      bram_rdata  => overlay_bram_rdata,
+      cell_we     => char_cell_we,
+      cell_addr   => char_cell_addr,
+      cell_din    => char_cell_din,
+      cell_dout   => char_cell_dout,
+      font_we     => char_font_we,
+      font_addr   => char_font_addr,
+      font_din    => char_font_din,
+      font_dout   => char_font_dout
     );
 
   cpu_reg_wrapper_inst : entity work.cpu_reg_wrapper
@@ -579,6 +634,9 @@ begin
       ext_vid_in_mux_sel  => ext_vid_in_mux_sel,
       edge_width_sel      => edge_width_sel,
       sync_hv_invert      => sync_hv_invert,
+      slow_cnt_frame_sel  => slow_cnt_frame_sel,
+      slow_cnt_div4       => slow_cnt_div4,
+      classic_mode        => classic_mode,
       ca_cfg              => ca_cfg,
       audio_crossover     => audio_crossover,
       audio_t_thresh      => audio_t_thresh,
@@ -602,7 +660,9 @@ begin
       video_fx_dither     => video_fx_dither,
       video_fx_mirror     => video_fx_mirror,
       video_fx_chromatic  => video_fx_chromatic,
-      video_fx_sharpness  => video_fx_sharpness,
+      video_fx_emboss     => video_fx_emboss,
+      mix_wipe_ctrl       => mix_wipe_ctrl,
+      mix_wipe_pos        => mix_wipe_pos,
       overlay_global_en   => overlay_global_en,
       overlay_block_div   => overlay_block_div,
       overlay_sprites     => overlay_sprites,
@@ -624,35 +684,14 @@ begin
       audio_mag_pre         => audio_mag_pre
     );
 
-    --- Buffer overlay and sprite generator
---  overlay_framebuffer_inst : entity work.overlay_framebuffer
---    generic map (
---      G_DEPTH      => 2048,
---      G_ADDR_WIDTH => 11
---    )
---    port map (
---      cpu_clk    => regs_clk,
---      cpu_en     => overlay_bram_en,
---      cpu_we     => overlay_bram_we,
---      cpu_addr   => overlay_bram_addr,
---      cpu_wdata  => overlay_bram_wdata,
---      cpu_rdata  => overlay_bram_rdata,
---      pix_clk    => pix_clk,
---      pix_rst    => reset_n,
---      h_sync     => h_sync_n,
---      v_sync     => v_sync_n,
---      global_enable => overlay_global_en,
---      block_div     => overlay_block_div,
---      sprites       => overlay_sprites,
---      overlay_key => overlay_key,
---      overlay_rgb => overlay_rgb
---    );
+    --- Sprites, patterns and text live in vdp, between the mix and the effects.
 
   -------------------------------------------
   -- Digital Side
   -------------------------------------------
 
-  ----------- Counter devider to change the perceved resolution of the digital side -----------------
+  -- Pixel divider re-phases on polarity-normalized syncs (idle-low, pulse-high)
+  -- so 640 (neg) and 720 (pos) both tick from the start of the sync pulse.
   pixel_clk_en_p : process (pix_clk)
     variable clk_div_counter : unsigned(1 downto 0) := "00";
     variable line_div_counter : unsigned(1 downto 0) := "00";
@@ -662,7 +701,7 @@ begin
   begin
     if rising_edge (pix_clk) then
       -- Re-phase pixel divider at start of each line
-      if h_sync = '1' and h_sync_d = '0' then
+      if h_sync_n = '1' and h_sync_d = '0' then
         pix_clk_en <= '0';
         clk_div_counter := "00";
       elsif div_sel_d /= pix_clk_div_sel then
@@ -686,10 +725,10 @@ begin
       end if;
 
       -- Re-phase line divider at start of each frame; step on each hsync edge
-      if v_sync = '1' and v_sync_d = '0' then
+      if v_sync_n = '1' and v_sync_d = '0' then
         line_clk_en <= '0';
         line_div_counter := "00";
-      elsif h_sync = '1' and h_sync_d = '0' then
+      elsif h_sync_n = '1' and h_sync_d = '0' then
         if pix_clk_div_sel = '0' then
           -- /2: one digital line every 2 video lines
           line_clk_en <= not line_clk_en;
@@ -711,8 +750,8 @@ begin
         end if;
       end if;
 
-      h_sync_d  := h_sync;
-      v_sync_d  := v_sync;
+      h_sync_d  := h_sync_n;
+      v_sync_d  := v_sync_n;
       div_sel_d := pix_clk_div_sel;
 
       -- Mux for ext_vid_in: select between luma calculation or y_out
@@ -752,6 +791,10 @@ begin
       vid_span       => vid_span_mix,
       edge_width     => edge_width_sel,
       ca_cfg        => ca_cfg,
+      slow_cnt_frame_sel => slow_cnt_frame_sel,
+      slow_cnt_div4      => slow_cnt_div4,
+      classic_dac        => classic_mode(0),
+      classic_x_delay    => classic_mode(1),
       osc1_sqr       => osc_1_sqr_o,
       osc2_sqr       => osc_2_sqr_o,
       random1        => noise_1_o,
@@ -951,7 +994,7 @@ begin
       osc_2_sqr_o      => osc_2_sqr_o,
       noise_1_o        => noise_1_o,
       noise_2_o        => noise_2_o,
-      noise_dirt_o     => noise_dirt,
+      noise_dirt_o     => open,
       noise_rst        => noise_rst_reg,
       matrix_pos_h_1   => matrix_pos_h_1,
       matrix_pos_v_1   => matrix_pos_v_1,
@@ -975,12 +1018,12 @@ begin
     );
 
   -------------------------------------------
-  -- YUV dirt (bottom bits of analog YUV out)
+  -- YUV dirt (bits [4:2] of analog YUV out, per-pixel LFSR)
   -------------------------------------------
   yuv_dirt_inst : entity work.yuv_dirt
     port map (
       clk       => pix_clk,
-      noise     => noise_dirt,
+      rst       => reset_n,
       dirt_ctrl => dirt_ctrl_reg,
       y_in      => y_analog,
       u_in      => u_analog,
@@ -1018,8 +1061,8 @@ begin
     (
       clk                   => pix_clk, --clk_148_5,
       rst                   => reset_n,
-      h_sync                => h_sync, --negated inside the module
-      v_sync                => v_sync, --negated inside the module
+      h_sync                => h_sync_n, -- same polarity as digital counters (idle-low)
+      v_sync                => v_sync_n,
       start_of_frame        => start_of_frame_n,
       start_of_active_video => '0',
       video_on              => '0',
@@ -1044,8 +1087,8 @@ begin
     (
       clk                   => pix_clk, --clk_148_5,
       rst                   => reset_n,
-      h_sync                => h_sync, --negated inside the module
-      v_sync                => v_sync, --negated inside the module
+      h_sync                => h_sync_n, -- idle-low, same as shape_gen1; module inverts for the ramp
+      v_sync                => v_sync_n,
       start_of_frame        => start_of_frame_n,
       start_of_active_video => '0',
       video_on              => '0',
@@ -1083,14 +1126,61 @@ begin
 --    );
 
   -------------------------------------------
-  -- Video Output
+  -- Classic 4:3 mask + luma lift, then colour encoder
   -------------------------------------------
+  p_classic_out : process (pix_clk)
+    variable v_x : unsigned(11 downto 0);
+    variable v_y : unsigned(7 downto 0);
+    variable v_u : unsigned(7 downto 0);
+    variable v_v : unsigned(7 downto 0);
+    variable v_sum : unsigned(8 downto 0);
+  begin
+    if rising_edge(pix_clk) then
+      if h_sync_n = '0' then
+        if h_sync_n_d = '1' then
+          v_x := (others => '0');
+        else
+          v_x := x_line + 1;
+        end if;
+      else
+        v_x := x_line;
+      end if;
+      x_line     <= v_x;
+      h_sync_n_d <= h_sync_n;
+
+      v_y := unsigned(y_out);
+      v_u := unsigned(u_out);
+      v_v := unsigned(v_out);
+
+      -- 4:3 pillarbox: blank left/right of 720p active (off at reset)
+      if classic_mode(2) = '1' and (v_x < C_43_KEEP_LO or v_x >= C_43_KEEP_HI) then
+        v_y := (others => '0');
+        v_u := (others => '0');
+        v_v := (others => '0');
+      end if;
+
+      -- +25 luma, saturate at 255
+      if classic_mode(3) = '1' then
+        v_sum := ('0' & v_y) + 25;
+        if v_sum(8) = '1' then
+          v_y := (others => '1');
+        else
+          v_y := v_sum(7 downto 0);
+        end if;
+      end if;
+
+      y_enc <= std_logic_vector(v_y);
+      u_enc <= std_logic_vector(v_u);
+      v_enc <= std_logic_vector(v_v);
+    end if;
+  end process p_classic_out;
+
      color_encoder_inst : entity work.color_encoder
         port map (
             clk        => pix_clk,
-            y          => y_out,
-            c1         => u_out,
-            c2         => v_out,
+            y          => y_enc,
+            c1         => u_enc,
+            c2         => v_enc,
             swap_early => '0',
             red        => red,
             green      => green,
@@ -1103,23 +1193,22 @@ begin
   begin
     if rising_edge (pix_clk) then
       if col_en_bypass = '1' then
-        encoder_video := y_out & u_out & v_out;
+        encoder_video := y_enc & u_enc & v_enc;
       else
         encoder_video := blue & green & red;
       end if;
 
-      if overlay_key = '1' then
-        bg_video_reg1 <= overlay_rgb;
-      else
-        bg_video_reg1 <= encoder_video;
-      end if;
+      -- Overlay sprite is not instantiated. Do not let an undriven key
+      -- replace the encoder picture with a black pixel.
+      bg_video_reg1 <= encoder_video;
 
       bg_video_reg2 <= bg_video_reg1;
       bg_video <= bg_video_reg2;
     end if;
   end process;
 
-  -- Composite source, then final pixel effects before output
+  -- Old source mux. The picture into the FX chain now comes from mix_wipe_bus:
+  -- A is bg_video (spectron), B is the external input.
   process (pix_clk)
   begin
     if rising_edge (pix_clk) then
@@ -1139,24 +1228,141 @@ begin
     end if;
   end process;
 
---  video_effects_inst : entity work.video_effects
---    port map (
---      clk       => pix_clk,
---      rst       => reset,
---      h_sync    => h_sync,
---      v_sync    => v_sync,
---      video_in  => video_pre_fx,
---      fx_ctrl      => video_fx_ctrl,
---      fx_bitplane  => video_fx_bitplane,
---      fx_dither    => video_fx_dither,
---      fx_mirror    => video_fx_mirror,
---      fx_chromatic => video_fx_chromatic,
---      fx_sharpness => video_fx_sharpness,
---      video_out    => video_fx_out
---    );
+  -- Hold external video and sync until they line up with bg_video.
+  -- h_sync_n / v_sync_n are already idle-low, pulse-high.
+  p_mix_align : process (pix_clk) is
+  begin
+    if rising_edge(pix_clk) then
+      hs_aln <= hs_aln(C_SRC_ALIGN - 2 downto 0) & h_sync_n;
+      vs_aln <= vs_aln(C_SRC_ALIGN - 2 downto 0) & v_sync_n;
+      ext_aln(0) <= ext_video;
+      for i in 1 to C_SRC_ALIGN - 1 loop
+        ext_aln(i) <= ext_aln(i - 1);
+      end loop;
+    end if;
+  end process p_mix_align;
 
-video_out <= video_pre_fx;
--- video_out <= video_fx_out;
+  -- x/y count from the end of the sync pulse (start of the back porch).
+  -- vid_active is high only inside the picture, for the pixel the mixer
+  -- samples on this same edge.
+  p_mix_raster : process (pix_clk) is
+  begin
+    if rising_edge(pix_clk) then
+      if vs_aln(C_SRC_ALIGN - 1) = '1' then
+        x_act   <= (others => '0');
+        y_act   <= (others => '0');
+        h_act_d <= '1';
+      elsif hs_aln(C_SRC_ALIGN - 1) = '1' then
+        x_act <= (others => '0');
+        if h_act_d = '0' then
+          y_act <= y_act + 1;
+        end if;
+        h_act_d <= '1';
+      else
+        if h_act_d = '1' then
+          x_act <= to_unsigned(1, x_act'length);
+        else
+          x_act <= x_act + 1;
+        end if;
+        h_act_d <= '0';
+      end if;
+    end if;
+  end process p_mix_raster;
+
+  p_mix_active : process (x_act, y_act, hs_aln, vs_aln) is
+    constant C_HBP : unsigned(12 downto 0) := to_unsigned(C_H_BACK_PORCH, 13);
+    constant C_VBP : unsigned(12 downto 0) := to_unsigned(C_V_BACK_PORCH, 13);
+    constant C_FW  : unsigned(12 downto 0) := to_unsigned(C_H_ACTIVE, 13);
+    constant C_FH  : unsigned(12 downto 0) := to_unsigned(C_V_ACTIVE, 13);
+    variable xv : unsigned(12 downto 0);
+    variable yv : unsigned(12 downto 0);
+  begin
+    xv := resize(x_act, 13);
+    yv := resize(y_act, 13);
+    if (vs_aln(C_SRC_ALIGN - 1) = '0') and (hs_aln(C_SRC_ALIGN - 1) = '0') and
+       (xv >= C_HBP) and (xv < C_HBP + C_FW) and
+       (yv >= C_VBP) and (yv < C_VBP + C_FH) then
+      vid_active <= '1';
+    else
+      vid_active <= '0';
+    end if;
+  end process p_mix_active;
+
+  -- A = spectron, B = external. Position 0 / mix mode passes A.
+  mix_wipe_bus_inst : entity work.mix_wipe_bus
+    port map (
+      clk      => pix_clk,
+      rst      => reset_n,
+      h_sync   => hs_aln(C_SRC_ALIGN - 1),
+      v_sync   => vs_aln(C_SRC_ALIGN - 1),
+      active   => vid_active,
+      video_a  => bg_video,
+      video_b  => ext_aln(C_SRC_ALIGN - 1),
+      mode     => mix_wipe_ctrl(3 downto 0),
+      origin   => mix_wipe_ctrl(7 downto 4),
+      invert   => mix_wipe_ctrl(8),
+      pos      => mix_wipe_pos(12 downto 0),
+      soft     => mix_wipe_ctrl(20 downto 9),
+      border_w => mix_wipe_ctrl(27 downto 21),
+      border_c => mix_wipe_ctrl(31 downto 28),
+      frame_w  => std_logic_vector(to_unsigned(C_H_ACTIVE, 12)),
+      frame_h  => std_logic_vector(to_unsigned(C_V_ACTIVE, 12)),
+      video_o  => video_mix,
+      h_sync_o => mix_hs,
+      v_sync_o => mix_vs,
+      active_o => mix_act
+    );
+
+  -- Text under the sprites. Effects see this picture and its delayed sync.
+  vdp_inst : entity work.vdp
+    port map (
+      clk           => pix_clk,
+      rst           => reset_n,
+      h_sync        => mix_hs,
+      v_sync        => mix_vs,
+      active        => mix_act,
+      video_in      => video_mix,
+      video_o       => video_vdp,
+      h_sync_o      => vdp_hs,
+      v_sync_o      => vdp_vs,
+      cpu_clk       => regs_clk,
+      cpu_en        => overlay_bram_en,
+      cpu_we        => overlay_bram_we,
+      cpu_addr      => overlay_bram_addr,
+      cpu_wdata     => overlay_bram_wdata,
+      cpu_rdata     => overlay_bram_rdata,
+      global_enable => overlay_global_en,
+      block_div     => overlay_block_div,
+      sprites       => overlay_sprites,
+      cpu_cell_we   => char_cell_we,
+      cpu_cell_addr => char_cell_addr,
+      cpu_cell_din  => char_cell_din,
+      cpu_cell_dout => char_cell_dout,
+      cpu_font_we   => char_font_we,
+      cpu_font_addr => char_font_addr,
+      cpu_font_din  => char_font_din,
+      cpu_font_dout => char_font_dout
+    );
+
+  video_effects_inst : entity work.video_effects
+    port map (
+      clk          => pix_clk,
+      -- reset is MMCM LOCKED, active high while the pixel clock is running.
+      -- video_effects treats rst as active high, so use the inverted lock.
+      rst          => reset_n,
+      h_sync       => vdp_hs,
+      v_sync       => vdp_vs,
+      video_in     => video_vdp,
+      fx_ctrl      => video_fx_ctrl,
+      fx_bitplane  => video_fx_bitplane,
+      fx_dither    => video_fx_dither,
+      fx_mirror    => video_fx_mirror,
+      fx_chromatic => video_fx_chromatic,
+      fx_emboss    => video_fx_emboss,
+      video_out    => video_fx_out
+    );
+
+  video_out <= video_fx_out;
 
 --  frame_video_stats_inst : entity work.frame_video_stats
 --    generic map (

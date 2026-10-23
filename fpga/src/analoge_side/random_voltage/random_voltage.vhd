@@ -33,6 +33,7 @@ end random_voltage;
 
 architecture Behavioral of random_voltage is
 
+  signal recycle_n : std_logic;
   signal spio_out_1, spio_out_2  : std_logic_vector(7 downto 0);
   signal count : std_logic_vector(13 downto 0);
   signal noise_1_to_slew, noise_2_to_slew, slew_out_1, slew_out_2 : std_logic_vector(9 downto 0);
@@ -46,13 +47,14 @@ architecture Behavioral of random_voltage is
   signal recycle_stretched: std_logic := '0'; 
   signal lfsr: std_logic_vector(5 downto 0);
   signal cnt_enable : std_logic := '1';
-  signal slowdown_cnt : std_logic_vector(5 downto 0) := (others => '0'); -- 6 bits for 48x slowdown (0-47)
+  -- Base /256 vs pixel clock, then slowdown_sel 1x / 24x / 48x on top of that.
+  signal slowdown_cnt : unsigned(13 downto 0) := (others => '0');
 
 begin
 
---  mux_in <= extra_in & noise_1_to_slew(0) & noise_freq(2 downto 0) & extra_in & noise_1_to_slew(1) & '1';
-  mux_in <= lfsr(5) & noise_1_to_slew(7) & lfsr(2) & lfsr(1 downto 0) & noise_1_to_slew(7)  & noise_1_to_slew(8) & '1';
-
+    recycle_n <= not recycle;
+    mux_in <= "10011100";
+  
   
   lfsr_rnd : entity work.rand_num
     port map(
@@ -67,7 +69,7 @@ begin
   process (Clock)
   begin
     if rising_edge(Clock) then
-    recycle_d <= recycle;
+    recycle_d <= recycle_n;
     recycle_re_d <= recycle_re;
     recycle_re_d2 <= recycle_re_d;
     recycle_re_d3 <= recycle_re_d2;
@@ -107,8 +109,8 @@ begin
         Pout => spio_out_2
         );
 
-    mux_in_des <= mux_in(7 downto 0);
-    mux_sel_in <= spio_out_2(7)&spio_out_2(5)&(recycle_stretched);
+    mux_in_des <= mux_in(7 downto 2) & (mux_in(1) xor extra_in) & mux_in(0);
+    mux_sel_in <= (recycle_stretched)& spio_out_2(5)& (spio_out_2(7) xor extra_in); -- extra in is an expantion to the original design to introduce some chaos
     
   mux_random : entity work.mux_8_to_1
       Port map( 
@@ -129,37 +131,31 @@ begin
       
   cnt_rst <=  cnt_match or rst; -- chroma_pin_74 does it also have this pin?
   
-  -- Slowdown logic: controls counter enable to slow down pseudo-random output
-  process(clock) begin
+  -- Clock enable: /256 vs pix clk, times slowdown_sel (1 / 24 / 48).
+  process(clock)
+    variable v_div : unsigned(13 downto 0);
+  begin
     if rising_edge(clock) then
       if rst = '1' then
         slowdown_cnt <= (others => '0');
-        cnt_enable <= '1';
+        cnt_enable   <= '0';
       else
         case slowdown_sel is
-          when "00" => -- Normal speed (no slowdown)
-            cnt_enable <= '1';
-            slowdown_cnt <= (others => '0');
-          when "01" => -- 24x slower (enable every 24th clock)
-            if slowdown_cnt = "010111" then  -- 23 in binary (0-23 = 24 counts)
-              cnt_enable <= '1';
-              slowdown_cnt <= (others => '0');
-            else
-              cnt_enable <= '0';
-              slowdown_cnt <= std_logic_vector(unsigned(slowdown_cnt) + 1);
-            end if;
-          when "10" | "11" => -- 48x slower (enable every 48th clock)
-            if slowdown_cnt = "101111" then  -- 47 in binary (0-47 = 48 counts)
-              cnt_enable <= '1';
-              slowdown_cnt <= (others => '0');
-            else
-              cnt_enable <= '0';
-              slowdown_cnt <= std_logic_vector(unsigned(slowdown_cnt) + 1);
-            end if;
+          when "00" =>
+            v_div := to_unsigned(256 - 1, 14);           -- /256
+          when "01" =>
+            v_div := to_unsigned(256 * 24 - 1, 14);      -- /6144
           when others =>
-            cnt_enable <= '1';
-            slowdown_cnt <= (others => '0');
+            v_div := to_unsigned(256 * 48 - 1, 14);      -- /12288
         end case;
+
+        if slowdown_cnt = v_div then
+          cnt_enable   <= '1';
+          slowdown_cnt <= (others => '0');
+        else
+          cnt_enable   <= '0';
+          slowdown_cnt <= slowdown_cnt + 1;
+        end if;
       end if;
     end if;
   end process;
@@ -180,6 +176,7 @@ slew_output_1 : entity work.slew_wraper
   Port map(
     clk => clock,
     rst => rst,
+    ce  => cnt_enable,
     slew_sel => slew_in,
     input => noise_1_to_slew,
     output => slew_out_1
@@ -190,6 +187,7 @@ slew_output_2 : entity work.slew_wraper
   Port map(
     clk => clock,
     rst => rst,
+    ce  => cnt_enable,
     slew_sel => slew_in,
     input => noise_2_to_slew,
     output => slew_out_2

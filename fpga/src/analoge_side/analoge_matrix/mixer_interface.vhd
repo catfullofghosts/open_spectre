@@ -46,7 +46,7 @@ end mixer_interface;
 
 architecture Behavioral of mixer_interface is
 
-    signal mutes        : array_16(19 downto 0);
+    signal mutes        : array_16(19 downto 0) := (others => (others => '1')); -- muted = nothing patched
     signal ram_address        : std_logic_vector(7 downto 0); 
 
 begin

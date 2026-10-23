@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Patch Digilent rgb2dvi for Vivado OOC synthesis (works on fresh clones).
+"""Keep Digilent rgb2dvi OOC-safe and push those sources into the project.
 
-Problem: upstream Digilent uses `entity work.ResetBridge` while Vivado OOC
-often compiles those sources into another library, so synth fails even when
-the GUI project shows ResetBridge in work.
-
-Fix: overlay component-style sources from fpga/syn/patches/digilent/rgb2dvi/
-onto the cloned vivado-library, then sync into any existing project ipshared.
+The catalog lives in fpga/ip/digilent (not a git clone). Upstream rgb2dvi
+uses `entity work.ResetBridge`, which Vivado OOC synthesis often cannot
+resolve. The vendored sources already use component instantiations; this
+script re-applies that overlay and copies it into any generated ipshared
+copy after generate_target.
 """
 
 from __future__ import annotations
@@ -79,8 +78,8 @@ def main() -> int:
     parser.add_argument(
         "--repo",
         type=Path,
-        default=here.parent / "deps" / "vivado-library",
-        help="Path to Digilent vivado-library checkout",
+        default=here.parent / "ip" / "digilent",
+        help="Path to the vendored Digilent IP catalog",
     )
     parser.add_argument(
         "--project",

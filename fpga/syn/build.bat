@@ -20,7 +20,7 @@ REM   build.bat clean synth        Wipe, then synth only
 REM   build.bat clean_only         Wipe only (no rebuild)
 REM
 REM Optional env:
-REM   DIGILENT_IP_REPO, XILINX_VIVADO, XILINX_VITIS
+REM   XILINX_VIVADO, XILINX_VITIS
 REM =============================================================================
 
 set "SCRIPT_DIR=%~dp0"
@@ -29,8 +29,7 @@ cd /d "%SCRIPT_DIR%"
 set "FPGA_DIR=%SCRIPT_DIR%.."
 for %%I in ("%FPGA_DIR%") do set "FPGA_DIR=%%~fI"
 
-set "DEFAULT_IP_REPO=%FPGA_DIR%\deps\vivado-library"
-set "DIGILENT_GIT_URL=https://github.com/Digilent/vivado-library.git"
+set "DEFAULT_IP_REPO=%FPGA_DIR%\ip\digilent"
 set "SW_DIR=%FPGA_DIR%\z7_build\sw"
 set "BUILD_DIR=%SCRIPT_DIR%build"
 set "XSA_PATH=%BUILD_DIR%\hdmi_in.xsa"
@@ -44,8 +43,10 @@ set "VIVADO_ARGS="
 :parse_args
 if "%~1"=="" goto args_done
 if /i "%~1"=="clean" (
-  REM Wipe locally; do not pass "clean" to Vivado (project already gone)
+  REM Wipe the build tree, and tell Vivado to drop any block design that survives
+  REM so the project is recreated from fpga\syn\hdmi_in.tcl.
   set "DO_CLEAN=1"
+  set "VIVADO_ARGS=!VIVADO_ARGS! clean"
   shift & goto parse_args
 )
 if /i "%~1"=="clean_only" (
@@ -104,10 +105,10 @@ if /i "%STAGE%"=="software" goto software_only
 REM -----------------------------------------------------------------------------
 REM Digilent IP + Vivado
 REM -----------------------------------------------------------------------------
-if not defined DIGILENT_IP_REPO set "DIGILENT_IP_REPO=%DEFAULT_IP_REPO%"
+set "DIGILENT_IP_REPO=%DEFAULT_IP_REPO%"
 
 echo.
-echo [hw] Checking Digilent vivado-library ...
+echo [hw] Checking vendored Digilent IP ...
 call :ensure_digilent_repo
 if errorlevel 1 exit /b 1
 echo [OK] Digilent IP repo: %DIGILENT_IP_REPO%
@@ -217,24 +218,11 @@ if exist "%SCRIPT_DIR%.Xil\" rmdir /s /q "%SCRIPT_DIR%.Xil"
 exit /b 0
 
 :ensure_digilent_repo
-if exist "%DIGILENT_IP_REPO%\ip\" (
-  call :check_required_ips
-  exit /b %ERRORLEVEL%
-)
-if exist "%DIGILENT_IP_REPO%\" (
-  echo ERROR: %DIGILENT_IP_REPO% exists but does not look like vivado-library
+if not exist "%DIGILENT_IP_REPO%\ip\" (
+  echo ERROR: vendored Digilent IP not found at %DIGILENT_IP_REPO%
+  echo        Expected fpga\ip\digilent from this repo. The build no longer clones it.
   exit /b 1
 )
-echo       Not found — cloning into: %DIGILENT_IP_REPO%
-where git >nul 2>&1
-if errorlevel 1 (
-  echo ERROR: git not found on PATH.
-  exit /b 1
-)
-for %%I in ("%DIGILENT_IP_REPO%") do set "IP_PARENT=%%~dpI"
-if not exist "%IP_PARENT%" mkdir "%IP_PARENT%"
-git clone --depth 1 "%DIGILENT_GIT_URL%" "%DIGILENT_IP_REPO%"
-if errorlevel 1 exit /b 1
 call :check_required_ips
 exit /b %ERRORLEVEL%
 
