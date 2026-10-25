@@ -69,16 +69,7 @@
  *     digital out 0-56 in 0-63; analog out 0-19 in 0-15
  *   F0 7D 53 50 21 <mat> <out> F7
  *     clear one output; out=127 clears all
- *
- * Text plane SysEx. Cells are 80 x 45. A cell value is character in
- * [7:0] and ink colour in [11:8]. Colour 0 is transparent.
- *   F0 7D 53 50 33 <index lo> <index hi> <count> <char lo> <attr> ... F7
- *     index is 14-bit, cell = row*80+column
- *     char bit 7 is attr bit 0, colour is attr [4:1]
- *   F0 7D 53 50 34 <row> F7
- *     row 0-44 clears that row; row 127 clears the plane
  */
-
 int MidiUartInit(void);
 void MidiUartPoll(void);
 int MidiUartTryRead(u8 *byte);

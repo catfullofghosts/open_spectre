@@ -1385,14 +1385,6 @@ class RegisterControlWidget(QWidget):
             ("0x0C", "audio_crossover", "Audio T/B Crossover", 8, 0, 255, 0),
             ("0x0C", "audio_b_thresh", "Audio Bass Dig Thresh (0=~12%..7=~94%)", 3, 0, 7, 8),
             ("0x0C", "audio_t_thresh", "Audio Treb Dig Thresh (0=~12%..7=~94%)", 3, 0, 7, 11),
-            ("0xFC", "overlay_global_en", "Overlay Enable", 1, 0, 1, 0),
-            ("0xFC", "overlay_block_div", "Overlay Block Div (0=/1..4=/16)", 3, 0, 4, 1),
-            ("0x100", "sprite0_enable", "Sprite0 Enable", 1, 0, 1, 0),
-            ("0x100", "sprite0_x", "Sprite0 X", 11, 0, 2047, 1),
-            ("0x100", "sprite0_y", "Sprite0 Y", 11, 0, 2047, 12),
-            ("0x104", "sprite0_width", "Sprite0 Width", 11, 0, 2047, 0),
-            ("0x104", "sprite0_height", "Sprite0 Height", 11, 0, 2047, 11),
-            ("0x108", "sprite0_base", "Sprite0 BRAM Base", 11, 0, 2047, 0),
         ]
         ca_defs = [
             ("0x18", "ca_rule", "CA Wolfram Rule", 8, 0, 255, 0),

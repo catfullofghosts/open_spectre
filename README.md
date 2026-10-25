@@ -26,7 +26,6 @@ Open to donations and contributors with FPGA experience.
 | Vitis test software | done | video in works, frame buffer works, midi parsing works |
 | Pico Based midi usb in | done | is just a bridge (computer -> pico (usb midi) -> uart -> zynq |
 | hardware interface | not started | still software controlled |
-| VST software for control | just  started |  |
 
 ## Aim
 

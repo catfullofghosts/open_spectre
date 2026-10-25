@@ -26,8 +26,6 @@ use ieee.numeric_std.all;
 library UNISIM;
 use UNISIM.vcomponents.all;
 
-use work.overlay_sprite_pkg.all;
-
 entity digital_reg_file is
   generic (
     reg_version_id : std_logic_vector(7 downto 0) := x"00";
@@ -171,10 +169,6 @@ entity digital_reg_file is
     -- The raster is fixed at 720p in the wrapper.
     mix_wipe_ctrl  : out std_logic_vector(31 downto 0);
     mix_wipe_pos   : out std_logic_vector(31 downto 0);
-    -- Overlay sprites (shared BRAM atlas, up to C_NUM_SPRITES slots)
-    overlay_global_en : out std_logic;
-    overlay_block_div : out std_logic_vector(2 downto 0); -- 0=/1 1=/2 2=/4 3=/8 4=/16
-    overlay_sprites   : out t_sprite_array;
 
     -- Final video frame stats (read-only, filtered over 4 frames)
     frame_stats_luma_min : in std_logic_vector(7 downto 0);
@@ -344,32 +338,6 @@ architecture RTL of digital_reg_file is
   -- Power-up is mix, position 0: spectron (A) straight through.
   signal mix_wipe_ctrl_i  : std_logic_vector(31 downto 0) := (others => '0');
   signal mix_wipe_pos_i   : std_logic_vector(31 downto 0) := (others => '0');
-  signal overlay_global_en_i : std_logic := '0';
-  signal overlay_block_div_i : std_logic_vector(2 downto 0) := "000";
-  signal overlay_sprites_i   : t_sprite_array := (others => (
-    enable => '0',
-    x      => (others => '0'),
-    y      => (others => '0'),
-    width  => (others => '0'),
-    height => (others => '0'),
-    base   => (others => '0'),
-    tile_w => (others => '0'),
-    tile_h => (others => '0')
-  ));
-  signal overlay_sprites_r   : t_sprite_array := (others => (
-    enable => '0',
-    x      => (others => '0'),
-    y      => (others => '0'),
-    width  => (others => '0'),
-    height => (others => '0'),
-    base   => (others => '0'),
-    tile_w => (others => '0'),
-    tile_h => (others => '0')
-  ));
-  signal sprite_wr_en        : std_logic := '0';
-  signal sprite_wr_idx       : integer range 0 to C_NUM_SPRITES - 1 := 0;
-  signal sprite_wr_off       : std_logic_vector(3 downto 0) := (others => '0');
-  signal sprite_wr_data      : std_logic_vector(31 downto 0) := (others => '0');
   signal exception_addr : std_logic; -- toggles on address out of range error for reg file -- need better solution with reset + exception for sniffer
 
 begin
@@ -470,17 +438,6 @@ begin
   -- Mix/wipe. Mode 0 and position 0 pass the spectron picture.
   regs(ra(x"1A0")) <= mix_wipe_ctrl_i;
   regs(ra(x"1A4")) <= mix_wipe_pos_i;
-  -- Overlay master enable
-  regs(ra(x"FC")) <= "0000000000000000000000000000" & overlay_block_div_i & overlay_global_en_i;
-
-  g_sprite_read : for i in 0 to C_NUM_SPRITES - 1 generate
-    constant c_base : unsigned(12 downto 0) :=
-      unsigned(C_SPRITE_REG_LO) + to_unsigned(i * C_SPRITE_STRIDE, 13);
-  begin
-    regs(ra(std_logic_vector(c_base + 0))) <= "000000000" & overlay_sprites_i(i).y & overlay_sprites_i(i).x & overlay_sprites_i(i).enable;
-    regs(ra(std_logic_vector(c_base + 4))) <= "000000000" & overlay_sprites_i(i).height & '0' & overlay_sprites_i(i).width;
-    regs(ra(std_logic_vector(c_base + 8))) <= overlay_sprites_i(i).tile_h(9 downto 0) & overlay_sprites_i(i).tile_w & overlay_sprites_i(i).base;
-  end generate g_sprite_read;
 
   -- Frame video stats (read-only @ 0x180, bytes increase with address)
   regs(ra(x"180")) <= frame_stats_frame_id & frame_stats_luma_avg & frame_stats_luma_max & frame_stats_luma_min;
@@ -529,57 +486,6 @@ begin
       end if;
     end if;
   end process;
-  ---------------------------------------------------------------------------
-  -- Sprite register writes: pipeline decode (cycle N) then update (cycle N+1)
-  -- to avoid a long combinatorial path from the CPU bus into tile_h/base FFs.
-  ---------------------------------------------------------------------------
-  p_sprite_decode : process (regs_clk)
-  begin
-    if rising_edge(regs_clk) then
-      sprite_wr_en <= '0';
-      if write_en = '1' then
-        -- 0x100..0x17F: sprite_idx = addr[7:4], word offset = addr[3:0]
-        if addr_reg(11 downto 8) = x"1"
-           and unsigned(addr_reg(7 downto 4)) <= C_NUM_SPRITES - 1 then
-          sprite_wr_en   <= '1';
-          sprite_wr_idx  <= to_integer(unsigned(addr_reg(7 downto 4)));
-          sprite_wr_off  <= addr_reg(3 downto 0);
-          sprite_wr_data <= write_reg;
-        end if;
-      end if;
-    end if;
-  end process p_sprite_decode;
-
-  p_sprite_apply : process (regs_clk)
-  begin
-    if rising_edge(regs_clk) then
-      if sprite_wr_en = '1' then
-        case sprite_wr_off is
-          when x"0" =>
-            overlay_sprites_i(sprite_wr_idx).enable <= sprite_wr_data(0);
-            overlay_sprites_i(sprite_wr_idx).x      <= sprite_wr_data(11 downto 1);
-            overlay_sprites_i(sprite_wr_idx).y      <= sprite_wr_data(22 downto 12);
-          when x"4" =>
-            overlay_sprites_i(sprite_wr_idx).width  <= sprite_wr_data(10 downto 0);
-            overlay_sprites_i(sprite_wr_idx).height <= sprite_wr_data(21 downto 11);
-          when x"8" =>
-            overlay_sprites_i(sprite_wr_idx).base   <= sprite_wr_data(10 downto 0);
-            overlay_sprites_i(sprite_wr_idx).tile_w <= sprite_wr_data(21 downto 11);
-            overlay_sprites_i(sprite_wr_idx).tile_h <= '0' & sprite_wr_data(31 downto 22);
-          when others =>
-            null;
-        end case;
-      end if;
-    end if;
-  end process p_sprite_apply;
-
-  p_sprite_out : process (regs_clk)
-  begin
-    if rising_edge(regs_clk) then
-      overlay_sprites_r <= overlay_sprites_i;
-    end if;
-  end process p_sprite_out;
-
   p_audio_crossover_out : process (regs_clk)
   begin
     if rising_edge(regs_clk) then
@@ -596,14 +502,7 @@ begin
   begin
     if rising_edge(regs_clk) then
       if (write_en = '1') then
-        -- Decode overlay global enable by low byte to avoid width-mismatch compares.
-        if addr_reg(7 downto 0) = x"FC" then
-          overlay_global_en_i <= write_reg(0);
-          overlay_block_div_i <= write_reg(3 downto 1);
-        elsif addr_reg(11 downto 8) = x"1"
-              and unsigned(addr_reg(7 downto 4)) <= C_NUM_SPRITES - 1 then
-          null; -- sprite descriptor writes handled by p_sprite_decode/p_sprite_apply
-        elsif addr_reg(11 downto 8) = x"1" and addr_reg(7 downto 4) = x"A" then
+        if addr_reg(11 downto 8) = x"1" and addr_reg(7 downto 4) = x"A" then
           -- 0x1A0 and 0x1A4. Low byte alone would collide with 0x0A0.
           case addr_reg(3 downto 0) is
             when x"0" =>
@@ -870,10 +769,6 @@ begin
   video_fx_emboss <= video_fx_emboss_i;
   mix_wipe_ctrl  <= mix_wipe_ctrl_i;
   mix_wipe_pos   <= mix_wipe_pos_i;
-
-  overlay_global_en <= overlay_global_en_i;
-  overlay_block_div <= overlay_block_div_i;
-  overlay_sprites   <= overlay_sprites_r;
 
   Rotery_addr_mux     <= Rotery_addr_mux_i;
   Rotery_enc_preset_w <= Rotery_enc_preset_w_i;

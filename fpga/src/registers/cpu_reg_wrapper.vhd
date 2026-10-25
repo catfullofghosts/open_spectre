@@ -25,8 +25,6 @@ use unisim.vcomponents.all;
 use ieee.std_logic_arith.all;
 use ieee.std_logic_unsigned.all;
 
-use work.overlay_sprite_pkg.all;
-
 entity cpu_reg_wrapper is
   port (
     clk     : in std_logic;
@@ -154,9 +152,6 @@ entity cpu_reg_wrapper is
     video_fx_emboss    : out std_logic_vector(31 downto 0);
     mix_wipe_ctrl      : out std_logic_vector(31 downto 0);
     mix_wipe_pos       : out std_logic_vector(31 downto 0);
-    overlay_global_en  : out std_logic;
-    overlay_block_div  : out std_logic_vector(2 downto 0);
-    overlay_sprites    : out t_sprite_array;
 
     frame_stats_luma_min : in  std_logic_vector(7 downto 0);
     frame_stats_luma_max : in  std_logic_vector(7 downto 0);
@@ -285,9 +280,6 @@ architecture rtl of cpu_reg_wrapper is
   signal  i_video_fx_emboss    : std_logic_vector(31 downto 0);
   signal  i_mix_wipe_ctrl      : std_logic_vector(31 downto 0);
   signal  i_mix_wipe_pos       : std_logic_vector(31 downto 0);
-  signal  i_overlay_global_en  : std_logic;
-  signal  i_overlay_block_div  : std_logic_vector(2 downto 0);
-  signal  i_overlay_sprites     : t_sprite_array;
 
   
 begin
@@ -403,9 +395,6 @@ begin
       video_fx_emboss    => i_video_fx_emboss,
       mix_wipe_ctrl      => i_mix_wipe_ctrl,
       mix_wipe_pos       => i_mix_wipe_pos,
-      overlay_global_en  => i_overlay_global_en,
-      overlay_block_div  => i_overlay_block_div,
-      overlay_sprites    => i_overlay_sprites,
       frame_stats_luma_min => frame_stats_luma_min,
       frame_stats_luma_max => frame_stats_luma_max,
       frame_stats_luma_avg => frame_stats_luma_avg,
@@ -506,9 +495,6 @@ begin
       video_fx_emboss     <= i_video_fx_emboss;
       mix_wipe_ctrl       <= i_mix_wipe_ctrl;
       mix_wipe_pos        <= i_mix_wipe_pos;
-      overlay_global_en   <= i_overlay_global_en;
-      overlay_block_div   <= i_overlay_block_div;
-      overlay_sprites     <= i_overlay_sprites;
       end if;
     end process;
 

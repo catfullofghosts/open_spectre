@@ -318,28 +318,13 @@ def read_audio_mag_pre():
 
 
 REG_BASE_ADDR = 0x40000000
-OVERLAY_BRAM_BYTE_BASE = 0x400
-# AXI BRAM ctrl maps 8KB @ 0x40000000; first 1KB is CPU regs, rest is overlay atlas.
-OVERLAY_BRAM_AXI_BYTES = 0x1C00
-OVERLAY_BRAM_WORDS = OVERLAY_BRAM_AXI_BYTES // 4  # 1792 words (VHDL depth is 2048)
-SPRITE_REG_BASE = 0x100
-SPRITE_REG_STRIDE = 0x10
 CA_RULE_REG = 0x18
 AUDIO_CROSSOVER_REG = 0x0C
 DIRT_CTRL_REG = 0x198
 AUDIO_MAG_PRE_REG = 0x19C
-OVERLAY_GLOBAL_EN_REG = 0xFC
 CA_CTRL_INJECT_XOR_LUMA = 1 << 8
 CA_CTRL_RULE_XOR_Y = 1 << 9
 CA_CTRL_RULE_XOR_X = 1 << 10
-OVERLAY_BLOCK_DIV_ENCODE = {1: 0, 2: 1, 4: 2, 8: 3, 16: 4}
-_overlay_fc_state = {"enabled": False, "block_div": 1}
-
-
-def _write_overlay_fc_reg():
-            enc = OVERLAY_BLOCK_DIV_ENCODE.get(_overlay_fc_state["block_div"], 0)
-            value = (1 if _overlay_fc_state["enabled"] else 0) | (enc << 1)
-            wr_reg(OVERLAY_GLOBAL_EN_REG, value)
 
 
 def configure_ca(
@@ -389,191 +374,6 @@ def set_dirt(depth=0, y_en=False, u_en=False, v_en=False):
             value = (int(depth) & 0x3) | ((1 if y_en else 0) << 2) | ((1 if u_en else 0) << 3) | ((1 if v_en else 0) << 4)
             wr_reg(DIRT_CTRL_REG, value)
 
-
-def set_overlay_global_enable(enabled=True):
-            _overlay_fc_state["enabled"] = bool(enabled)
-            _write_overlay_fc_reg()
-
-
-def set_overlay_block_div(div=1):
-            """Set overlay BRAM address blockiness: 1, 2, 4, 8, or 16."""
-            if div not in OVERLAY_BLOCK_DIV_ENCODE:
-                raise ValueError("block_div must be one of 1, 2, 4, 8, 16")
-            _overlay_fc_state["block_div"] = int(div)
-            _write_overlay_fc_reg()
-
-
-def _sprite_reg_addr(sprite_idx, word_offset):
-            return SPRITE_REG_BASE + sprite_idx * SPRITE_REG_STRIDE + word_offset
-
-
-def configure_sprite(sprite_idx, x, y, width, height, base, enable=True, tile_w=0, tile_h=0):
-            """Configure one overlay sprite descriptor (registers 0x100+).
-
-            width/height: on-screen coverage in pixels.
-            tile_w/tile_h: repeating BRAM pattern size (0 = legacy non-tiled, uses width/height).
-            """
-            if not 0 <= sprite_idx < 8:
-                raise ValueError(f"sprite_idx must be 0-7, got {sprite_idx}")
-            ctrl = (1 if enable else 0) | ((int(x) & 0x7FF) << 1) | ((int(y) & 0x7FF) << 12)
-            size = (int(width) & 0x7FF) | ((int(height) & 0x7FF) << 11)
-            atlas = (
-                (int(base) & 0x7FF)
-                | ((int(tile_w) & 0x7FF) << 11)
-                | ((int(tile_h) & 0x3FF) << 22)
-            )
-            wr_reg(_sprite_reg_addr(sprite_idx, 0), ctrl)
-            wr_reg(_sprite_reg_addr(sprite_idx, 4), size)
-            wr_reg(_sprite_reg_addr(sprite_idx, 8), atlas)
-
-
-def write_overlay_bram_word(word_addr, value):
-            """Write one 32-bit overlay pixel word. Bit31=opaque, [23:16]=B, [15:8]=G, [7:0]=R."""
-            word_addr = int(word_addr)
-            if word_addr < 0 or word_addr >= OVERLAY_BRAM_WORDS:
-                raise ValueError(
-                    f"overlay BRAM word {word_addr} out of range 0..{OVERLAY_BRAM_WORDS - 1}"
-                )
-            byte_addr = OVERLAY_BRAM_BYTE_BASE + word_addr * 4
-            wr_reg(byte_addr, int(value) & 0xFFFFFFFF)
-
-
-def fill_overlay_sprite(base, width, height, rgb=0x00FF00, opaque=True):
-            """Fill a contiguous BRAM atlas region with one RGB colour."""
-            base, width, height = int(base), int(width), int(height)
-            if base + width * height > OVERLAY_BRAM_WORDS:
-                raise ValueError(
-                    f"sprite needs {width * height} words at base {base}, "
-                    f"max {OVERLAY_BRAM_WORDS} words available"
-                )
-            pixel = (0x80000000 if opaque else 0x00000000) | (int(rgb) & 0x00FFFFFF)
-            for ly in range(height):
-                for lx in range(width):
-                    write_overlay_bram_word(base + ly * width + lx, pixel)
-
-
-def setup_test_overlay(sprite_idx=0, x=100, y=80, width=32, height=32, base=0, rgb=0x00FF00):
-            """Enable overlay, configure one solid sprite, and fill its atlas."""
-            fill_overlay_sprite(base, width, height, rgb=rgb, opaque=True)
-            configure_sprite(sprite_idx, x, y, width, height, base, enable=True)
-            set_overlay_global_enable(True)
-
-
-def fill_overlay_checkerboard(base, width, height):
-            """Fill atlas with an opaque red/cyan checkerboard."""
-            base, width, height = int(base), int(width), int(height)
-            if base + width * height > OVERLAY_BRAM_WORDS:
-                raise ValueError(
-                    f"checkerboard needs {width * height} words at base {base}, "
-                    f"max {OVERLAY_BRAM_WORDS} words available"
-                )
-            red  = 0x800000FF  # opaque, R=FF
-            cyan = 0x80FFFF00  # opaque, G=FF B=FF
-            for ly in range(height):
-                for lx in range(width):
-                    pixel = red if (lx + ly) % 2 == 0 else cyan
-                    write_overlay_bram_word(base + ly * width + lx, pixel)
-
-
-def fill_overlay_noise(base=0, width=32, height=32, seed=1, sparse=0.0):
-            """Fill a BRAM atlas region with pseudo-random opaque RGB noise.
-
-            base/width/height: word-addressed sprite atlas rectangle at buffer start.
-            seed: RNG seed for reproducible patterns.
-            sparse: 0.0 = every pixel opaque noise; higher values randomly leave pixels transparent.
-            """
-            base, width, height = int(base), int(width), int(height)
-            sparse = float(sparse)
-            if not 0.0 <= sparse < 1.0:
-                raise ValueError(f"sparse must be in [0.0, 1.0), got {sparse}")
-            if base + width * height > OVERLAY_BRAM_WORDS:
-                raise ValueError(
-                    f"noise fill needs {width * height} words at base {base}, "
-                    f"max {OVERLAY_BRAM_WORDS} words available"
-                )
-
-            rng = random.Random(seed)
-            print(
-                f"[overlay] Filling noise {width}x{height} at BRAM base {base} "
-                f"(seed={seed}, sparse={sparse})..."
-            )
-            for ly in range(height):
-                for lx in range(width):
-                    if sparse > 0.0 and rng.random() < sparse:
-                        pixel = 0x00000000
-                    else:
-                        r = rng.randint(0, 255)
-                        g = rng.randint(0, 255)
-                        b = rng.randint(0, 255)
-                        pixel = 0x80000000 | (b << 16) | (g << 8) | r
-                    write_overlay_bram_word(base + ly * width + lx, pixel)
-            print(f"[overlay] Wrote {width * height} noise words.")
-
-
-def test_overlay_visible(
-            sprite_idx=0,
-            screen_w=720,
-            screen_h=576,
-            tile_w=16,
-            tile_h=16,
-            x=0,
-            y=0,
-            base=0,
-    ):
-            """
-            Tile a small checkerboard pattern across the full screen.
-            Only tile_w * tile_h words are written to BRAM; hardware repeats the tile.
-            Requires FPGA build with overlay tile-repeat support.
-            """
-            print(
-                f"[overlay] Loading {tile_w}x{tile_h} tile, "
-                f"tiled across {screen_w}x{screen_h} screen..."
-            )
-            fill_overlay_checkerboard(base, tile_w, tile_h)
-
-            print(f"[overlay] Configuring sprite{sprite_idx} full-screen @ ({x},{y})...")
-            configure_sprite(
-                sprite_idx, x, y, screen_w, screen_h, base,
-                enable=True, tile_w=tile_w, tile_h=tile_h,
-            )
-
-            print("[overlay] Enabling global overlay...")
-            set_overlay_global_enable(True)
-
-            print(
-                f"[overlay] Done. Expect a {tile_w}x{tile_h} red/cyan checker "
-                f"repeated over the full {screen_w}x{screen_h} screen."
-            )
-
-
-def test_overlay_multi_sprites(block_div=8):
-            """Example with four visible sprites using separate BRAM atlas regions."""
-            print("[overlay] Loading multi-sprite demo atlases...")
-            fill_overlay_noise(base=0, width=32, height=32, seed=11)
-            fill_overlay_checkerboard(base=1024, width=16, height=16)
-            fill_overlay_sprite(base=1280, width=16, height=16, rgb=0x00FF00, opaque=True)
-            fill_overlay_noise(base=1536, width=16, height=16, seed=99, sparse=0.15)
-
-            sprites = [
-                # idx, x, y, w, h, base, tile_w, tile_h
-                (0, 20, 20, 220, 160, 0, 32, 32),
-                (1, 280, 80, 260, 180, 1024, 16, 16),
-                (2, 520, 300, 180, 140, 1280, 16, 16),
-                (3, 80, 380, 200, 160, 1536, 16, 16),
-            ]
-            for idx, x, y, w, h, base, tw, th in sprites:
-                print(f"[overlay] Sprite {idx} @ ({x},{y}) size {w}x{h}, base={base}")
-                configure_sprite(
-                    idx, x, y, w, h, base,
-                    enable=True, tile_w=tw, tile_h=th,
-                )
-
-            set_overlay_block_div(block_div)
-            set_overlay_global_enable(True)
-            print(
-                f"[overlay] Multi-sprite demo active "
-                f"(noise + checker + green + sparse noise, block_div={block_div})."
-            )
 
 
 def setup_ca_test_routing():
@@ -966,29 +766,9 @@ if __name__ == "__main__":
     # prog_digital_side_matrix(54, "xy_inv_out_12")
 
     ################################################################
-    ############ Overlay test — checkerboard sprite on screen
-    ################################################################
-    # Bypass colour encoder so overlay RGB shows directly (already set above via wr_reg('78', 2))
-    # test_overlay_visible(
-    #     sprite_idx=0,
-    #     screen_w=720,
-    #     screen_h=576,
-    #     tile_w=16,
-    #     tile_h=16,
-    #     x=0,
-    #     y=0,
-    #     base=0,
-    # )
-
-    ################################################################
-    ############ Overlay multi-sprite demo (4 visible sprites)
-    ################################################################
-    test_overlay_multi_sprites(block_div=8)
-
-    ################################################################
     ############ 1D CA tests — inv_in_0 + inv_in_1 -> CA inject (XOR)
     ################################################################
-    # Uncomment one block below (comment overlay test above if using CA).
+    # Uncomment one block below.
 
     # test_ca_mode_plain(rule=30, dwell_sec=10)
     # test_ca_mode_rule_xor_y(rule=30, dwell_sec=10)

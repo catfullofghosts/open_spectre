@@ -1,4 +1,4 @@
-"""Open Spectre MIDI panel — Channel 1 CCs 1–86 via the Pico USB gadget."""
+"""Open Spectre MIDI panel — Channel 1 CCs 1–58 via the Pico USB gadget."""
 
 import os
 import sys
@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
-    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QSlider,
@@ -52,58 +51,6 @@ DIGITAL_GRID_ROWS = 64  # matrix_in 0-63
 DIGITAL_GRID_COLS = 57  # matrix_out 0-56
 ANALOG_GRID_ROWS = 11   # analog inputs 0-10
 ANALOG_GRID_COLS = 20   # analog outputs 0-19
-CHAR_COLS = 80
-CHAR_ROWS = 45
-CHAR_CHUNK = 16
-SYSEX_TEXT = 0x33
-SYSEX_TEXT_CLEAR = 0x34
-INK_COLOURS = [
-    "0 transparent",
-    "1 white",
-    "2 black",
-    "3 red",
-    "4 green",
-    "5 blue",
-    "6 yellow",
-    "7 cyan",
-    "8 magenta",
-    "9 grey",
-    "10 dark grey",
-    "11 orange",
-    "12 brown",
-    "13 light green",
-    "14 light blue",
-    "15 pink",
-]
-TEXT_GLYPHS = [
-    ("ASCII code", None),
-    ("80 horizontal", 0x80),
-    ("81 vertical", 0x81),
-    ("82 corner TL", 0x82),
-    ("83 corner TR", 0x83),
-    ("84 corner BL", 0x84),
-    ("85 corner BR", 0x85),
-    ("86 tee down", 0x86),
-    ("87 tee up", 0x87),
-    ("88 tee right", 0x88),
-    ("89 tee left", 0x89),
-    ("8A cross", 0x8A),
-    ("90 left half", 0x90),
-    ("91 right half", 0x91),
-    ("92 top half", 0x92),
-    ("93 bottom half", 0x93),
-    ("94 quarter TL", 0x94),
-    ("95 quarter TR", 0x95),
-    ("96 quarter BL", 0x96),
-    ("97 quarter BR", 0x97),
-    ("98 shade 25%", 0x98),
-    ("99 shade 50%", 0x99),
-    ("9A shade 75%", 0x9A),
-    ("9B slope", 0x9B),
-    ("9C slope", 0x9C),
-    ("9D block", 0x9D),
-]
-
 
 def encode_u14(value):
     value = max(0, min(16383, int(value)))
@@ -130,18 +77,6 @@ def enum_to_cc(index, bits):
 
 def gate_to_cc(on):
     return 127 if on else 0
-
-
-def rot_to_cc(steps):
-    """0 = none, +1..+7 toward MSB, -1..-7 toward LSB."""
-    steps = int(steps)
-    if steps > 0:
-        code = min(7, steps)
-    elif steps < 0:
-        code = min(14, 7 - steps)
-    else:
-        code = 0
-    return enum_to_cc(code, 4)
 
 
 class MidiGUIApp(QMainWindow):
@@ -187,8 +122,8 @@ class MidiGUIApp(QMainWindow):
         self.status_label = QLabel("Not connected")
         self.status_label.setStyleSheet("color: red; font-weight: bold;")
         midi_layout.addWidget(self.status_label)
-        midi_layout.addWidget(QLabel("Channel 1  ·  CCs 1–106"))
-        midi_layout.addWidget(QLabel("Matrix and text  ·  SysEx 7D 53 50"))
+        midi_layout.addWidget(QLabel("Channel 1  ·  CCs 1–58"))
+        midi_layout.addWidget(QLabel("Matrix  ·  SysEx 7D 53 50"))
 
         self.send_all_btn = QPushButton("Send all")
         self.send_all_btn.clicked.connect(self.send_all)
@@ -209,9 +144,6 @@ class MidiGUIApp(QMainWindow):
 
         tabs = QTabWidget()
         tabs.addTab(self._cc_panel(), "CC Controls")
-        tabs.addTab(self._video_fx_panel(), "Video FX")
-        tabs.addTab(self._wipe_panel(), "Mix / Wipe")
-        tabs.addTab(self._text_panel(), "Text")
 
         self.digital_grid = MatrixGridWidget(
             DIGITAL_GRID_ROWS,
@@ -275,261 +207,6 @@ class MidiGUIApp(QMainWindow):
         body_layout.addLayout(col_c)
         scroll.setWidget(body)
         return scroll
-
-    def _video_fx_panel(self):
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        body = QWidget()
-        body_layout = QHBoxLayout(body)
-        col_a = QVBoxLayout()
-        col_b = QVBoxLayout()
-        col_a.addWidget(self._fx_rot_group())
-        col_a.addWidget(self._fx_color_group())
-        col_a.addWidget(self._fx_scan_group())
-        col_a.addWidget(self._fx_smear_group())
-        col_a.addWidget(self._fx_bitplane_group())
-        col_a.addStretch()
-        col_b.addWidget(self._fx_dither_group())
-        col_b.addWidget(self._fx_mirror_group())
-        col_b.addWidget(self._fx_chromatic_group())
-        col_b.addWidget(self._fx_emboss_group())
-        col_b.addStretch()
-        body_layout.addLayout(col_a)
-        body_layout.addLayout(col_b)
-        scroll.setWidget(body)
-        return scroll
-
-    def _wipe_panel(self):
-        self._wipe_dir = 0
-        self._wipe_band = 0
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        body = QWidget()
-        layout = QVBoxLayout(body)
-        layout.addWidget(QLabel(
-            "A is the spectron picture. B is the external input. "
-            "Mix position 0 shows the spectron; 4095 shows the external input."
-        ))
-        self._add_combo(
-            layout,
-            "Mode",
-            [
-                "Mix",
-                "Horizontal",
-                "Vertical",
-                "Square",
-                "Diagonal",
-                "Diamond",
-                "Cross",
-                "Barn doors",
-                "Venetian blinds",
-                "Vertical blinds",
-            ],
-            lambda i: self.queue_cc(99, enum_to_cc(i, 4)),
-        )
-        self._add_slider(
-            layout,
-            "Position",
-            0,
-            4095,
-            0,
-            lambda v: self.send_u14(103, 104, v),
-        )
-        self._add_slider(
-            layout,
-            "Soft edge",
-            0,
-            255,
-            0,
-            lambda v: self.queue_cc(102, scale_to_cc(v, 255)),
-        )
-        self._add_toggle(layout, "Invert", False, lambda on: self.queue_cc(100, gate_to_cc(on)))
-        layout.addWidget(QLabel(
-            "Direction 0–3 picks an edge. Compass points are for square, diamond and cross. "
-            "Barn doors use 0 for left/right and 1 for up/down. "
-            "Venetian blinds are horizontal bands and vertical blinds are columns. "
-            "Their band control is 64, 128, 256 or 512 pixels."
-        ))
-        self._add_combo(
-            layout,
-            "Direction",
-            [
-                "0 centre / left / top / TL",
-                "1 north / right / bottom / TR",
-                "2 east / BL",
-                "3 south / BR",
-                "4 west",
-                "5 NE",
-                "6 SE",
-                "7 SW",
-                "8 NW",
-            ],
-            self._wipe_set_dir,
-        )
-        self._add_combo(
-            layout,
-            "Blinds band",
-            ["64 px", "128 px (2x64)", "256 px (4x64)", "512 px (8x64)"],
-            self._wipe_set_band,
-        )
-        self._add_combo(
-            layout,
-            "Border color",
-            [
-                "Black", "Grey", "White", "Red", "Green", "Blue",
-                "Yellow", "Cyan", "Magenta", "Orange", "Rose",
-                "Purple", "Lime", "Teal", "Brown", "Dark grey",
-            ],
-            lambda i: self.queue_cc(105, enum_to_cc(i, 4)),
-        )
-        self._add_slider(
-            layout,
-            "Border width",
-            0,
-            127,
-            0,
-            lambda v: self.queue_cc(106, scale_to_cc(v, 127)),
-        )
-        layout.addStretch()
-        scroll.setWidget(body)
-        return scroll
-
-    def _wipe_set_dir(self, index):
-        self._wipe_dir = index
-        self._wipe_send_origin()
-
-    def _wipe_set_band(self, index):
-        self._wipe_band = index
-        self._wipe_send_origin()
-
-    def _wipe_send_origin(self):
-        if self._wipe_dir <= 3:
-            code = (self._wipe_band << 2) | self._wipe_dir
-        else:
-            code = self._wipe_dir
-        self.queue_cc(101, enum_to_cc(code, 4))
-
-    def _fx_rot_group(self):
-        group = QGroupBox("Bit rotate")
-        layout = QVBoxLayout(group)
-        layout.addWidget(QLabel("Runs first. Negative rotates toward the LSB, positive toward the MSB, with wrap."))
-        self._add_slider(layout, "R rotate", -7, 7, 0, lambda v: self.queue_cc(92, rot_to_cc(v)))
-        self._add_slider(layout, "G rotate", -7, 7, 0, lambda v: self.queue_cc(93, rot_to_cc(v)))
-        self._add_slider(layout, "B rotate", -7, 7, 0, lambda v: self.queue_cc(94, rot_to_cc(v)))
-        return group
-
-    def _fx_color_group(self):
-        group = QGroupBox("Color")
-        layout = QVBoxLayout(group)
-        self._add_toggle(layout, "Invert R", False, lambda on: self.queue_cc(59, gate_to_cc(on)))
-        self._add_toggle(layout, "Invert G", False, lambda on: self.queue_cc(60, gate_to_cc(on)))
-        self._add_toggle(layout, "Invert B", False, lambda on: self.queue_cc(61, gate_to_cc(on)))
-        self._add_choice(
-            layout,
-            "Swap",
-            ["RGB", "BGR", "GRB", "RBG"],
-            lambda i: self.queue_cc(62, enum_to_cc(i, 2)),
-        )
-        self._add_toggle(layout, "Bit reverse R", False, lambda on: self.queue_cc(63, gate_to_cc(on)))
-        self._add_toggle(layout, "Bit reverse G", False, lambda on: self.queue_cc(64, gate_to_cc(on)))
-        self._add_toggle(layout, "Bit reverse B", False, lambda on: self.queue_cc(65, gate_to_cc(on)))
-        return group
-
-    def _fx_scan_group(self):
-        group = QGroupBox("Scanline and previous pixel")
-        layout = QVBoxLayout(group)
-        self._add_toggle(layout, "Scanlines", False, lambda on: self.queue_cc(66, gate_to_cc(on)))
-        self._add_slider(layout, "Scan delay", 0, 16, 0, lambda v: self.queue_cc(67, enum_to_cc(v, 5)))
-        self._add_combo(
-            layout,
-            "Shifted lines",
-            ["Single lines", "Groups of 2", "Groups of 4", "Groups of 8", "Groups of 16"],
-            lambda i: self.queue_cc(90, enum_to_cc(i, 3)),
-        )
-        self._add_toggle(layout, "CRT darken", False, lambda on: self.queue_cc(91, gate_to_cc(on)))
-        self._add_choice(
-            layout,
-            "With previous",
-            ["Off", "OR", "AND", "XOR"],
-            lambda i: self.queue_cc(68, enum_to_cc(i, 2)),
-        )
-        return group
-
-    def _fx_smear_group(self):
-        group = QGroupBox("Smear")
-        layout = QVBoxLayout(group)
-        layout.addWidget(QLabel("Repeat 0 is off. A channel above its threshold is drawn that many pixels in a row."))
-        self._add_slider(layout, "Repeat", 0, 64, 0, lambda v: self.queue_cc(95, v))
-        self._add_slider(layout, "R threshold", 0, 255, 128, lambda v: self.queue_cc(96, scale_to_cc(v, 255)))
-        self._add_slider(layout, "G threshold", 0, 255, 128, lambda v: self.queue_cc(97, scale_to_cc(v, 255)))
-        self._add_slider(layout, "B threshold", 0, 255, 128, lambda v: self.queue_cc(98, scale_to_cc(v, 255)))
-        return group
-
-    def _fx_bitplane_group(self):
-        group = QGroupBox("Bit plane")
-        layout = QVBoxLayout(group)
-        layout.addWidget(QLabel("Bypass on keeps the full 8-bit channel."))
-        self._add_toggle(layout, "R bypass", True, lambda on: self.queue_cc(69, gate_to_cc(on)))
-        self._add_slider(layout, "R bit", 0, 7, 0, lambda v: self.queue_cc(70, enum_to_cc(v, 3)))
-        self._add_toggle(layout, "G bypass", True, lambda on: self.queue_cc(71, gate_to_cc(on)))
-        self._add_slider(layout, "G bit", 0, 7, 0, lambda v: self.queue_cc(72, enum_to_cc(v, 3)))
-        self._add_toggle(layout, "B bypass", True, lambda on: self.queue_cc(73, gate_to_cc(on)))
-        self._add_slider(layout, "B bit", 0, 7, 0, lambda v: self.queue_cc(74, enum_to_cc(v, 3)))
-        return group
-
-    def _fx_dither_group(self):
-        group = QGroupBox("Dither")
-        layout = QVBoxLayout(group)
-        self._add_toggle(layout, "Enable", False, lambda on: self.queue_cc(75, gate_to_cc(on)))
-        self._add_choice(
-            layout,
-            "Depth",
-            ["6-bit", "5-bit", "4-bit", "3-bit"],
-            lambda i: self.queue_cc(76, enum_to_cc(i, 2)),
-        )
-        self._add_combo(
-            layout,
-            "Posterize",
-            ["Off", "7-bit", "6-bit", "5-bit", "4-bit", "3-bit", "2-bit", "1-bit"],
-            lambda i: self.queue_cc(89, enum_to_cc(i, 3)),
-        )
-        return group
-
-    def _fx_mirror_group(self):
-        group = QGroupBox("Horizontal mirror")
-        layout = QVBoxLayout(group)
-        self._add_toggle(layout, "Enable", False, lambda on: self.queue_cc(77, gate_to_cc(on)))
-        self._add_slider(layout, "Half width", 0, 960, 360, lambda v: self.send_u14(78, 79, v))
-        return group
-
-    def _fx_chromatic_group(self):
-        group = QGroupBox("Chromatic aberration")
-        layout = QVBoxLayout(group)
-        self._add_toggle(layout, "Enable", False, lambda on: self.queue_cc(80, gate_to_cc(on)))
-        self._add_slider(layout, "Green delay", 0, 32, 0, lambda v: self.queue_cc(81, enum_to_cc(v, 6)))
-        self._add_slider(layout, "Blue delay", 0, 32, 0, lambda v: self.queue_cc(82, enum_to_cc(v, 6)))
-        return group
-
-    def _fx_emboss_group(self):
-        group = QGroupBox("Emboss and shadow")
-        layout = QVBoxLayout(group)
-        layout.addWidget(QLabel("Threshold and strength run from 1 to 255."))
-        self._add_toggle(layout, "Emboss", False, lambda on: self.queue_cc(83, gate_to_cc(on)))
-        self._add_toggle(layout, "Shadow", False, lambda on: self.queue_cc(84, gate_to_cc(on)))
-        self._add_slider(layout, "Threshold", 1, 255, 1, lambda v: self.queue_cc(85, scale_to_cc(v, 255)))
-        self._add_slider(layout, "Strength", 1, 255, 1, lambda v: self.queue_cc(86, scale_to_cc(v, 255)))
-        self._add_toggle(layout, "Color fringe", False, lambda on: self.queue_cc(87, gate_to_cc(on)))
-        self._add_combo(
-            layout,
-            "Fringe color",
-            [
-                "Black", "Grey", "White", "Red", "Green", "Blue",
-                "Yellow", "Cyan", "Magenta", "Orange", "Rose",
-                "Purple", "Lime", "Teal", "Brown", "Dark grey",
-            ],
-            lambda i: self.queue_cc(88, enum_to_cc(i, 4)),
-        )
-        return group
 
     def _osc_group(self, title, base_cc):
         group = QGroupBox(title)
@@ -725,169 +402,6 @@ class MidiGUIApp(QMainWindow):
         layout.addStretch()
         parent.addWidget(row)
         self._senders.append(lambda fn=on_toggle, b=btn: fn(b.isChecked()))
-
-    def _text_panel(self):
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        body = QWidget()
-        layout = QVBoxLayout(body)
-        layout.addWidget(QLabel(
-            "80 columns by 45 rows. The font is already in the FPGA. "
-            "Colour 0 leaves the cell transparent."
-        ))
-
-        place = QHBoxLayout()
-        place.addWidget(QLabel("Column"))
-        self._text_col = QSpinBox()
-        self._text_col.setRange(0, CHAR_COLS - 1)
-        place.addWidget(self._text_col)
-        place.addWidget(QLabel("Row"))
-        self._text_row = QSpinBox()
-        self._text_row.setRange(0, CHAR_ROWS - 1)
-        place.addWidget(self._text_row)
-        place.addWidget(QLabel("Colour"))
-        self._text_colour = QComboBox()
-        self._text_colour.addItems(INK_COLOURS)
-        self._text_colour.setCurrentIndex(1)
-        place.addWidget(self._text_colour, 1)
-        layout.addLayout(place)
-
-        layout.addWidget(QLabel("Text"))
-        self._text_body = QPlainTextEdit()
-        self._text_body.setPlaceholderText("Type here, then Write.")
-        self._text_body.setMaximumHeight(160)
-        layout.addWidget(self._text_body)
-
-        buttons = QHBoxLayout()
-        write_btn = QPushButton("Write text")
-        write_btn.clicked.connect(self._text_write)
-        clear_row_btn = QPushButton("Clear row")
-        clear_row_btn.clicked.connect(self._text_clear_row)
-        clear_all_btn = QPushButton("Clear screen")
-        clear_all_btn.clicked.connect(self._text_clear_screen)
-        buttons.addWidget(write_btn)
-        buttons.addWidget(clear_row_btn)
-        buttons.addWidget(clear_all_btn)
-        layout.addLayout(buttons)
-
-        one = QHBoxLayout()
-        one.addWidget(QLabel("Character"))
-        self._text_char = QSpinBox()
-        self._text_char.setRange(0, 255)
-        self._text_char.setDisplayIntegerBase(16)
-        self._text_char.setPrefix("0x")
-        one.addWidget(self._text_char)
-        self._text_glyph = QComboBox()
-        for name, code in TEXT_GLYPHS:
-            self._text_glyph.addItem(name, code)
-        self._text_glyph.currentIndexChanged.connect(self._text_glyph_picked)
-        one.addWidget(self._text_glyph, 1)
-        place_btn = QPushButton("Place cell")
-        place_btn.clicked.connect(self._text_place_cell)
-        one.addWidget(place_btn)
-        layout.addLayout(one)
-        layout.addStretch(1)
-
-        scroll.setWidget(body)
-        return scroll
-
-    def _text_colour_index(self):
-        return self._text_colour.currentIndex()
-
-    def _text_glyph_picked(self, index):
-        code = self._text_glyph.itemData(index)
-        if code is None:
-            return
-        self._text_char.setValue(int(code))
-
-    def _text_cells_from_string(self, text):
-        cells = []
-        col = self._text_col.value()
-        row = self._text_row.value()
-        origin = col
-        colour = self._text_colour_index()
-        for ch in text.replace("\r\n", "\n").replace("\r", "\n"):
-            if ch == "\n":
-                row += 1
-                col = origin
-                continue
-            if row >= CHAR_ROWS:
-                break
-            if col >= CHAR_COLS:
-                row += 1
-                col = origin
-                if row >= CHAR_ROWS:
-                    break
-            code = ord(ch)
-            if code > 255:
-                code = ord("?")
-            cells.append((row * CHAR_COLS + col, code, colour))
-            col += 1
-        return cells
-
-    def _send_cells(self, cells):
-        if self.port is None:
-            QMessageBox.warning(self, "Warning", "Not connected to MIDI")
-            return False
-        sent = 0
-        i = 0
-        while i < len(cells):
-            start = cells[i][0]
-            run = [cells[i]]
-            i += 1
-            while (
-                i < len(cells)
-                and len(run) < CHAR_CHUNK
-                and cells[i][0] == run[-1][0] + 1
-            ):
-                run.append(cells[i])
-                i += 1
-            payload = [start & 0x7F, (start >> 7) & 0x7F, len(run)]
-            for _index, ch, colour in run:
-                ch &= 0xFF
-                payload.append(ch & 0x7F)
-                payload.append(((ch >> 7) & 1) | ((colour & 0x0F) << 1))
-            if not self.send_sysex(SYSEX_HDR + [SYSEX_TEXT] + payload):
-                return False
-            sent += len(run)
-            if i < len(cells):
-                time.sleep(0.02)
-        self.log(f"Text wrote {sent} cell(s) from {cells[0][0]}")
-        return True
-
-    def _text_write(self):
-        cells = self._text_cells_from_string(self._text_body.toPlainText())
-        if not cells:
-            self.log("Text is empty")
-            return
-        self._send_cells(cells)
-
-    def _text_place_cell(self):
-        index = self._text_row.value() * CHAR_COLS + self._text_col.value()
-        cells = [(index, self._text_char.value(), self._text_colour_index())]
-        if not self._send_cells(cells):
-            return
-        col = self._text_col.value() + 1
-        if col >= CHAR_COLS:
-            col = 0
-            row = min(CHAR_ROWS - 1, self._text_row.value() + 1)
-            self._text_row.setValue(row)
-        self._text_col.setValue(col)
-
-    def _text_clear_row(self):
-        row = self._text_row.value()
-        if self.port is None:
-            QMessageBox.warning(self, "Warning", "Not connected to MIDI")
-            return
-        if self.send_sysex(SYSEX_HDR + [SYSEX_TEXT_CLEAR, row]):
-            self.log(f"Text cleared row {row}")
-
-    def _text_clear_screen(self):
-        if self.port is None:
-            QMessageBox.warning(self, "Warning", "Not connected to MIDI")
-            return
-        if self.send_sysex(SYSEX_HDR + [SYSEX_TEXT_CLEAR, 127]):
-            self.log("Text cleared")
 
     def log(self, text):
         self.log_text.append(text)
